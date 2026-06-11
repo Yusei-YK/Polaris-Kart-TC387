@@ -1,5 +1,6 @@
 # SmartCar
-# TC264 卡丁快跑组非视觉方案工程跟进文档<img width="184" height="187" alt="image" src="https://github.com/user-attachments/assets/aecc110b-6373-4010-a015-ecd86fe12567" />
+<img width="184" height="187" alt="image" src="https://github.com/user-attachments/assets/aecc110b-6373-4010-a015-ecd86fe12567" />
+# TC264 卡丁快跑组非视觉方案工程跟进文档
 
 > 本文档用于记录本工程的比赛规则理解、代码结构规划、编程日志、已完成内容和未完成内容。后续 AI 或人工继续开发时，请优先阅读并更新本文档。
 
