@@ -1,0 +1,29 @@
+# ===== 编译产物 / 中间文件 =====
+# AURIX/TASKING、GCC 生成的目标与调试产物，绝不入库
+Debug/
+*.o
+*.d
+*.src
+*.elf
+*.hex
+*.map
+*.mdf
+*.opt
+*.lst
+
+# ===== IDE / 工具链缓存 =====
+.ads/
+.metadata/
+Configurations/
+TriCore Debug (TASKING)/
+*.launch
+.settings/language.settings.xml
+
+# ===== 备份 / 压缩包 =====
+*.rar
+*.zip
+*.7z
+
+# ===== 系统文件 =====
+Thumbs.db
+.DS_Store

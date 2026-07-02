@@ -1,0 +1,51 @@
+#ifndef BOARD_PINS_H_
+#define BOARD_PINS_H_
+
+#include "zf_common_headfile.h"
+
+#define KART_STEER_DIR_PIN              (P21_2)
+#define KART_STEER_PWM_PIN              (ATOM0_CH1_P21_3)
+#define KART_LEFT_REAR_DIR_PIN          (P02_4)
+#define KART_LEFT_REAR_PWM_PIN          (ATOM0_CH5_P02_5)
+#define KART_RIGHT_REAR_DIR_PIN         (P02_6)
+#define KART_RIGHT_REAR_PWM_PIN         (ATOM0_CH7_P02_7)
+
+#define KART_STEER_MOTOR_SIGN           (+1)
+#define KART_LEFT_MOTOR_SIGN            (+1)
+#define KART_RIGHT_MOTOR_SIGN           (+1)
+
+#define KART_LEFT_ENCODER_INDEX         (TIM2_ENCODER)
+#define KART_LEFT_ENCODER_CH1           (TIM2_ENCODER_CH1_P33_7)
+#define KART_LEFT_ENCODER_CH2           (TIM2_ENCODER_CH2_P33_6)
+#define KART_LEFT_ENCODER_A_GPIO        (P33_7)
+#define KART_LEFT_ENCODER_B_GPIO        (P33_6)
+#define KART_RIGHT_ENCODER_INDEX        (TIM5_ENCODER)
+#define KART_RIGHT_ENCODER_CH1          (TIM5_ENCODER_CH1_P10_3)
+#define KART_RIGHT_ENCODER_CH2          (TIM5_ENCODER_CH2_P10_1)
+#define KART_RIGHT_ENCODER_A_GPIO       (P10_3)
+#define KART_RIGHT_ENCODER_B_GPIO       (P10_1)
+#define KART_LEFT_ENCODER_SIGN          (+1)
+#define KART_RIGHT_ENCODER_SIGN         (-1)
+
+#define KART_STEER_ABS_SPI_INDEX        (SPI_4)
+#define KART_STEER_ABS_SPI_MODE         (SPI_MODE0)
+#define KART_STEER_ABS_SPI_BAUD         (1000000)
+#define KART_STEER_ABS_SPI_SCK_PIN      (SPI4_SCLK_P22_3)
+#define KART_STEER_ABS_SPI_MOSI_PIN     (SPI4_MOSI_P22_0)
+#define KART_STEER_ABS_SPI_MISO_PIN     (SPI4_MISO_P22_1)
+#define KART_STEER_ABS_SPI_HW_CS_PIN    (SPI_CS_NULL)
+#define KART_STEER_ABS_CS_GPIO_PIN      (P23_1)
+#define KART_STEER_ABS_RAW_SHIFT        (4)
+#define KART_STEER_ABS_CENTER_RAW       (2048)
+#define KART_STEER_ABS_LEFT_LIMIT_RAW   (1600)
+#define KART_STEER_ABS_RIGHT_LIMIT_RAW  (2496)
+
+#define BOARD_WIRELESS_UART_INDEX       (UART_2)
+#define BOARD_WIRELESS_UART_TX_PIN      (UART2_TX_P10_5)
+#define BOARD_WIRELESS_UART_RX_PIN      (UART2_RX_P10_6)
+#define BOARD_WIRELESS_UART_BAUD        (115200)
+#define BOARD_WIRELESS_UART_BAUD_FAST   (460800)
+
+#define KART_MAIN_LOOP_PERIOD_MS        (5)
+
+#endif
