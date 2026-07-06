@@ -1,59 +1,62 @@
 /*********************************************************************************************************************
-* TC387 Opensourec Library ¼´£¨TC387 ¿ªÔ´¿â£©ÊÇÒ»¸ö»ùÓÚ¹Ù·½ SDK ½Ó¿ÚµÄµÚÈı·½¿ªÔ´¿â
-* Copyright (c) 2022 SEEKFREE Öğ·É¿Æ¼¼
+* TC387 Opensourec Library ï¿½ï¿½ï¿½ï¿½TC387 ï¿½ï¿½Ô´ï¿½â£©ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½Ú¹Ù·ï¿½ SDK ï¿½Ó¿ÚµÄµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô´ï¿½ï¿½
+* Copyright (c) 2022 SEEKFREE ï¿½ï¿½É¿Æ¼ï¿½
 *
-* ±¾ÎÄ¼şÊÇ TC387 ¿ªÔ´¿âµÄÒ»²¿·Ö
+* ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½ TC387 ï¿½ï¿½Ô´ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½
 *
-* TC387 ¿ªÔ´¿â ÊÇÃâ·ÑÈí¼ş
-* Äú¿ÉÒÔ¸ù¾İ×ÔÓÉÈí¼ş»ù½ğ»á·¢²¼µÄ GPL£¨GNU General Public License£¬¼´ GNUÍ¨ÓÃ¹«¹²Ğí¿ÉÖ¤£©µÄÌõ¿î
-* ¼´ GPL µÄµÚ3°æ£¨¼´ GPL3.0£©»ò£¨ÄúÑ¡ÔñµÄ£©ÈÎºÎºóÀ´µÄ°æ±¾£¬ÖØĞÂ·¢²¼ºÍ/»òĞŞ¸ÄËü
+* TC387 ï¿½ï¿½Ô´ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+* ï¿½ï¿½ï¿½ï¿½ï¿½Ô¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½á·¢ï¿½ï¿½ï¿½ï¿½ GPLï¿½ï¿½GNU General Public Licenseï¿½ï¿½ï¿½ï¿½ GNUÍ¨ï¿½Ã¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¤ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+* ï¿½ï¿½ GPL ï¿½Äµï¿½3ï¿½æ£¨ï¿½ï¿½ GPL3.0ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½Ä£ï¿½ï¿½ÎºÎºï¿½ï¿½ï¿½ï¿½Ä°æ±¾ï¿½ï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½ï¿½Ş¸ï¿½ï¿½ï¿½
 *
-* ±¾¿ªÔ´¿âµÄ·¢²¼ÊÇÏ£ÍûËüÄÜ·¢»Ó×÷ÓÃ£¬µ«²¢Î´¶ÔÆä×÷ÈÎºÎµÄ±£Ö¤
-* ÉõÖÁÃ»ÓĞÒşº¬µÄÊÊÏúĞÔ»òÊÊºÏÌØ¶¨ÓÃÍ¾µÄ±£Ö¤
-* ¸ü¶àÏ¸½ÚÇë²Î¼û GPL
+* ï¿½ï¿½ï¿½ï¿½Ô´ï¿½ï¿½Ä·ï¿½ï¿½ï¿½ï¿½ï¿½Ï£ï¿½ï¿½ï¿½ï¿½ï¿½Ü·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã£ï¿½ï¿½ï¿½ï¿½ï¿½Î´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÎºÎµÄ±ï¿½Ö¤
+* ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô»ï¿½ï¿½Êºï¿½ï¿½Ø¶ï¿½ï¿½ï¿½Í¾ï¿½Ä±ï¿½Ö¤
+* ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½ï¿½ï¿½ï¿½Î¼ï¿½ GPL
 *
-* ÄúÓ¦¸ÃÔÚÊÕµ½±¾¿ªÔ´¿âµÄÍ¬Ê±ÊÕµ½Ò»·İ GPL µÄ¸±±¾
-* Èç¹ûÃ»ÓĞ£¬Çë²ÎÔÄ<https://www.gnu.org/licenses/>
+* ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½ï¿½Õµï¿½ï¿½ï¿½ï¿½ï¿½Ô´ï¿½ï¿½ï¿½Í¬Ê±ï¿½Õµï¿½Ò»ï¿½ï¿½ GPL ï¿½Ä¸ï¿½ï¿½ï¿½
+* ï¿½ï¿½ï¿½Ã»ï¿½Ğ£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½<https://www.gnu.org/licenses/>
 *
-* ¶îÍâ×¢Ã÷£º
-* ±¾¿ªÔ´¿âÊ¹ÓÃ GPL3.0 ¿ªÔ´Ğí¿ÉÖ¤Ğ­Òé ÒÔÉÏĞí¿ÉÉêÃ÷ÎªÒëÎÄ°æ±¾
-* Ğí¿ÉÉêÃ÷Ó¢ÎÄ°æÔÚ libraries/doc ÎÄ¼ş¼ĞÏÂµÄ GPL3_permission_statement.txt ÎÄ¼şÖĞ
-* Ğí¿ÉÖ¤¸±±¾ÔÚ libraries ÎÄ¼ş¼ĞÏÂ ¼´¸ÃÎÄ¼ş¼ĞÏÂµÄ LICENSE ÎÄ¼ş
-* »¶Ó­¸÷Î»Ê¹ÓÃ²¢´«²¥±¾³ÌĞò µ«ĞŞ¸ÄÄÚÈİÊ±±ØĞë±£ÁôÖğ·É¿Æ¼¼µÄ°æÈ¨ÉùÃ÷£¨¼´±¾ÉùÃ÷£©
+* ï¿½ï¿½ï¿½ï¿½×¢ï¿½ï¿½ï¿½ï¿½
+* ï¿½ï¿½ï¿½ï¿½Ô´ï¿½ï¿½Ê¹ï¿½ï¿½ GPL3.0 ï¿½ï¿½Ô´ï¿½ï¿½ï¿½ï¿½Ö¤Ğ­ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½Ä°æ±¾
+* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó¢ï¿½Ä°ï¿½ï¿½ï¿½ libraries/doc ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½Âµï¿½ GPL3_permission_statement.txt ï¿½Ä¼ï¿½ï¿½ï¿½
+* ï¿½ï¿½ï¿½ï¿½Ö¤ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ libraries ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½Âµï¿½ LICENSE ï¿½Ä¼ï¿½
+* ï¿½ï¿½Ó­ï¿½ï¿½Î»Ê¹ï¿½Ã²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½Ş¸ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ë±£ï¿½ï¿½ï¿½ï¿½É¿Æ¼ï¿½ï¿½Ä°ï¿½È¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 *
-* ÎÄ¼şÃû³Æ          isr
-* ¹«Ë¾Ãû³Æ          ³É¶¼Öğ·É¿Æ¼¼ÓĞÏŞ¹«Ë¾
-* °æ±¾ĞÅÏ¢          ²é¿´ libraries/doc ÎÄ¼ş¼ĞÄÚ version ÎÄ¼ş °æ±¾ËµÃ÷
-* ¿ª·¢»·¾³          ADS v1.10.2
-* ÊÊÓÃÆ½Ì¨          TC387QP
-* µêÆÌÁ´½Ó          https://seekfree.taobao.com/
+* ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½          isr
+* ï¿½ï¿½Ë¾ï¿½ï¿½ï¿½ï¿½          ï¿½É¶ï¿½ï¿½ï¿½É¿Æ¼ï¿½ï¿½ï¿½ï¿½Ş¹ï¿½Ë¾
+* ï¿½æ±¾ï¿½ï¿½Ï¢          ï¿½é¿´ libraries/doc ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ version ï¿½Ä¼ï¿½ ï¿½æ±¾Ëµï¿½ï¿½
+* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½          ADS v1.10.2
+* ï¿½ï¿½ï¿½ï¿½Æ½Ì¨          TC387QP
+* ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½          https://seekfree.taobao.com/
 *
-* ĞŞ¸Ä¼ÇÂ¼
-* ÈÕÆÚ              ×÷Õß                ±¸×¢
+* ï¿½Ş¸Ä¼ï¿½Â¼
+* ï¿½ï¿½ï¿½ï¿½              ï¿½ï¿½ï¿½ï¿½                ï¿½ï¿½×¢
 * 2022-11-04       pudding            first version
 ********************************************************************************************************************/
 
 #include "isr_config.h"
 #include "isr.h"
+#include "kart_remote.h"
+#include "kart_imu.h"                                   // 5ms ä¸­æ–­é‡Œè¦è°ƒ kart_imu_update()
+#include "kart_control.h"                               // 5ms ä¸­æ–­é‡Œè¦è°ƒ kart_control_speed_update()
 
-// ¶ÔÓÚTCÏµÁĞÄ¬ÈÏÊÇ²»Ö§³ÖÖĞ¶ÏÇ¶Ì×µÄ£¬Ï£ÍûÖ§³ÖÖĞ¶ÏÇ¶Ì×ĞèÒªÔÚÖĞ¶ÏÄÚÊ¹ÓÃ interrupt_global_enable(0); À´¿ªÆôÖĞ¶ÏÇ¶Ì×
-// ¼òµ¥µãËµÊµ¼ÊÉÏ½øÈëÖĞ¶ÏºóTCÏµÁĞµÄÓ²¼ş×Ô¶¯µ÷ÓÃÁË interrupt_global_disable(); À´¾Ü¾øÏìÓ¦ÈÎºÎµÄÖĞ¶Ï£¬Òò´ËĞèÒªÎÒÃÇ×Ô¼ºÊÖ¶¯µ÷ÓÃ interrupt_global_enable(0); À´¿ªÆôÖĞ¶ÏµÄÏìÓ¦¡£
+// ï¿½ï¿½ï¿½ï¿½TCÏµï¿½ï¿½Ä¬ï¿½ï¿½ï¿½Ç²ï¿½Ö§ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½×µÄ£ï¿½Ï£ï¿½ï¿½Ö§ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½ï¿½ï¿½Òªï¿½ï¿½ï¿½Ğ¶ï¿½ï¿½ï¿½Ê¹ï¿½ï¿½ interrupt_global_enable(0); ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
+// ï¿½òµ¥µï¿½ËµÊµï¿½ï¿½ï¿½Ï½ï¿½ï¿½ï¿½ï¿½Ğ¶Ïºï¿½TCÏµï¿½Ğµï¿½Ó²ï¿½ï¿½ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ interrupt_global_disable(); ï¿½ï¿½ï¿½Ü¾ï¿½ï¿½ï¿½Ó¦ï¿½ÎºÎµï¿½ï¿½Ğ¶Ï£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½ï¿½Ô¼ï¿½ï¿½Ö¶ï¿½ï¿½ï¿½ï¿½ï¿½ interrupt_global_enable(0); ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶Ïµï¿½ï¿½ï¿½Ó¦ï¿½ï¿½
 
-// **************************** PITÖĞ¶Ïº¯Êı ****************************
+// **************************** PITï¿½Ğ¶Ïºï¿½ï¿½ï¿½ ****************************
 IFX_INTERRUPT(cc60_pit_ch0_isr, CCU6_0_CH0_INT_VECTAB_NUM, CCU6_0_CH0_ISR_PRIORITY)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     pit_clear_flag(CCU60_CH0);
 
-
-
+    kart_imu_update();                              // 5ms å‘¨æœŸ:è¯» IMU + Madgwick è§£ç®—èˆªå‘
+    kart_control_speed_update();                    // 5ms å‘¨æœŸ:è¯»ç¼–ç å™¨â†’æ»¤æ³¢â†’PIDâ†’ç®— duty(å†…éƒ¨æŒ‰ enable å†³å®šæ˜¯å¦ä¸‹å‘)
 
 }
 
 
 IFX_INTERRUPT(cc60_pit_ch1_isr, CCU6_0_CH1_INT_VECTAB_NUM, CCU6_0_CH1_ISR_PRIORITY)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     pit_clear_flag(CCU60_CH1);
 
 
@@ -63,7 +66,7 @@ IFX_INTERRUPT(cc60_pit_ch1_isr, CCU6_0_CH1_INT_VECTAB_NUM, CCU6_0_CH1_ISR_PRIORI
 
 IFX_INTERRUPT(cc61_pit_ch0_isr, CCU6_1_CH0_INT_VECTAB_NUM, CCU6_1_CH0_ISR_PRIORITY)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     pit_clear_flag(CCU61_CH0);
 
 
@@ -73,7 +76,7 @@ IFX_INTERRUPT(cc61_pit_ch0_isr, CCU6_1_CH0_INT_VECTAB_NUM, CCU6_1_CH0_ISR_PRIORI
 
 IFX_INTERRUPT(cc61_pit_ch1_isr, CCU6_1_CH1_INT_VECTAB_NUM, CCU6_1_CH1_ISR_PRIORITY)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     pit_clear_flag(CCU61_CH1);
 
 
@@ -81,14 +84,14 @@ IFX_INTERRUPT(cc61_pit_ch1_isr, CCU6_1_CH1_INT_VECTAB_NUM, CCU6_1_CH1_ISR_PRIORI
 
 
 }
-// **************************** PITÖĞ¶Ïº¯Êı ****************************
+// **************************** PITï¿½Ğ¶Ïºï¿½ï¿½ï¿½ ****************************
 
 
-// **************************** Íâ²¿ÖĞ¶Ïº¯Êı ****************************
+// **************************** ï¿½â²¿ï¿½Ğ¶Ïºï¿½ï¿½ï¿½ ****************************
 IFX_INTERRUPT(exti_ch0_ch4_isr, EXTI_CH0_CH4_INT_VECTAB_NUM, EXTI_CH0_CH4_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
-    if(exti_flag_get(ERU_CH0_REQ0_P15_4))           // Í¨µÀ0ÖĞ¶Ï
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
+    if(exti_flag_get(ERU_CH0_REQ0_P15_4))           // Í¨ï¿½ï¿½0ï¿½Ğ¶ï¿½
     {
         exti_flag_clear(ERU_CH0_REQ0_P15_4);
 
@@ -96,7 +99,7 @@ IFX_INTERRUPT(exti_ch0_ch4_isr, EXTI_CH0_CH4_INT_VECTAB_NUM, EXTI_CH0_CH4_INT_PR
 
     }
 
-    if(exti_flag_get(ERU_CH4_REQ13_P15_5))          // Í¨µÀ4ÖĞ¶Ï
+    if(exti_flag_get(ERU_CH4_REQ13_P15_5))          // Í¨ï¿½ï¿½4ï¿½Ğ¶ï¿½
     {
         exti_flag_clear(ERU_CH4_REQ13_P15_5);
 
@@ -108,17 +111,17 @@ IFX_INTERRUPT(exti_ch0_ch4_isr, EXTI_CH0_CH4_INT_VECTAB_NUM, EXTI_CH0_CH4_INT_PR
 
 IFX_INTERRUPT(exti_ch1_ch5_isr, EXTI_CH1_CH5_INT_VECTAB_NUM, EXTI_CH1_CH5_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
-    if(exti_flag_get(ERU_CH1_REQ10_P14_3))          // Í¨µÀ1ÖĞ¶Ï
+    if(exti_flag_get(ERU_CH1_REQ10_P14_3))          // Í¨ï¿½ï¿½1ï¿½Ğ¶ï¿½
     {
         exti_flag_clear(ERU_CH1_REQ10_P14_3);
 
-        tof_module_exti_handler();                  // ToF Ä£¿é INT ¸üĞÂÖĞ¶Ï
+        tof_module_exti_handler();                  // ToF Ä£ï¿½ï¿½ INT ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½
 
     }
 
-    if(exti_flag_get(ERU_CH5_REQ1_P15_8))           // Í¨µÀ5ÖĞ¶Ï
+    if(exti_flag_get(ERU_CH5_REQ1_P15_8))           // Í¨ï¿½ï¿½5ï¿½Ğ¶ï¿½
     {
         exti_flag_clear(ERU_CH5_REQ1_P15_8);
 
@@ -127,15 +130,15 @@ IFX_INTERRUPT(exti_ch1_ch5_isr, EXTI_CH1_CH5_INT_VECTAB_NUM, EXTI_CH1_CH5_INT_PR
     }
 }
 
-// ÓÉÓÚÉãÏñÍ·pclkÒı½ÅÄ¬ÈÏÕ¼ÓÃÁË 2Í¨µÀ£¬ÓÃÓÚ´¥·¢DMA£¬Òò´ËÕâÀï²»ÔÙ¶¨ÒåÖĞ¶Ïº¯Êı
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í·pclkï¿½ï¿½ï¿½ï¿½Ä¬ï¿½ï¿½Õ¼ï¿½ï¿½ï¿½ï¿½ 2Í¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú´ï¿½ï¿½ï¿½DMAï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï²»ï¿½Ù¶ï¿½ï¿½ï¿½ï¿½Ğ¶Ïºï¿½ï¿½ï¿½
 // IFX_INTERRUPT(exti_ch2_ch6_isr, EXTI_CH2_CH6_INT_VECTAB_NUM, EXTI_CH2_CH6_INT_PRIO)
 // {
-//  interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
-//  if(exti_flag_get(ERU_CH2_REQ7_P00_4))           // Í¨µÀ2ÖĞ¶Ï
+//  interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
+//  if(exti_flag_get(ERU_CH2_REQ7_P00_4))           // Í¨ï¿½ï¿½2ï¿½Ğ¶ï¿½
 //  {
 //      exti_flag_clear(ERU_CH2_REQ7_P00_4);
 //  }
-//  if(exti_flag_get(ERU_CH6_REQ9_P20_0))           // Í¨µÀ6ÖĞ¶Ï
+//  if(exti_flag_get(ERU_CH6_REQ9_P20_0))           // Í¨ï¿½ï¿½6ï¿½Ğ¶ï¿½
 //  {
 //      exti_flag_clear(ERU_CH6_REQ9_P20_0);
 //  }
@@ -143,13 +146,13 @@ IFX_INTERRUPT(exti_ch1_ch5_isr, EXTI_CH1_CH5_INT_VECTAB_NUM, EXTI_CH1_CH5_INT_PR
 
 IFX_INTERRUPT(exti_ch3_ch7_isr, EXTI_CH3_CH7_INT_VECTAB_NUM, EXTI_CH3_CH7_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
-    if(exti_flag_get(ERU_CH3_REQ6_P02_0))           // Í¨µÀ3ÖĞ¶Ï
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
+    if(exti_flag_get(ERU_CH3_REQ6_P02_0))           // Í¨ï¿½ï¿½3ï¿½Ğ¶ï¿½
     {
         exti_flag_clear(ERU_CH3_REQ6_P02_0);
-        camera_vsync_handler();                     // ÉãÏñÍ·´¥·¢²É¼¯Í³Ò»»Øµ÷º¯Êı
+        camera_vsync_handler();                     // ï¿½ï¿½ï¿½ï¿½Í·ï¿½ï¿½ï¿½ï¿½ï¿½É¼ï¿½Í³Ò»ï¿½Øµï¿½ï¿½ï¿½ï¿½ï¿½
     }
-    if(exti_flag_get(ERU_CH7_REQ16_P15_1))          // Í¨µÀ7ÖĞ¶Ï
+    if(exti_flag_get(ERU_CH7_REQ16_P15_1))          // Í¨ï¿½ï¿½7ï¿½Ğ¶ï¿½
     {
         exti_flag_clear(ERU_CH7_REQ16_P15_1);
 
@@ -158,41 +161,41 @@ IFX_INTERRUPT(exti_ch3_ch7_isr, EXTI_CH3_CH7_INT_VECTAB_NUM, EXTI_CH3_CH7_INT_PR
 
     }
 }
-// **************************** Íâ²¿ÖĞ¶Ïº¯Êı ****************************
+// **************************** ï¿½â²¿ï¿½Ğ¶Ïºï¿½ï¿½ï¿½ ****************************
 
 
-// **************************** DMAÖĞ¶Ïº¯Êı ****************************
+// **************************** DMAï¿½Ğ¶Ïºï¿½ï¿½ï¿½ ****************************
 IFX_INTERRUPT(dma_ch5_isr, DMA_INT_VECTAB_NUM, DMA_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
-    camera_dma_handler();                           // ÉãÏñÍ·²É¼¯Íê³ÉÍ³Ò»»Øµ÷º¯Êı
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
+    camera_dma_handler();                           // ï¿½ï¿½ï¿½ï¿½Í·ï¿½É¼ï¿½ï¿½ï¿½ï¿½Í³Ò»ï¿½Øµï¿½ï¿½ï¿½ï¿½ï¿½
 }
-// **************************** DMAÖĞ¶Ïº¯Êı ****************************
+// **************************** DMAï¿½Ğ¶Ïºï¿½ï¿½ï¿½ ****************************
 
 
-// **************************** ´®¿ÚÖĞ¶Ïº¯Êı ****************************
-// ´®¿Ú0Ä¬ÈÏ×÷Îªµ÷ÊÔ´®¿Ú
+// **************************** ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶Ïºï¿½ï¿½ï¿½ ****************************
+// ï¿½ï¿½ï¿½ï¿½0Ä¬ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½Ô´ï¿½ï¿½ï¿½
 IFX_INTERRUPT(uart0_tx_isr, UART0_INT_VECTAB_NUM, UART0_TX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
 }
 IFX_INTERRUPT(uart0_rx_isr, UART0_INT_VECTAB_NUM, UART0_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
-#if DEBUG_UART_USE_INTERRUPT                        // Èç¹û¿ªÆô debug ´®¿ÚÖĞ¶Ï
-        debug_interrupr_handler();                  // µ÷ÓÃ debug ´®¿Ú½ÓÊÕ´¦Àíº¯Êı Êı¾İ»á±» debug »·ĞÎ»º³åÇø¶ÁÈ¡
-#endif                                              // Èç¹ûĞŞ¸ÄÁË DEBUG_UART_INDEX ÄÇÕâ¶Î´úÂëĞèÒª·Åµ½¶ÔÓ¦µÄ´®¿ÚÖĞ¶ÏÈ¥
+#if DEBUG_UART_USE_INTERRUPT                        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ debug ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½
+        debug_interrupr_handler();                  // ï¿½ï¿½ï¿½ï¿½ debug ï¿½ï¿½ï¿½Ú½ï¿½ï¿½Õ´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½İ»á±» debug ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¡
+#endif                                              // ï¿½ï¿½ï¿½ï¿½Ş¸ï¿½ï¿½ï¿½ DEBUG_UART_INDEX ï¿½ï¿½ï¿½ï¿½Î´ï¿½ï¿½ï¿½ï¿½ï¿½Òªï¿½Åµï¿½ï¿½ï¿½Ó¦ï¿½Ä´ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½È¥
 }
 
 
-// ´®¿Ú1Ä¬ÈÏÁ¬½Óµ½ÉãÏñÍ·ÅäÖÃ´®¿Ú
+// ï¿½ï¿½ï¿½ï¿½1Ä¬ï¿½ï¿½ï¿½ï¿½ï¿½Óµï¿½ï¿½ï¿½ï¿½ï¿½Í·ï¿½ï¿½ï¿½Ã´ï¿½ï¿½ï¿½
 IFX_INTERRUPT(uart1_tx_isr, UART1_INT_VECTAB_NUM, UART1_TX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -200,14 +203,14 @@ IFX_INTERRUPT(uart1_tx_isr, UART1_INT_VECTAB_NUM, UART1_TX_INT_PRIO)
 }
 IFX_INTERRUPT(uart1_rx_isr, UART1_INT_VECTAB_NUM, UART1_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
-    camera_uart_handler();                          // ÉãÏñÍ·²ÎÊıÅäÖÃÍ³Ò»»Øµ÷º¯Êı
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
+    camera_uart_handler();                          // ï¿½ï¿½ï¿½ï¿½Í·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í³Ò»ï¿½Øµï¿½ï¿½ï¿½ï¿½ï¿½
 }
 
-// ´®¿Ú2Ä¬ÈÏÁ¬½Óµ½ÎŞÏß×ª´®¿ÚÄ£¿é
+// ï¿½ï¿½ï¿½ï¿½2Ä¬ï¿½ï¿½ï¿½ï¿½ï¿½Óµï¿½ï¿½ï¿½ï¿½ï¿½×ªï¿½ï¿½ï¿½ï¿½Ä£ï¿½ï¿½
 IFX_INTERRUPT(uart2_tx_isr, UART2_INT_VECTAB_NUM, UART2_TX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -215,16 +218,16 @@ IFX_INTERRUPT(uart2_tx_isr, UART2_INT_VECTAB_NUM, UART2_TX_INT_PRIO)
 
 IFX_INTERRUPT(uart2_rx_isr, UART2_INT_VECTAB_NUM, UART2_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
-    wireless_module_uart_handler();                 // ÎŞÏßÄ£¿éÍ³Ò»»Øµ÷º¯Êı
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
+    wireless_module_uart_handler();                 // ï¿½ï¿½ï¿½ï¿½Ä£ï¿½ï¿½Í³Ò»ï¿½Øµï¿½ï¿½ï¿½ï¿½ï¿½
 
 
 
 }
-// ´®¿Ú3Ä¬ÈÏÁ¬½Óµ½GPS¶¨Î»Ä£¿é
+// ï¿½ï¿½ï¿½ï¿½3Ä¬ï¿½ï¿½ï¿½ï¿½ï¿½Óµï¿½GPSï¿½ï¿½Î»Ä£ï¿½ï¿½
 IFX_INTERRUPT(uart3_tx_isr, UART3_INT_VECTAB_NUM, UART3_TX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -232,8 +235,8 @@ IFX_INTERRUPT(uart3_tx_isr, UART3_INT_VECTAB_NUM, UART3_TX_INT_PRIO)
 
 IFX_INTERRUPT(uart3_rx_isr, UART3_INT_VECTAB_NUM, UART3_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
-    gnss_uart_callback();                            // GPS´®¿Ú»Øµ÷º¯Êı
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
+    kart_remote_uart_callback();                     // UART3 borrowed from GPS for SBUS receiver
 
 
 
@@ -242,7 +245,7 @@ IFX_INTERRUPT(uart3_rx_isr, UART3_INT_VECTAB_NUM, UART3_RX_INT_PRIO)
 
 IFX_INTERRUPT(uart4_tx_isr, UART4_INT_VECTAB_NUM, UART4_TX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -250,7 +253,7 @@ IFX_INTERRUPT(uart4_tx_isr, UART4_INT_VECTAB_NUM, UART4_TX_INT_PRIO)
 
 IFX_INTERRUPT(uart4_rx_isr, UART4_INT_VECTAB_NUM, UART4_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -258,7 +261,7 @@ IFX_INTERRUPT(uart4_rx_isr, UART4_INT_VECTAB_NUM, UART4_RX_INT_PRIO)
 
 IFX_INTERRUPT(uart5_tx_isr, UART5_INT_VECTAB_NUM, UART5_TX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -266,7 +269,7 @@ IFX_INTERRUPT(uart5_tx_isr, UART5_INT_VECTAB_NUM, UART5_TX_INT_PRIO)
 
 IFX_INTERRUPT(uart5_rx_isr, UART5_INT_VECTAB_NUM, UART5_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -274,7 +277,7 @@ IFX_INTERRUPT(uart5_rx_isr, UART5_INT_VECTAB_NUM, UART5_RX_INT_PRIO)
 
 IFX_INTERRUPT(uart6_tx_isr, UART6_INT_VECTAB_NUM, UART6_TX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -282,7 +285,7 @@ IFX_INTERRUPT(uart6_tx_isr, UART6_INT_VECTAB_NUM, UART6_TX_INT_PRIO)
 
 IFX_INTERRUPT(uart6_rx_isr, UART6_INT_VECTAB_NUM, UART6_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -290,7 +293,7 @@ IFX_INTERRUPT(uart6_rx_isr, UART6_INT_VECTAB_NUM, UART6_RX_INT_PRIO)
 
 IFX_INTERRUPT(uart8_tx_isr, UART8_INT_VECTAB_NUM, UART8_TX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -298,7 +301,7 @@ IFX_INTERRUPT(uart8_tx_isr, UART8_INT_VECTAB_NUM, UART8_TX_INT_PRIO)
 
 //IFX_INTERRUPT(uart8_rx_isr, UART8_INT_VECTAB_NUM, UART8_RX_INT_PRIO)
 //{
-//    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+//    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 //
 //
 //
@@ -306,7 +309,7 @@ IFX_INTERRUPT(uart8_tx_isr, UART8_INT_VECTAB_NUM, UART8_TX_INT_PRIO)
 
 IFX_INTERRUPT(uart9_tx_isr, UART9_INT_VECTAB_NUM, UART9_TX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -314,7 +317,7 @@ IFX_INTERRUPT(uart9_tx_isr, UART9_INT_VECTAB_NUM, UART9_TX_INT_PRIO)
 
 IFX_INTERRUPT(uart9_rx_isr, UART9_INT_VECTAB_NUM, UART9_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -322,7 +325,7 @@ IFX_INTERRUPT(uart9_rx_isr, UART9_INT_VECTAB_NUM, UART9_RX_INT_PRIO)
 
 IFX_INTERRUPT(uart10_tx_isr, UART10_INT_VECTAB_NUM, UART10_TX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -330,7 +333,7 @@ IFX_INTERRUPT(uart10_tx_isr, UART10_INT_VECTAB_NUM, UART10_TX_INT_PRIO)
 
 IFX_INTERRUPT(uart10_rx_isr, UART10_INT_VECTAB_NUM, UART10_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -338,7 +341,7 @@ IFX_INTERRUPT(uart10_rx_isr, UART10_INT_VECTAB_NUM, UART10_RX_INT_PRIO)
 
 IFX_INTERRUPT(uart11_tx_isr, UART11_INT_VECTAB_NUM, UART11_TX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
@@ -346,65 +349,65 @@ IFX_INTERRUPT(uart11_tx_isr, UART11_INT_VECTAB_NUM, UART11_TX_INT_PRIO)
 
 IFX_INTERRUPT(uart11_rx_isr, UART11_INT_VECTAB_NUM, UART11_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
 
 
 
 }
-// ´®¿ÚÍ¨Ñ¶´íÎóÖĞ¶Ï
+// ï¿½ï¿½ï¿½ï¿½Í¨Ñ¶ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½
 IFX_INTERRUPT(uart0_er_isr, UART0_INT_VECTAB_NUM, UART0_ER_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     IfxAsclin_Asc_isrError(&uart0_handle);
 }
 IFX_INTERRUPT(uart1_er_isr, UART1_INT_VECTAB_NUM, UART1_ER_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     IfxAsclin_Asc_isrError(&uart1_handle);
 }
 IFX_INTERRUPT(uart2_er_isr, UART2_INT_VECTAB_NUM, UART2_ER_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     IfxAsclin_Asc_isrError(&uart2_handle);
 }
 IFX_INTERRUPT(uart3_er_isr, UART3_INT_VECTAB_NUM, UART3_ER_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     IfxAsclin_Asc_isrError(&uart3_handle);
 }
 IFX_INTERRUPT(uart4_er_isr, UART4_INT_VECTAB_NUM, UART4_ER_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     IfxAsclin_Asc_isrError(&uart4_handle);
 }
 IFX_INTERRUPT(uart5_er_isr, UART5_INT_VECTAB_NUM, UART5_ER_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     IfxAsclin_Asc_isrError(&uart5_handle);
 }
 IFX_INTERRUPT(uart6_er_isr, UART6_INT_VECTAB_NUM, UART6_ER_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     IfxAsclin_Asc_isrError(&uart6_handle);
 }
 IFX_INTERRUPT(uart8_er_isr, UART8_INT_VECTAB_NUM, UART8_ER_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     IfxAsclin_Asc_isrError(&uart8_handle);
 }
 IFX_INTERRUPT(uart9_er_isr, UART9_INT_VECTAB_NUM, UART9_ER_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     IfxAsclin_Asc_isrError(&uart9_handle);
 }
 IFX_INTERRUPT(uart10_er_isr, UART10_INT_VECTAB_NUM, UART10_ER_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     IfxAsclin_Asc_isrError(&uart10_handle);
 }
 IFX_INTERRUPT(uart11_er_isr, UART11_INT_VECTAB_NUM, UART11_ER_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // ¿ªÆôÖĞ¶ÏÇ¶Ì×
+    interrupt_global_enable(0);                     // ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶ï¿½Ç¶ï¿½ï¿½
     IfxAsclin_Asc_isrError(&uart11_handle);
 }
-// **************************** ´®¿ÚÖĞ¶Ïº¯Êı ****************************
+// **************************** ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶Ïºï¿½ï¿½ï¿½ ****************************

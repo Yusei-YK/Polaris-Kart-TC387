@@ -9,7 +9,10 @@
 #define KART_BOOT_MOTOR_DUTY            (0)
 #define KART_BOOT_SERVO_DUTY            (0)
 
-#define KART_POWER_BOOT_CHECK_ENABLE    (1)
+/* 上电自检:开机跑一遍左右轮+转向的动作确认接线。
+ * 调参阶段必须关(=0):它会在开机 12.5s 内反复写 Power_now 后轮 duty,和速度环抢控制权。
+ * 硬件接线确认完、正式跑之前想重新验证接线时再开回 1。 */
+#define KART_POWER_BOOT_CHECK_ENABLE    (0)
 #define KART_POWER_CHECK_REAR_DUTY      (3000)
 #define KART_POWER_CHECK_STEER_LEFT     (4000)
 #define KART_POWER_CHECK_STEER_RIGHT    (-4000)

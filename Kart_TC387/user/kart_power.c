@@ -1,4 +1,5 @@
 #include "kart_power.h"
+#include "kart_remote.h"
 
 Power_Output_Struct Power_now = {0};
 
@@ -166,4 +167,140 @@ void power_check_poll(void)
 #else
     Power_now.Debug_Stage = 0;
 #endif
+}
+
+volatile kart_remote_t kart_remote = {0};
+
+static uint8 kart_remote_raw[KART_REMOTE_FRAME_LEN] = {0};
+static volatile uint16 kart_remote_timeout_ticks = 0;
+
+static int16 kart_remote_limit(int32 value)
+{
+    if(value > 10000)  { return 10000; }
+    if(value < -10000) { return -10000; }
+    return (int16)value;
+}
+
+static int16 kart_remote_map_channel(uint16 value, int8 reverse)
+{
+    int32 out = 0;
+
+    if(value > KART_REMOTE_CH_MID - KART_REMOTE_CH_DEAD_ZONE &&
+       value < KART_REMOTE_CH_MID + KART_REMOTE_CH_DEAD_ZONE)
+    {
+        return 0;
+    }
+
+    if(value < KART_REMOTE_CH_MID)
+    {
+        out = -((int32)(KART_REMOTE_CH_MID - KART_REMOTE_CH_DEAD_ZONE - value) * 10000) /
+              (KART_REMOTE_CH_MID - KART_REMOTE_CH_DEAD_ZONE - KART_REMOTE_CH_MIN);
+    }
+    else
+    {
+        out = ((int32)(value - KART_REMOTE_CH_MID - KART_REMOTE_CH_DEAD_ZONE) * 10000) /
+              (KART_REMOTE_CH_MAX - KART_REMOTE_CH_MID - KART_REMOTE_CH_DEAD_ZONE);
+    }
+
+    if(reverse)
+    {
+        out = -out;
+    }
+
+    return kart_remote_limit(out);
+}
+
+static void kart_remote_parse_frame(uint8 *buffer)
+{
+    uint8 num = 0;
+    uint16 ch4 = 0;
+
+    kart_remote.channel[num++] = (buffer[1] | buffer[2] << 8) & 0x07FF;
+    kart_remote.channel[num++] = (buffer[2] >> 3 | buffer[3] << 5) & 0x07FF;
+    kart_remote.channel[num++] = (buffer[3] >> 6 | buffer[4] << 2 | buffer[5] << 10) & 0x07FF;
+    kart_remote.channel[num++] = (buffer[5] >> 1 | buffer[6] << 7) & 0x07FF;
+    kart_remote.channel[num++] = (buffer[6] >> 4 | buffer[7] << 4) & 0x07FF;
+    kart_remote.channel[num++] = (buffer[7] >> 7 | buffer[8] << 1 | buffer[9] << 9) & 0x07FF;
+
+    kart_remote.online = ((buffer[23] & KART_REMOTE_FAILSAFE_FLAG) == 0) ? 1 : 0;
+    kart_remote.steering = kart_remote_map_channel(kart_remote.channel[0], 1);
+    kart_remote.throttle = kart_remote_map_channel(kart_remote.channel[1], 0);
+
+    ch4 = kart_remote.channel[3];
+    if(ch4 >= KART_REMOTE_ENABLE_CH_HIGH)
+    {
+        kart_remote.switch_stage = 2;
+    }
+    else if(ch4 >= KART_REMOTE_ENABLE_CH_LOW)
+    {
+        kart_remote.switch_stage = 1;
+    }
+    else
+    {
+        kart_remote.switch_stage = 0;
+    }
+
+    kart_remote.frame_ready = 1;
+    kart_remote_timeout_ticks = KART_REMOTE_TIMEOUT_TICKS;
+}
+
+void kart_remote_init(void)
+{
+    uart_sbus_init(BOARD_GPS_UART_INDEX,
+                   KART_REMOTE_UART_BAUD,
+                   BOARD_GPS_UART_TX_PIN,
+                   BOARD_GPS_UART_RX_PIN);
+    kart_remote_timeout_ticks = 0;
+}
+
+void kart_remote_uart_callback(void)
+{
+    static uint8 length = 0;
+    uint8 dat = 0;
+
+    if(uart_query_byte(BOARD_GPS_UART_INDEX, &dat) == 0)
+    {
+        return;
+    }
+
+    if(length == 0 && dat != KART_REMOTE_FRAME_HEAD)
+    {
+        return;
+    }
+
+    kart_remote_raw[length++] = dat;
+
+    if(length >= KART_REMOTE_FRAME_LEN)
+    {
+        if(kart_remote_raw[0] == KART_REMOTE_FRAME_HEAD &&
+           kart_remote_raw[KART_REMOTE_FRAME_LEN - 1] == KART_REMOTE_FRAME_TAIL)
+        {
+            kart_remote_parse_frame(kart_remote_raw);
+        }
+        length = 0;
+    }
+}
+
+void kart_remote_poll(void)
+{
+    if(kart_remote_timeout_ticks > 0)
+    {
+        kart_remote_timeout_ticks--;
+    }
+    else
+    {
+        kart_remote.online = 0;
+        kart_remote.frame_ready = 0;
+    }
+
+    if(kart_remote.online && kart_remote.switch_stage == 2)
+    {
+        power_set_rear_duty(kart_remote.throttle, kart_remote.throttle);
+        power_set_steer_duty(kart_remote.steering);
+    }
+    else
+    {
+        power_set_rear_duty(0, 0);
+        power_set_steer_duty(0);
+    }
 }
