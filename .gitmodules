@@ -1,0 +1,3 @@
+[submodule "examples/TLD7002_LED_Dot_Matrix"]
+	path = examples/TLD7002_LED_Dot_Matrix
+	url = https://gitee.com/seekfree/TLD7002_LED_Dot_Matrix.git

@@ -120,6 +120,7 @@ typedef struct {
 | `Kart_TC387/` | 主力工程 | TC387 卡丁快跑代码，用户代码在 `Kart_TC387/user/` |
 | `TC387_Library-master/` | 编译依赖 | TC387 逐飞库副本，不能删除，不能 ignore |
 | `docs/` | 文档入口 | 当前规划、硬件排查、测试清单、开发日志统一放这里 |
+| `examples/` | 官方例程 | 外部参考工程以 Git 子模块固定版本，不直接参与主工程编译 |
 | `imu963RA/` | 参考资料 | IMU963RA 相关资料，暂保留 |
 
 历史工程和 demo 已移出仓库根目录，保存在上级归档目录：
@@ -142,6 +143,7 @@ G:\CODE\Smart car\SmartCar_归档\
 - `Kart_TC387/user/kart_steer_abs.c` 是转向绝对编码器 SPI4 读数实现，协议来自逐飞绝对编码器驱动思路，但引脚已按 TC387 板重写。
 - `Kart_TC387/user/cpu0_main.c` 主循环已周期调用 `kart_steer_abs_update()`，不是只在 init 读一次。
 - `Kart_TC387/user/isr.c` 的 5ms 中断调用 `kart_imu_update()` 和 `kart_control_speed_update()`。
+- `examples/TLD7002_LED_Dot_Matrix/` 仅是逐飞官方参考例程；当前灯板驱动尚未接入主工程，实际 PCB 接口仍需核对。
 
 ## 先读文档
 
@@ -149,6 +151,7 @@ G:\CODE\Smart car\SmartCar_归档\
 - `docs/开发日志.md`：开发过程和当天风险。
 - `docs/03_硬件排查与第二版PCB.md`：硬件硬结论、v1/v2 引脚、排查记录。
 - `docs/04_Indoor_Test_Checklist.md`：室内测试前置清单。
+- `docs/05_官方例程与第三方来源.md`：外部例程版本、许可证、接口差异和迁移边界。
 
 ## 安全禁忌
 
