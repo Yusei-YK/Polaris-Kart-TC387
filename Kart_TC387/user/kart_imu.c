@@ -24,34 +24,48 @@ static volatile float beta = betaDef;                       // Madgwick 增益
 static volatile float q0 = 1.0f, q1 = 0.0f, q2 = 0.0f, q3 = 0.0f;   // 姿态四元数,初值=单位四元数(不旋转)
 
 static sSensorData IMU_data = {0};      // 当前帧传感器数据(内部缓存)
+static uint8 kart_imu_ready = 0;        // 逐飞 imu963ra_init() 返回成功后才置 1
 
 IMU_Handle_struct IMU_Handle = {0};     // IMU 总句柄(对外)
 
 /* =========================== 读一帧原始数据 + 去零偏 + 换算 =========================== */
 /* 移植自 IMU.c 的 USE_IMU963RA 分支 get_IMU_RAW()
  * data->Gyro* 出去是 rad/s,data->Acc* 出去是 g。
- * 换算系数照搬:陀螺 /14.3(2000dps 量程 LSB→°/s)再 *0.01745(°→rad);
- *              加速度 /4098(8G 量程 LSB→g)。
+ * 换算使用逐飞 imu963ra_gyro_transition()/imu963ra_acc_transition()，
+ * 会跟随逐飞驱动初始化得到的当前量程系数，再把 °/s 转成 rad/s。
  * 指针参数 data:传进来的是"地址",函数里用 -> 直接改调用者的那块内存(相当于返回多个值)。*/
 void get_IMU_RAW(IMU_data_RAW_struct *data){
+    float gyro_x_dps;
+    float gyro_y_dps;
+    float gyro_z_dps;
+    float acc_x_g;
+    float acc_y_g;
+    float acc_z_g;
+
     imu963ra_get_gyro();    // 读陀螺,结果进全局 imu963ra_gyro_x/y/z
-    data->GyroX=((float)imu963ra_gyro_x-IMU_Handle.IMU_CaliData.GYRO_X_bias)/14.3f*0.01745329252f;
-    data->GyroY=((float)imu963ra_gyro_y-IMU_Handle.IMU_CaliData.GYRO_Y_bias)/14.3f*0.01745329252f;
-    data->GyroZ=((float)imu963ra_gyro_z-IMU_Handle.IMU_CaliData.GYRO_Z_bias)/14.3f*0.01745329252f;
+    gyro_x_dps = imu963ra_gyro_transition((float)imu963ra_gyro_x - IMU_Handle.IMU_CaliData.GYRO_X_bias);
+    gyro_y_dps = imu963ra_gyro_transition((float)imu963ra_gyro_y - IMU_Handle.IMU_CaliData.GYRO_Y_bias);
+    gyro_z_dps = imu963ra_gyro_transition((float)imu963ra_gyro_z - IMU_Handle.IMU_CaliData.GYRO_Z_bias);
+    data->GyroX = gyro_x_dps * 0.01745329252f;
+    data->GyroY = gyro_y_dps * 0.01745329252f;
+    data->GyroZ = gyro_z_dps * 0.01745329252f;
 
     imu963ra_get_acc();     // 读加速度,结果进全局 imu963ra_acc_x/y/z
-    data->AccX=imu963ra_acc_x/(float)4098;
-    data->AccY=imu963ra_acc_y/(float)4098;
-    data->AccZ=imu963ra_acc_z/(float)4098;
+    acc_x_g = imu963ra_acc_transition(imu963ra_acc_x);
+    acc_y_g = imu963ra_acc_transition(imu963ra_acc_y);
+    acc_z_g = imu963ra_acc_transition(imu963ra_acc_z);
+    data->AccX = acc_x_g;
+    data->AccY = acc_y_g;
+    data->AccZ = acc_z_g;
 
-    /* 顺手把去零偏后的量存进句柄(单位:陀螺 °/s,加速度 m/s^2),给调试/以后航位推算用 */
-    IMU_Handle.RAW_data.GyroX=((float)imu963ra_gyro_x-IMU_Handle.IMU_CaliData.GYRO_X_bias)/14.3f;
-    IMU_Handle.RAW_data.GyroY=((float)imu963ra_gyro_y-IMU_Handle.IMU_CaliData.GYRO_Y_bias)/14.3f;
-    IMU_Handle.RAW_data.GyroZ=((float)imu963ra_gyro_z-IMU_Handle.IMU_CaliData.GYRO_Z_bias)/14.3f;
+    /* 换算统一走逐飞 transition 宏，量程配置改变时不再依赖写死的 14.3/4098。 */
+    IMU_Handle.RAW_data.GyroX = gyro_x_dps;
+    IMU_Handle.RAW_data.GyroY = gyro_y_dps;
+    IMU_Handle.RAW_data.GyroZ = gyro_z_dps;
 
-    IMU_Handle.RAW_data.AccX=imu963ra_acc_x*0.00239141;     // 0.00239141 = 9.8/4098,直接换成 m/s^2
-    IMU_Handle.RAW_data.AccY=imu963ra_acc_y*0.00239141;
-    IMU_Handle.RAW_data.AccZ=imu963ra_acc_z*0.00239141;
+    IMU_Handle.RAW_data.AccX = acc_x_g * 9.8f;
+    IMU_Handle.RAW_data.AccY = acc_y_g * 9.8f;
+    IMU_Handle.RAW_data.AccZ = acc_z_g * 9.8f;
 }
 
 /* =========================== 读一帧,填进算法输入结构 =========================== */
@@ -167,7 +181,11 @@ void reset_attitude(void){
     q1 = 0.0f;
     q2 = 0.0f;
     q3 = 0.0f;
-    IMU_Handle.Attitude=quaternionToEuler(IMU_data.attitude);
+    IMU_data.attitude.a = 1.0f;
+    IMU_data.attitude.b = 0.0f;
+    IMU_data.attitude.c = 0.0f;
+    IMU_data.attitude.d = 0.0f;
+    IMU_Handle.Attitude = quaternionToEuler(IMU_data.attitude);
 }
 
 /* =========================== 陀螺零偏静止标定 =========================== */
@@ -200,12 +218,20 @@ void IMU_check(void){
  * 顺序:复位姿态 → 初始化 963RA(内部按 zf_device_imu963ra.h 里的宏配 SPI_0/引脚)
  *       → 标定零偏 → 放行 update。
  * 注:IMU_data_filter_init() 因滤波器暂缺,先不调。 */
-void kart_imu_init(void){
+uint8 kart_imu_init(void){
+    kart_imu_ready = 0;
+    IMU_Handle.FLAG_enable_running_CALLBACK = 0;
     reset_attitude();
     /* IMU_data_filter_init();   // 滤波器初始化(暂缺) */
-    imu963ra_init();
+    if(0 != imu963ra_init())
+    {
+        /* 逐飞驱动已完成芯片 ID/寄存器自检；失败时禁止继续采随机值和做零偏标定。 */
+        return 1;
+    }
     IMU_check();                 // 上电静止标定(车必须放稳)
+    kart_imu_ready = 1;
     IMU_Handle.FLAG_enable_running_CALLBACK=1;
+    return 0;
 }
 
 /* =========================== 周期更新(放 5ms 中断)=========================== */
@@ -233,5 +259,12 @@ void kart_imu_update(void){
 
 /* =========================== 取航向 =========================== */
 float kart_imu_get_yaw(void){
-    return IMU_Handle.Attitude.yaw;
+    uint32 primask = interrupt_global_disable();
+    float yaw = IMU_Handle.Attitude.yaw;
+    interrupt_global_enable(primask);
+    return yaw;
+}
+
+uint8 kart_imu_is_ready(void){
+    return kart_imu_ready;
 }

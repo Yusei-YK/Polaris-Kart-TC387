@@ -52,15 +52,13 @@ typedef struct
     int16       output_duty;                    // 速度环算出的 duty(下发给两后轮)
 } kart_speed_ctrl_t;
 
-/* 让调试输出能读到速度环内部状态(VOFA 波形要用) */
-extern kart_speed_ctrl_t kart_speed;
-
 /* --- 对外接口 --- */
 void  kart_control_init(void);                  // 初始化速度环(填默认 PID 参数)
 void  kart_control_speed_update(void);          // 速度环一拍:读编码器→滤波→PID→下发。放 5ms 中断
 void  kart_control_set_enable(uint8 en);        // 使能/关闭速度环输出
 void  kart_control_set_target(float target);    // 设目标速度(脉冲/5ms)
 void  kart_control_set_pid(float kp, float ki, float kd);   // 在线改 PID 参数
+void  kart_control_get_pid(float *kp, float *ki, float *kd); // 原子读取当前 PID 参数
 
 /* --- 给调试/VOFA 读的取值接口 --- */
 float kart_control_get_target(void);            // 目标速度

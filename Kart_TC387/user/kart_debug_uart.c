@@ -70,6 +70,9 @@ static void kart_debug_send_vofa(void)
 static void kart_debug_parse_cmd(const char *cmd, uint8 len)
 {
     float val;
+    float kp;
+    float ki;
+    float kd;
 
     if(len < 1)
     {
@@ -77,25 +80,20 @@ static void kart_debug_parse_cmd(const char *cmd, uint8 len)
     }
 
     val = (float)atof(&cmd[1]);         // 从第 2 个字符起转数值(没有数值时 atof 返回 0)
+    kart_control_get_pid(&kp, &ki, &kd);
 
     switch(cmd[0])
     {
         case 'p': case 'P':
-            kart_control_set_pid(val,
-                                 kart_speed.pid.Ki,
-                                 kart_speed.pid.Kd);
+            kart_control_set_pid(val, ki, kd);
             break;
 
         case 'i': case 'I':
-            kart_control_set_pid(kart_speed.pid.Kp,
-                                 val,
-                                 kart_speed.pid.Kd);
+            kart_control_set_pid(kp, val, kd);
             break;
 
         case 'd': case 'D':
-            kart_control_set_pid(kart_speed.pid.Kp,
-                                 kart_speed.pid.Ki,
-                                 val);
+            kart_control_set_pid(kp, ki, val);
             break;
 
         case 't': case 'T':

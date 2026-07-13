@@ -1,9 +1,8 @@
 #include "kart_power.h"
 #include "kart_remote.h"
 
-Power_Output_Struct Power_now = {0};
-
-static int16 kart_last_motor_duty = 0;
+/* 速度环中断会写输出请求，主循环会读取并下发 PWM；访问必须使用临界区。 */
+static volatile Power_Output_Struct Power_now = {0};
 static uint16 kart_power_check_tick = 0;
 static uint8 kart_power_check_done = 0;
 
@@ -32,23 +31,30 @@ static void kart_set_dir_pwm(gpio_pin_enum dir_pin, pwm_channel_enum pwm_pin, in
 
 void power_set_motor_duty(int16 duty)
 {
-    Power_now.Motor_Duty = kart_limit_duty(duty);
-    Power_now.Left_Rear_Duty = Power_now.Motor_Duty;
-    Power_now.Right_Rear_Duty = Power_now.Motor_Duty;
-    kart_last_motor_duty = Power_now.Motor_Duty;
+    uint32 primask = interrupt_global_disable();
+    int16 limited = kart_limit_duty(duty);
+
+    Power_now.Motor_Duty = limited;
+    Power_now.Left_Rear_Duty = limited;
+    Power_now.Right_Rear_Duty = limited;
+
+    interrupt_global_enable(primask);
 }
 
 void power_set_rear_duty(int16 left_duty, int16 right_duty)
 {
+    uint32 primask = interrupt_global_disable();
     Power_now.Left_Rear_Duty = kart_limit_duty(left_duty);
     Power_now.Right_Rear_Duty = kart_limit_duty(right_duty);
     Power_now.Motor_Duty = (int16)((Power_now.Left_Rear_Duty + Power_now.Right_Rear_Duty) / 2);
-    kart_last_motor_duty = Power_now.Motor_Duty;
+    interrupt_global_enable(primask);
 }
 
 void power_set_steer_duty(int16 duty)
 {
+    uint32 primask = interrupt_global_disable();
     Power_now.Servo_Duty = kart_limit_duty(duty);
+    interrupt_global_enable(primask);
 }
 
 void power_init(void)
@@ -68,14 +74,20 @@ void power_init(void)
 
 void power_sync(void)
 {
-    if(Power_now.Motor_Duty != kart_last_motor_duty)
-    {
-        power_set_motor_duty(Power_now.Motor_Duty);
-    }
+    int16 steer_duty;
+    int16 left_rear_duty;
+    int16 right_rear_duty;
+    uint32 primask = interrupt_global_disable();
 
-    kart_set_dir_pwm(KART_STEER_DIR_PIN, KART_STEER_PWM_PIN, Power_now.Servo_Duty, KART_STEER_MOTOR_SIGN);
-    kart_set_dir_pwm(KART_LEFT_REAR_DIR_PIN, KART_LEFT_REAR_PWM_PIN, Power_now.Left_Rear_Duty, KART_LEFT_MOTOR_SIGN);
-    kart_set_dir_pwm(KART_RIGHT_REAR_DIR_PIN, KART_RIGHT_REAR_PWM_PIN, Power_now.Right_Rear_Duty, KART_RIGHT_MOTOR_SIGN);
+    steer_duty = Power_now.Servo_Duty;
+    left_rear_duty = Power_now.Left_Rear_Duty;
+    right_rear_duty = Power_now.Right_Rear_Duty;
+
+    interrupt_global_enable(primask);
+
+    kart_set_dir_pwm(KART_STEER_DIR_PIN, KART_STEER_PWM_PIN, steer_duty, KART_STEER_MOTOR_SIGN);
+    kart_set_dir_pwm(KART_LEFT_REAR_DIR_PIN, KART_LEFT_REAR_PWM_PIN, left_rear_duty, KART_LEFT_MOTOR_SIGN);
+    kart_set_dir_pwm(KART_RIGHT_REAR_DIR_PIN, KART_RIGHT_REAR_PWM_PIN, right_rear_duty, KART_RIGHT_MOTOR_SIGN);
 }
 
 void power_stop(void)
@@ -283,6 +295,9 @@ void kart_remote_uart_callback(void)
 
 void kart_remote_poll(void)
 {
+    kart_remote_t snapshot;
+    uint32 primask = interrupt_global_disable();
+
     if(kart_remote_timeout_ticks > 0)
     {
         kart_remote_timeout_ticks--;
@@ -293,10 +308,18 @@ void kart_remote_poll(void)
         kart_remote.frame_ready = 0;
     }
 
-    if(kart_remote.online && kart_remote.switch_stage == 2)
+    snapshot.steering = kart_remote.steering;
+    snapshot.throttle = kart_remote.throttle;
+    snapshot.switch_stage = kart_remote.switch_stage;
+    snapshot.online = kart_remote.online;
+    snapshot.frame_ready = kart_remote.frame_ready;
+
+    interrupt_global_enable(primask);
+
+    if(snapshot.online && snapshot.switch_stage == 2)
     {
-        power_set_rear_duty(kart_remote.throttle, kart_remote.throttle);
-        power_set_steer_duty(kart_remote.steering);
+        power_set_rear_duty(snapshot.throttle, snapshot.throttle);
+        power_set_steer_duty(snapshot.steering);
     }
     else
     {
