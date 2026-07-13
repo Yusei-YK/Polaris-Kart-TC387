@@ -23,7 +23,7 @@
 #define KART_SPEED_IMAX_DEFAULT        (3000.0f)
 #define KART_SPEED_OUTMAX_DEFAULT      ((float)KART_POWER_MAX_DUTY)
 
-static kart_speed_ctrl_t kart_speed = {0};
+kart_speed_ctrl_t kart_speed = {0};
 
 /* =========================== 初始化 =========================== */
 void kart_control_init(void)
@@ -104,79 +104,29 @@ void kart_control_speed_update(void)
 /* =========================== 在线设置接口 =========================== */
 void kart_control_set_enable(uint8 en)
 {
-    uint32 primask = interrupt_global_disable();
-
     kart_speed.enable = en ? 1 : 0;
     if(!kart_speed.enable)
     {
         kart_pid_reset(&kart_speed.pid);    // 关的时候清记忆,下次开不带旧账
-        kart_speed.output_duty = 0;
-        power_set_rear_duty(0, 0);          // e0/故障关闭后立即撤销上一拍的电机请求
     }
-
-    interrupt_global_enable(primask);
 }
 
 void kart_control_set_target(float target)
 {
-    uint32 primask = interrupt_global_disable();
     kart_speed.target = target;
-    interrupt_global_enable(primask);
 }
 
 void kart_control_set_pid(float kp, float ki, float kd)
 {
-    uint32 primask = interrupt_global_disable();
-
     /* 只改三个系数,限幅沿用初始化时的值;改完清一次记忆防跳变 */
     kart_speed.pid.Kp = kp;
     kart_speed.pid.Ki = ki;
     kart_speed.pid.Kd = kd;
     kart_pid_reset(&kart_speed.pid);
-
-    interrupt_global_enable(primask);
 }
 
 /* =========================== 取值接口(给 VOFA/调试)=========================== */
-float kart_control_get_target(void)
-{
-    uint32 primask = interrupt_global_disable();
-    float value = kart_speed.target;
-    interrupt_global_enable(primask);
-    return value;
-}
-
-float kart_control_get_meas(void)
-{
-    uint32 primask = interrupt_global_disable();
-    float value = kart_speed.meas;
-    interrupt_global_enable(primask);
-    return value;
-}
-
-int16 kart_control_get_output(void)
-{
-    uint32 primask = interrupt_global_disable();
-    int16 value = kart_speed.output_duty;
-    interrupt_global_enable(primask);
-    return value;
-}
-
-uint8 kart_control_is_enabled(void)
-{
-    uint32 primask = interrupt_global_disable();
-    uint8 value = kart_speed.enable;
-    interrupt_global_enable(primask);
-    return value;
-}
-
-void kart_control_get_pid(float *kp, float *ki, float *kd)
-{
-    uint32 primask = interrupt_global_disable();
-
-    if(kp != NULL) { *kp = kart_speed.pid.Kp; }
-    if(ki != NULL) { *ki = kart_speed.pid.Ki; }
-    if(kd != NULL) { *kd = kart_speed.pid.Kd; }
-
-    interrupt_global_enable(primask);
-}
+float kart_control_get_target(void) { return kart_speed.target; }
+float kart_control_get_meas(void)   { return kart_speed.meas; }
+int16 kart_control_get_output(void) { return kart_speed.output_duty; }
+uint8 kart_control_is_enabled(void) { return kart_speed.enable; }

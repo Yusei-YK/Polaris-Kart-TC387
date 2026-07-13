@@ -120,7 +120,7 @@
 
 ## 5. 前轮绝对值编码器测试
 
-目标：确认 SPI4 读数可用。
+目标：确认 SPI3 读数可用。
 
 步骤：
 
@@ -287,9 +287,8 @@
 
 通过标准：
 
-- `WAIT_START -> LEAVE_START -> SLALOM -> APPROACH_GARAGE -> REVERSE_ALIGN -> REVERSE_PARK` 状态清楚。
-- 任一 readiness 未置位时，`kart_mission_arm()` 必须失败且 IPS200 `MISSING` 非零。
-- 任何异常进入 `KART_MISSION_FAULT`，人工中止进入 `KART_MISSION_ABORTED`，两者都必须产生停机请求。
+- `WAIT_START -> FORWARD_REPLAY -> SLOW_FOR_PARK` 等状态清楚。
+- 任何异常进入 `KART_FAULT` 或 `KART_STOP`。
 - 不出现高速突然转向。
 
 ## 13. 禁止项

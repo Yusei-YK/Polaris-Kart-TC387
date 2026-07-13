@@ -35,11 +35,9 @@
 
 #include "isr_config.h"
 #include "isr.h"
-#include "board_pins.h"                                 // KART_MAIN_LOOP_PERIOD_MS 的板级定义
 #include "kart_remote.h"
 #include "kart_imu.h"                                   // 5ms 中断里要调 kart_imu_update()
 #include "kart_control.h"                               // 5ms 中断里要调 kart_control_speed_update()
-#include "kart_mission.h"                               // 5ms 中断只推进 Mission 计时，不改状态或操作屏幕
 
 // ����TCϵ��Ĭ���ǲ�֧���ж�Ƕ�׵ģ�ϣ��֧���ж�Ƕ����Ҫ���ж���ʹ�� interrupt_global_enable(0); �������ж�Ƕ��
 // �򵥵�˵ʵ���Ͻ����жϺ�TCϵ�е�Ӳ���Զ������� interrupt_global_disable(); ���ܾ���Ӧ�κε��жϣ������Ҫ�����Լ��ֶ����� interrupt_global_enable(0); �������жϵ���Ӧ��
@@ -52,7 +50,6 @@ IFX_INTERRUPT(cc60_pit_ch0_isr, CCU6_0_CH0_INT_VECTAB_NUM, CCU6_0_CH0_ISR_PRIORI
 
     kart_imu_update();                              // 5ms 周期:读 IMU + Madgwick 解算航向
     kart_control_speed_update();                    // 5ms 周期:读编码器→滤波→PID→算 duty(内部按 enable 决定是否下发)
-    kart_mission_tick(KART_MAIN_LOOP_PERIOD_MS);    // 固定节拍累计比赛时间，状态转换仍全部留在主循环
 
 }
 

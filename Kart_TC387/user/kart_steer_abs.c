@@ -4,7 +4,6 @@ static uint16 kart_steer_abs_raw = 0;
 static uint16 kart_steer_abs_frame = 0;
 static int16 kart_steer_abs_delta = 0;
 static int16 kart_steer_abs_deg_x100 = 0;
-static uint8 kart_steer_abs_ready = 0;
 
 #define KART_STEER_ABS_SPI_W            (0x80)
 #define KART_STEER_ABS_SPI_R            (0x40)
@@ -109,9 +108,8 @@ static uint16 kart_steer_abs_read_frame(void)
     return data;
 }
 
-uint8 kart_steer_abs_init(void)
+void kart_steer_abs_init(void)
 {
-    kart_steer_abs_ready = 0;
     gpio_init(KART_STEER_ABS_CS_GPIO_PIN, GPO, GPIO_HIGH, GPO_PUSH_PULL);
     spi_init(KART_STEER_ABS_SPI_INDEX,
              KART_STEER_ABS_SPI_MODE,
@@ -121,12 +119,7 @@ uint8 kart_steer_abs_init(void)
              KART_STEER_ABS_SPI_MISO_PIN,
              KART_STEER_ABS_SPI_HW_CS_PIN);
 
-    if(0 != kart_steer_abs_self_check())
-    {
-        /* 自检失败时不能继续把随机 SPI 数据当成转角反馈。 */
-        return 1;
-    }
-
+    if(0 == kart_steer_abs_self_check())
     {
         uint16 zero_position = 0;
         kart_steer_abs_write_register(KART_STEER_ABS_DIR_REG, 0x00);
@@ -134,18 +127,11 @@ uint8 kart_steer_abs_init(void)
         kart_steer_abs_write_register(KART_STEER_ABS_ZERO_H_REG, (uint8)(zero_position >> 8));
     }
 
-    kart_steer_abs_ready = 1;
     kart_steer_abs_update();
-    return 0;
 }
 
 void kart_steer_abs_update(void)
 {
-    if(0 == kart_steer_abs_ready)
-    {
-        return;
-    }
-
     kart_steer_abs_frame = kart_steer_abs_read_frame();
     kart_steer_abs_raw = (uint16)((kart_steer_abs_frame >> KART_STEER_ABS_RAW_SHIFT) & 0x0FFF);
     kart_steer_abs_delta = kart_steer_abs_wrap_delta(kart_steer_abs_raw, KART_STEER_ABS_CENTER_RAW);
@@ -170,9 +156,4 @@ int16 kart_steer_abs_get_center_delta(void)
 int16 kart_steer_abs_get_deg_x100(void)
 {
     return kart_steer_abs_deg_x100;
-}
-
-uint8 kart_steer_abs_is_ready(void)
-{
-    return kart_steer_abs_ready;
 }

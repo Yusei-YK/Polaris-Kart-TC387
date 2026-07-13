@@ -30,6 +30,8 @@ typedef struct
     uint8 Debug_Stage;
 } Power_Output_Struct;
 
+extern Power_Output_Struct Power_now;
+
 void power_init(void);
 void power_sync(void);
 void power_stop(void);

@@ -22,5 +22,6 @@ int16 kart_encoder_get_left_raw(void);
 int16 kart_encoder_get_right_raw(void);
 int32 kart_encoder_get_left_sum(void);
 int32 kart_encoder_get_right_sum(void);
+const kart_encoder_state_t *kart_encoder_get_state(void);
 
 #endif

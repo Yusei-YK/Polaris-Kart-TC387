@@ -26,48 +26,35 @@ void kart_encoder_update(void)
 
 int16 kart_encoder_get_left_delta(void)
 {
-    uint32 primask = interrupt_global_disable();
-    int16 value = kart_encoder_state.left_delta;
-    interrupt_global_enable(primask);
-    return value;
+    return kart_encoder_state.left_delta;
 }
 
 int16 kart_encoder_get_right_delta(void)
 {
-    uint32 primask = interrupt_global_disable();
-    int16 value = kart_encoder_state.right_delta;
-    interrupt_global_enable(primask);
-    return value;
+    return kart_encoder_state.right_delta;
 }
 
 int16 kart_encoder_get_left_raw(void)
 {
-    uint32 primask = interrupt_global_disable();
-    int16 value = kart_encoder_state.left_raw;
-    interrupt_global_enable(primask);
-    return value;
+    return kart_encoder_state.left_raw;
 }
 
 int16 kart_encoder_get_right_raw(void)
 {
-    uint32 primask = interrupt_global_disable();
-    int16 value = kart_encoder_state.right_raw;
-    interrupt_global_enable(primask);
-    return value;
+    return kart_encoder_state.right_raw;
 }
 
 int32 kart_encoder_get_left_sum(void)
 {
-    uint32 primask = interrupt_global_disable();
-    int32 value = kart_encoder_state.left_sum;
-    interrupt_global_enable(primask);
-    return value;
+    return kart_encoder_state.left_sum;
 }
 
 int32 kart_encoder_get_right_sum(void)
 {
-    uint32 primask = interrupt_global_disable();
-    int32 value = kart_encoder_state.right_sum;
-    interrupt_global_enable(primask);
-    return value;
+    return kart_encoder_state.right_sum;
+}
+
+const kart_encoder_state_t *kart_encoder_get_state(void)
+{
+    return &kart_encoder_state;
 }
