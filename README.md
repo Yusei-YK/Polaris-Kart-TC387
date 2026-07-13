@@ -86,6 +86,7 @@ typedef struct {
 - `kart_pid`：PID 算子。
 - `kart_control`：当前后轮平均速度环，后续拆左右轮独立环。
 - `kart_debug_uart`：VOFA 和在线改参。
+- `kart_light`：科目二 8 种灯光命令的 7x15 点阵逻辑、亮度和非阻塞动画；逻辑测试已覆盖全部图案与动画，TLD7002 硬件扫描层待接入。
 - 后续再补：`kart_path`、`kart_mission`、`kart_subject1`、参数保存和菜单。
 
 总体数据流保留旧规划的分层思想：
@@ -121,6 +122,7 @@ typedef struct {
 | `TC387_Library-master/` | 编译依赖 | TC387 逐飞库副本，不能删除，不能 ignore |
 | `docs/` | 文档入口 | 当前规划、硬件排查、测试清单、开发日志统一放这里 |
 | `examples/` | 官方例程 | 外部参考工程以 Git 子模块固定版本，不直接参与主工程编译 |
+| `tests/` | 主机测试 | 测试与硬件无关的业务逻辑，当前覆盖 `kart_light` 全部图案和动画 |
 | `imu963RA/` | 参考资料 | IMU963RA 相关资料，暂保留 |
 
 历史工程和 demo 已移出仓库根目录，保存在上级归档目录：
@@ -143,7 +145,7 @@ G:\CODE\Smart car\SmartCar_归档\
 - `Kart_TC387/user/kart_steer_abs.c` 是转向绝对编码器 SPI4 读数实现，协议来自逐飞绝对编码器驱动思路，但引脚已按 TC387 板重写。
 - `Kart_TC387/user/cpu0_main.c` 主循环已周期调用 `kart_steer_abs_update()`，不是只在 init 读一次。
 - `Kart_TC387/user/isr.c` 的 5ms 中断调用 `kart_imu_update()` 和 `kart_control_speed_update()`。
-- `examples/TLD7002_LED_Dot_Matrix/` 仅是逐飞官方参考例程；当前灯板驱动尚未接入主工程，实际 PCB 接口仍需核对。
+- `examples/TLD7002_LED_Dot_Matrix/` 仅是逐飞官方参考例程；原理图已确认当前 PCB 必须使用 20 针转 24 针飞线，TLD7002 驱动尚未接入主工程。
 
 ## 先读文档
 
