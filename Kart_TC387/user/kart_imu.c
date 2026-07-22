@@ -1,14 +1,13 @@
 #include "kart_imu.h"
 #include "kart_calc.h"
-#include "zf_device_imu963ra.h"
+#include "zf_device_imu660ra.h"
 #include "math.h"
 
 /*
  * 卡丁车航向解算 —— 实现
  * ------------------------------------------------------------------
- * 移植自 TopSpeed IMU.c(USE_6DOF_AHRS + USE_IMU963RA)。
- * Madgwick 主体、四元数积分、963RA 读数换算全部一字不改照搬,
- * 只把 GBK 乱码注释换成干净中文,并砍掉:
+ * Madgwick 主体和四元数积分参考 TopSpeed 6DOF 实现；
+ * 传感器读取与换算按本车 IMU660RA 适配，并砍掉:
  *   - IMU_running_CALLBACK 里的 Subject 发射方向偏置、撞击/自由落体检测
  *   - IMU_check 里的 Flash 读写、IPS 屏显示
  * ------------------------------------------------------------------
@@ -17,6 +16,7 @@
 /* ===== Madgwick 算法参数(照搬 TopSpeed)===== */
 #define sampleFreq  200.0f      // 采样频率 200Hz(对应 5ms 一帧)
 #define betaDef     0.01f       // 2*比例增益(Madgwick 收敛系数,越大越信加速度计)
+#define GYRO_DEADBAND 0.002f    // 陀螺死区(rad/s)≈0.11°/s,低于此视为静止噪声清零
 
 /* volatile:告诉编译器"这变量随时可能被中断改",别把它优化进寄存器缓存。
  * 因为 kart_imu_update 在定时中断里跑,这几个四元数会在中断里被改。 */
@@ -28,30 +28,45 @@ static sSensorData IMU_data = {0};      // 当前帧传感器数据(内部缓存
 IMU_Handle_struct IMU_Handle = {0};     // IMU 总句柄(对外)
 
 /* =========================== 读一帧原始数据 + 去零偏 + 换算 =========================== */
-/* 移植自 IMU.c 的 USE_IMU963RA 分支 get_IMU_RAW()
+/* 参考 TopSpeed get_IMU_RAW()，传感器读取改为 IMU660RA。
  * data->Gyro* 出去是 rad/s,data->Acc* 出去是 g。
- * 换算系数照搬:陀螺 /14.3(2000dps 量程 LSB→°/s)再 *0.01745(°→rad);
+ * 换算系数:陀螺 /16.4(2000dps 量程 LSB→°/s)再 *0.01745(°→rad);
  *              加速度 /4098(8G 量程 LSB→g)。
  * 指针参数 data:传进来的是"地址",函数里用 -> 直接改调用者的那块内存(相当于返回多个值)。*/
 void get_IMU_RAW(IMU_data_RAW_struct *data){
-    imu963ra_get_gyro();    // 读陀螺,结果进全局 imu963ra_gyro_x/y/z
-    data->GyroX=((float)imu963ra_gyro_x-IMU_Handle.IMU_CaliData.GYRO_X_bias)/14.3f*0.01745329252f;
-    data->GyroY=((float)imu963ra_gyro_y-IMU_Handle.IMU_CaliData.GYRO_Y_bias)/14.3f*0.01745329252f;
-    data->GyroZ=((float)imu963ra_gyro_z-IMU_Handle.IMU_CaliData.GYRO_Z_bias)/14.3f*0.01745329252f;
+    imu660ra_get_gyro();
+    imu660ra_get_acc();
 
-    imu963ra_get_acc();     // 读加速度,结果进全局 imu963ra_acc_x/y/z
-    data->AccX=imu963ra_acc_x/(float)4098;
-    data->AccY=imu963ra_acc_y/(float)4098;
-    data->AccZ=imu963ra_acc_z/(float)4098;
+    /* 物理安装：X轴朝下(地面)，Y轴朝左，Z轴朝前(车头)
+     * Madgwick 期望坐标系：X→前，Y→左，Z→上
+     * 映射：algo_X = phys_Z(前)，algo_Y = phys_Y(左)，algo_Z = -phys_X(上=-下) */
+    float gx = ((float)imu660ra_gyro_x - IMU_Handle.IMU_CaliData.GYRO_X_bias) / 16.4f * 0.01745329252f;
+    float gy = ((float)imu660ra_gyro_y - IMU_Handle.IMU_CaliData.GYRO_Y_bias) / 16.4f * 0.01745329252f;
+    float gz = ((float)imu660ra_gyro_z - IMU_Handle.IMU_CaliData.GYRO_Z_bias) / 16.4f * 0.01745329252f;
 
-    /* 顺手把去零偏后的量存进句柄(单位:陀螺 °/s,加速度 m/s^2),给调试/以后航位推算用 */
-    IMU_Handle.RAW_data.GyroX=((float)imu963ra_gyro_x-IMU_Handle.IMU_CaliData.GYRO_X_bias)/14.3f;
-    IMU_Handle.RAW_data.GyroY=((float)imu963ra_gyro_y-IMU_Handle.IMU_CaliData.GYRO_Y_bias)/14.3f;
-    IMU_Handle.RAW_data.GyroZ=((float)imu963ra_gyro_z-IMU_Handle.IMU_CaliData.GYRO_Z_bias)/14.3f;
+    if(fabsf(gz) < GYRO_DEADBAND) gz = 0.0f;
+    if(fabsf(gy) < GYRO_DEADBAND) gy = 0.0f;
+    if(fabsf(gx) < GYRO_DEADBAND) gx = 0.0f;
 
-    IMU_Handle.RAW_data.AccX=imu963ra_acc_x*0.00239141;     // 0.00239141 = 9.8/4098,直接换成 m/s^2
-    IMU_Handle.RAW_data.AccY=imu963ra_acc_y*0.00239141;
-    IMU_Handle.RAW_data.AccZ=imu963ra_acc_z*0.00239141;
+    data->GyroX =  gz;
+    data->GyroY =  gy;
+    data->GyroZ = -gx;
+
+    float ax = imu660ra_acc_x / 4098.0f;
+    float ay = imu660ra_acc_y / 4098.0f;
+    float az = imu660ra_acc_z / 4098.0f;
+
+    data->AccX =  az;
+    data->AccY =  ay;
+    data->AccZ = -ax;
+
+    IMU_Handle.RAW_data.GyroX = ((float)imu660ra_gyro_x - IMU_Handle.IMU_CaliData.GYRO_X_bias) / 16.4f;
+    IMU_Handle.RAW_data.GyroY = ((float)imu660ra_gyro_y - IMU_Handle.IMU_CaliData.GYRO_Y_bias) / 16.4f;
+    IMU_Handle.RAW_data.GyroZ = ((float)imu660ra_gyro_z - IMU_Handle.IMU_CaliData.GYRO_Z_bias) / 16.4f;
+
+    IMU_Handle.RAW_data.AccX = imu660ra_acc_x * 0.00239141f;
+    IMU_Handle.RAW_data.AccY = imu660ra_acc_y * 0.00239141f;
+    IMU_Handle.RAW_data.AccZ = imu660ra_acc_z * 0.00239141f;
 }
 
 /* =========================== 读一帧,填进算法输入结构 =========================== */
@@ -171,8 +186,8 @@ void reset_attitude(void){
 }
 
 /* =========================== 陀螺零偏静止标定 =========================== */
-/* 移植自 IMU.c 的 USE_IMU963RA 分支 IMU_check()
- * 车放稳别动,连采 100 次(每次隔 5ms)陀螺读数求平均 = 零偏。
+/* 参考 TopSpeed IMU_check()。
+ * 车放稳别动,连采 300 次(每次隔 5ms)陀螺读数求平均 = 零偏。
  * 砍掉了原工程的 Flash 读写和 IPS 屏显示,只把结果留在内存。
  * 静止 1s 是为了让传感器上电稳定后再采。 */
 void IMU_check(void){
@@ -180,30 +195,30 @@ void IMU_check(void){
     IMU_Handle.FLAG_enable_running_CALLBACK=0;      // 标定期间禁止 update 抢读数据
     system_delay_ms(1000);                          // 静止等 1s 让传感器稳定
     reset_attitude();
-    for(int i=0;i<100;i++){
-        imu963ra_get_gyro();
-        IMU_CaliData_s.GYRO_X_bias+=imu963ra_gyro_x;
-        IMU_CaliData_s.GYRO_Y_bias+=imu963ra_gyro_y;
-        IMU_CaliData_s.GYRO_Z_bias+=imu963ra_gyro_z;
+    for(int i=0;i<300;i++){
+        imu660ra_get_gyro();
+        IMU_CaliData_s.GYRO_X_bias+=imu660ra_gyro_x;
+        IMU_CaliData_s.GYRO_Y_bias+=imu660ra_gyro_y;
+        IMU_CaliData_s.GYRO_Z_bias+=imu660ra_gyro_z;
         system_delay_ms(5);
     }
-    IMU_CaliData_s.GYRO_X_bias/=100.0f;
-    IMU_CaliData_s.GYRO_Y_bias/=100.0f;
-    IMU_CaliData_s.GYRO_Z_bias/=100.0f;
+    IMU_CaliData_s.GYRO_X_bias/=300.0f;
+    IMU_CaliData_s.GYRO_Y_bias/=300.0f;
+    IMU_CaliData_s.GYRO_Z_bias/=300.0f;
 
     IMU_Handle.IMU_CaliData=IMU_CaliData_s;         // 存进句柄(不写 Flash)
     IMU_Handle.FLAG_enable_running_CALLBACK=1;      // 标定完,放行 update
 }
 
 /* =========================== 初始化 =========================== */
-/* 移植自 IMU.c 的 USE_IMU963RA 分支 IMU_init()
- * 顺序:复位姿态 → 初始化 963RA(内部按 zf_device_imu963ra.h 里的宏配 SPI_0/引脚)
+/* 参考 TopSpeed IMU_init()，硬件使用 IMU660RA。
+ * 顺序:复位姿态 → 初始化 660RA(内部按 zf_device_imu660ra.h 里的宏配 SPI_0/引脚)
  *       → 标定零偏 → 放行 update。
  * 注:IMU_data_filter_init() 因滤波器暂缺,先不调。 */
 void kart_imu_init(void){
     reset_attitude();
     /* IMU_data_filter_init();   // 滤波器初始化(暂缺) */
-    imu963ra_init();
+    imu660ra_init();
     IMU_check();                 // 上电静止标定(车必须放稳)
     IMU_Handle.FLAG_enable_running_CALLBACK=1;
 }
@@ -212,6 +227,12 @@ void kart_imu_init(void){
 /* 精简自 IMU.c IMU_running_CALLBACK():
  *   读数 → Madgwick 解算 → 四元数转欧拉角 → yaw 归一化到 [-180,180]。
  * 砍掉:Subject 发射方向偏置、撞击检测、自由落体检测。 */
+
+/* yaw 滑动平均滤波缓冲区 */
+#define YAW_FILTER_SIZE  5
+static float yaw_filter_buf[YAW_FILTER_SIZE] = {0};
+static uint8 yaw_filter_idx = 0;
+
 void kart_imu_update(void){
     if(IMU_Handle.FLAG_enable_running_CALLBACK){
         read_IMU(&IMU_data);                                    // 读一帧
@@ -228,10 +249,23 @@ void kart_imu_update(void){
         else if(IMU_Handle.Attitude.yaw<=-180){
             IMU_Handle.Attitude.yaw+=360;
         }
+
+        // 更新滑动平均滤波缓冲区
+        yaw_filter_buf[yaw_filter_idx] = IMU_Handle.Attitude.yaw;
+        yaw_filter_idx = (yaw_filter_idx + 1) % YAW_FILTER_SIZE;
     }
 }
 
 /* =========================== 取航向 =========================== */
 float kart_imu_get_yaw(void){
     return IMU_Handle.Attitude.yaw;
+}
+
+/* 取滤波后航向（5拍滑动平均，延迟25ms，抑制抖动）*/
+float kart_imu_get_yaw_filtered(void){
+    float sum = 0;
+    for(uint8 i = 0; i < YAW_FILTER_SIZE; i++){
+        sum += yaw_filter_buf[i];
+    }
+    return sum / (float)YAW_FILTER_SIZE;
 }

@@ -13,12 +13,13 @@
  * ------------------------------------------------------------------
  */
 
-/* 速度环默认 PID 参数 —— 悬空调参的起点,不是最终值。
- * 注意:这里的量纲是"脉冲/5ms",和 TopSpeed 的 m/s 不同,所以不能照抄它的
- *      Kp=200/Kd=4000,那套是给 m/s 量纲的。这里先给保守小值,上车用串口慢慢往上调。
+/* 速度环默认 PID 参数 —— 2026-07-17 上车调定并冻结。
+ * 量纲是"脉冲/5ms"。串口在线调参最终定为 Kp=200 / Ki=0.8 / Kd=0,
+ * 实测 I12≈I13 左右脉冲率拉平、稳态误差可接受,底层速度环到此冻结。
+ * (左右后轮机械差异由前轮转向的航向角度环处理,不在速度环加电子差速。)
  * i_max/out_max 的 out_max 给 KART_POWER_MAX_DUTY(满量程),让 PID 能用满输出范围。 */
-#define KART_SPEED_KP_DEFAULT          (10.0f)
-#define KART_SPEED_KI_DEFAULT          (0.0f)
+#define KART_SPEED_KP_DEFAULT          (200.0f)
+#define KART_SPEED_KI_DEFAULT          (0.8f)
 #define KART_SPEED_KD_DEFAULT          (0.0f)
 #define KART_SPEED_IMAX_DEFAULT        (3000.0f)
 #define KART_SPEED_OUTMAX_DEFAULT      ((float)KART_POWER_MAX_DUTY)
@@ -32,15 +33,26 @@ void kart_control_init(void)
     for(int i = 0; i < KART_SPEED_LPF_LEN; i++)
     {
         kart_speed.lpf_buf[i] = 0.0f;
+        kart_speed.lpf_right[i] = 0.0f;
     }
     kart_speed.lpf_idx     = 0;
     kart_speed.target      = 0.0f;
     kart_speed.meas_raw    = 0.0f;
     kart_speed.meas        = 0.0f;
+    kart_speed.meas_left   = 0.0f;
+    kart_speed.meas_right  = 0.0f;
     kart_speed.output_duty = 0;
+    kart_speed.output_left = 0;
+    kart_speed.output_right = 0;
     kart_speed.enable      = 0;         // 默认不输出,等串口/上层显式使能,防一上电就冲
 
     kart_pid_init(&kart_speed.pid,
+                  KART_SPEED_KP_DEFAULT,
+                  KART_SPEED_KI_DEFAULT,
+                  KART_SPEED_KD_DEFAULT,
+                  KART_SPEED_IMAX_DEFAULT,
+                  KART_SPEED_OUTMAX_DEFAULT);
+    kart_pid_init(&kart_speed.pid_right,
                   KART_SPEED_KP_DEFAULT,
                   KART_SPEED_KI_DEFAULT,
                   KART_SPEED_KD_DEFAULT,
@@ -81,24 +93,43 @@ void kart_control_speed_update(void)
     kart_speed.meas_raw = (float)(l + r) / 2.0f;
 
     /* 3. 滑动平均滤波 */
-    kart_speed.meas = kart_speed_lpf(kart_speed.meas_raw);
+    kart_speed.lpf_buf[kart_speed.lpf_idx] = (float)l;
+    kart_speed.lpf_right[kart_speed.lpf_idx] = (float)r;
+    kart_speed.lpf_idx++;
+    if(kart_speed.lpf_idx >= KART_SPEED_LPF_LEN) { kart_speed.lpf_idx = 0; }
+
+    float left_sum = 0.0f, right_sum = 0.0f;
+    for(int i = 0; i < KART_SPEED_LPF_LEN; i++)
+    {
+        left_sum += kart_speed.lpf_buf[i];
+        right_sum += kart_speed.lpf_right[i];
+    }
+    kart_speed.meas_left = left_sum / (float)KART_SPEED_LPF_LEN;
+    kart_speed.meas_right = right_sum / (float)KART_SPEED_LPF_LEN;
+    kart_speed.meas = (kart_speed.meas_left + kart_speed.meas_right) * 0.5f;
 
     /* 4. 没使能就输出 0、清 PID 记忆,直接返回(悬空/急停态) */
     if(!kart_speed.enable)
     {
         kart_speed.output_duty = 0;
+        kart_speed.output_left = 0;
+        kart_speed.output_right = 0;
         kart_pid_reset(&kart_speed.pid);
+        kart_pid_reset(&kart_speed.pid_right);
         power_set_rear_duty(0, 0);
         return;
     }
 
     /* 5. 误差 = 目标 - 实测,喂 PID */
-    float err = kart_speed.target - kart_speed.meas;
-    kart_pid_update(&kart_speed.pid, err);
+    kart_pid_update(&kart_speed.pid, kart_speed.target - kart_speed.meas_left);
+    kart_pid_update(&kart_speed.pid_right, kart_speed.target - kart_speed.meas_right);
 
     /* 6. 直接赋值(不累加),下发两后轮 */
-    kart_speed.output_duty = (int16)kart_speed.pid.output;
-    power_set_rear_duty(kart_speed.output_duty, kart_speed.output_duty);
+    kart_speed.output_left = (int16)kart_speed.pid.output;
+    kart_speed.output_right = (int16)kart_speed.pid_right.output;
+    kart_speed.output_duty = (int16)(((int32)kart_speed.output_left +
+                                      (int32)kart_speed.output_right) / 2);
+    power_set_rear_duty(kart_speed.output_left, kart_speed.output_right);
 }
 
 /* =========================== 在线设置接口 =========================== */
@@ -108,6 +139,7 @@ void kart_control_set_enable(uint8 en)
     if(!kart_speed.enable)
     {
         kart_pid_reset(&kart_speed.pid);    // 关的时候清记忆,下次开不带旧账
+        kart_pid_reset(&kart_speed.pid_right);
     }
 }
 
@@ -122,11 +154,19 @@ void kart_control_set_pid(float kp, float ki, float kd)
     kart_speed.pid.Kp = kp;
     kart_speed.pid.Ki = ki;
     kart_speed.pid.Kd = kd;
+    kart_speed.pid_right.Kp = kp;
+    kart_speed.pid_right.Ki = ki;
+    kart_speed.pid_right.Kd = kd;
     kart_pid_reset(&kart_speed.pid);
+    kart_pid_reset(&kart_speed.pid_right);
 }
 
 /* =========================== 取值接口(给 VOFA/调试)=========================== */
 float kart_control_get_target(void) { return kart_speed.target; }
 float kart_control_get_meas(void)   { return kart_speed.meas; }
 int16 kart_control_get_output(void) { return kart_speed.output_duty; }
+float kart_control_get_left_meas(void) { return kart_speed.meas_left; }
+float kart_control_get_right_meas(void) { return kart_speed.meas_right; }
+int16 kart_control_get_left_output(void) { return kart_speed.output_left; }
+int16 kart_control_get_right_output(void) { return kart_speed.output_right; }
 uint8 kart_control_is_enabled(void) { return kart_speed.enable; }

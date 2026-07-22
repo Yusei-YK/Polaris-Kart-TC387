@@ -18,20 +18,14 @@
  * 保留照搬的:10 点滑动平均滤波、位置式 PID、目标速度斜坡(后面接规划时用)。
  * ------------------------------------------------------------------
  * 调用节拍:kart_control_speed_update() 必须放 5ms 定时中断里,和 IMU 同拍。
- * 单位说明:悬空调参阶段速度单位用"编码器脉冲/5ms",不折算 m/s;
- *          等地面实测标定出 KART_ENC_PULSE_TO_M 后再换算成真实车速。
+ * 单位说明:当前速度环仍用"编码器脉冲/5ms"在线调初值;
+ *          左右距离标定量已分开放在 board_pins.h,后续速度环再统一改成 m/s。
  * ------------------------------------------------------------------
  */
 
 /* 滑动平均滤波窗口长度(照搬 TopSpeed WHEEL_SPD_LPF_TEMP_LEN) */
 #define KART_SPEED_LPF_LEN              (10)
 
-/* 每编码器脉冲对应的米数 —— 占位,待地面实测标定(量一段实际距离÷脉冲数)。
- * 悬空调参用不到它,先留着,接航位推算/真实车速时再填真值。
- * 标定备忘:后轮齿比 40:20 = 2:1(电机端转 2 圈,轮子转 1 圈)。
- *          编码器若装在电机端,轮子每转 = 编码器 2×线数×倍频 个脉冲;
- *          装在轮端则直接对应。标定时按实际安装位置换算。 */
-#define KART_ENC_PULSE_TO_M            (0.001f)
 #define KART_REAR_GEAR_RATIO           (2.0f)      // 后轮减速比 40:20,标定真实车速时用
 
 /* -------------------------------------------------------------------------
@@ -39,6 +33,8 @@
  * ------------------------------------------------------------------------- */
 typedef struct
 {
+    /* pid 保持为左轮控制器，兼容现有在线调参命令。 */
+    kart_pid_t  pid_right;
     kart_pid_t  pid;                            // 速度环 PID(复用 kart_pid)
     uint8       enable;                         // =1 才输出,=0 输出 0(悬空/急停用)
 
@@ -49,7 +45,12 @@ typedef struct
     float       lpf_buf[KART_SPEED_LPF_LEN];    // 滑动平均缓冲区
     int         lpf_idx;                        // 缓冲区写指针(环形)
 
-    int16       output_duty;                    // 速度环算出的 duty(下发给两后轮)
+    int16       output_duty;                    // 左右输出平均值，兼容原 VOFA ch2
+    float       meas_left;
+    float       meas_right;
+    float       lpf_right[KART_SPEED_LPF_LEN];
+    int16       output_left;
+    int16       output_right;
 } kart_speed_ctrl_t;
 
 /* 让调试输出能读到速度环内部状态(VOFA 波形要用) */
@@ -67,5 +68,10 @@ float kart_control_get_target(void);            // 目标速度
 float kart_control_get_meas(void);              // 滤波后实测速度
 int16 kart_control_get_output(void);            // 当前输出 duty
 uint8 kart_control_is_enabled(void);            // 速度环是否使能(主循环用它仲裁:谁来管后轮 duty)
+
+float kart_control_get_left_meas(void);
+float kart_control_get_right_meas(void);
+int16 kart_control_get_left_output(void);
+int16 kart_control_get_right_output(void);
 
 #endif

@@ -16,6 +16,7 @@ typedef struct
 
 void kart_encoder_init(void);
 void kart_encoder_update(void);
+void kart_encoder_reset(void);
 int16 kart_encoder_get_left_delta(void);
 int16 kart_encoder_get_right_delta(void);
 int16 kart_encoder_get_left_raw(void);
