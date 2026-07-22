@@ -35,9 +35,12 @@
 
 #include "isr_config.h"
 #include "isr.h"
+#include "kart_imu.h"
+#include "kart_control.h"
+#include "kart_odom.h"
+#include "kart_power.h"
+#include "kart_horn.h"
 #include "kart_remote.h"
-#include "kart_imu.h"                                   // 5ms 中断里要调 kart_imu_update()
-#include "kart_control.h"                               // 5ms 中断里要调 kart_control_speed_update()
 
 // ����TCϵ��Ĭ���ǲ�֧���ж�Ƕ�׵ģ�ϣ��֧���ж�Ƕ����Ҫ���ж���ʹ�� interrupt_global_enable(0); �������ж�Ƕ��
 // �򵥵�˵ʵ���Ͻ����жϺ�TCϵ�е�Ӳ���Զ������� interrupt_global_disable(); ���ܾ���Ӧ�κε��жϣ������Ҫ�����Լ��ֶ����� interrupt_global_enable(0); �������жϵ���Ӧ��
@@ -45,22 +48,27 @@
 // **************************** PIT�жϺ��� ****************************
 IFX_INTERRUPT(cc60_pit_ch0_isr, CCU6_0_CH0_INT_VECTAB_NUM, CCU6_0_CH0_ISR_PRIORITY)
 {
-    interrupt_global_enable(0);                     // �����ж�Ƕ��
+    interrupt_global_enable(0);
     pit_clear_flag(CCU60_CH0);
 
-    kart_imu_update();                              // 5ms 周期:读 IMU + Madgwick 解算航向
-    kart_control_speed_update();                    // 5ms 周期:读编码器→滤波→PID→算 duty(内部按 enable 决定是否下发)
+    kart_imu_update();
+    kart_control_speed_update();
+    kart_odom_update();
+
+    if(!kart_control_is_enabled())
+    {
+        power_force_rear_pwm_zero();
+    }
 
 }
 
 
 IFX_INTERRUPT(cc60_pit_ch1_isr, CCU6_0_CH1_INT_VECTAB_NUM, CCU6_0_CH1_ISR_PRIORITY)
 {
-    interrupt_global_enable(0);                     // �����ж�Ƕ��
+    interrupt_global_enable(0);                     // 开启中断嵌套
     pit_clear_flag(CCU60_CH1);
 
-
-
+    kart_horn_isr();
 
 }
 
@@ -152,12 +160,9 @@ IFX_INTERRUPT(exti_ch3_ch7_isr, EXTI_CH3_CH7_INT_VECTAB_NUM, EXTI_CH3_CH7_INT_PR
         exti_flag_clear(ERU_CH3_REQ6_P02_0);
         camera_vsync_handler();                     // ����ͷ�����ɼ�ͳһ�ص�����
     }
-    if(exti_flag_get(ERU_CH7_REQ16_P15_1))          // ͨ��7�ж�
+    if(exti_flag_get(ERU_CH7_REQ16_P15_1))
     {
         exti_flag_clear(ERU_CH7_REQ16_P15_1);
-
-
-
 
     }
 }
@@ -236,10 +241,7 @@ IFX_INTERRUPT(uart3_tx_isr, UART3_INT_VECTAB_NUM, UART3_TX_INT_PRIO)
 IFX_INTERRUPT(uart3_rx_isr, UART3_INT_VECTAB_NUM, UART3_RX_INT_PRIO)
 {
     interrupt_global_enable(0);                     // �����ж�Ƕ��
-    kart_remote_uart_callback();                     // UART3 borrowed from GPS for SBUS receiver
-
-
-
+    kart_remote_rx_callback();                      // SBUS 遥控接收:逐字节攒帧解析(UART3,P15.7 RX)
 }
 
 

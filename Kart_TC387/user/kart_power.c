@@ -1,9 +1,8 @@
 #include "kart_power.h"
-#include "kart_remote.h"
 
-Power_Output_Struct Power_now = {0};
+volatile Power_Output_Struct Power_now = {0};
 
-static int16 kart_last_motor_duty = 0;
+static volatile int16 kart_last_motor_duty = 0;
 static uint16 kart_power_check_tick = 0;
 static uint8 kart_power_check_done = 0;
 
@@ -28,6 +27,51 @@ static void kart_set_dir_pwm(gpio_pin_enum dir_pin, pwm_channel_enum pwm_pin, in
         gpio_low(dir_pin);
         pwm_set_duty(pwm_pin, (uint32)(-out));
     }
+}
+
+/* 变化率限制器:把 applied 朝 target 每拍最多挪 step,并禁止穿零跳变。
+ * 返回本拍实际应输出的 duty。dwell 指针记录零点驻留剩余拍数(反向前强制停顿)。
+ * 规则见 kart_power.h 顶部注释:降幅/停车瞬时(安全),升幅限速,反向先归零+驻留。*/
+static int16 kart_slew_step(int16 target, int16 applied, uint16 *dwell, int16 step)
+{
+#if KART_SLEW_ENABLE
+    /* 反向请求:目标与当前输出异号(且都非零),先强制归零,不允许直接反向驱动 */
+    if(((int32)target * (int32)applied) < 0)
+    {
+        *dwell = KART_SLEW_ZERO_DWELL_TICKS;    /* 到零后要驻留,给电机泄速时间 */
+        target = 0;
+    }
+
+    /* 已在零点且处于驻留期:锁 0 直到驻留结束,期间无视反向目标 */
+    if(applied == 0 && *dwell > 0)
+    {
+        (*dwell)--;
+        return 0;
+    }
+
+    /* 降幅(朝 0 靠)不限速:减小电流/滑行是安全的,含急停到 0 */
+    if((target >= 0 && applied >= 0 && target < applied) ||
+       (target <= 0 && applied <= 0 && target > applied))
+    {
+        return target;
+    }
+
+    /* 升幅(远离 0)限速:每拍最多挪 step */
+    if(target > applied)
+    {
+        applied += step;
+        if(applied > target) { applied = target; }
+    }
+    else if(target < applied)
+    {
+        applied -= step;
+        if(applied < target) { applied = target; }
+    }
+    return applied;
+#else
+    (void)dwell; (void)step;
+    return target;
+#endif
 }
 
 void power_set_motor_duty(int16 duty)
@@ -68,14 +112,33 @@ void power_init(void)
 
 void power_sync(void)
 {
-    if(Power_now.Motor_Duty != kart_last_motor_duty)
+    static int16  steer_applied = 0, left_applied = 0, right_applied = 0;
+    static uint16 steer_dwell = 0, left_dwell = 0, right_dwell = 0;
+    int16 t_servo, t_left, t_right, t_motor;
+    uint32 primask;
+
+    /* [临界区] 成组快照 Power_now 四个 duty，避免读到 5ms 中断写一半的撕裂值。
+     * 关中断只包 4 条赋值（几十ns），不包 slew/PWM 硬件调用，不影响中断实时性。 */
+    primask = interrupt_global_disable();
+    t_servo = Power_now.Servo_Duty;
+    t_left  = Power_now.Left_Rear_Duty;
+    t_right = Power_now.Right_Rear_Duty;
+    t_motor = Power_now.Motor_Duty;
+    interrupt_global_enable(primask);
+
+    if(t_motor != kart_last_motor_duty)
     {
-        power_set_motor_duty(Power_now.Motor_Duty);
+        power_set_motor_duty(t_motor);
     }
 
-    kart_set_dir_pwm(KART_STEER_DIR_PIN, KART_STEER_PWM_PIN, Power_now.Servo_Duty, KART_STEER_MOTOR_SIGN);
-    kart_set_dir_pwm(KART_LEFT_REAR_DIR_PIN, KART_LEFT_REAR_PWM_PIN, Power_now.Left_Rear_Duty, KART_LEFT_MOTOR_SIGN);
-    kart_set_dir_pwm(KART_RIGHT_REAR_DIR_PIN, KART_RIGHT_REAR_PWM_PIN, Power_now.Right_Rear_Duty, KART_RIGHT_MOTOR_SIGN);
+    /* 每路先过变化率限制器,再写 PWM。target 来自速度环/仲裁,applied 是上拍实际输出。 */
+    steer_applied = kart_slew_step(t_servo, steer_applied, &steer_dwell, KART_SLEW_STEER_STEP);
+    left_applied  = kart_slew_step(t_left,  left_applied,  &left_dwell,  KART_SLEW_REAR_STEP);
+    right_applied = kart_slew_step(t_right, right_applied, &right_dwell, KART_SLEW_REAR_STEP);
+
+    kart_set_dir_pwm(KART_STEER_DIR_PIN, KART_STEER_PWM_PIN, steer_applied, KART_STEER_MOTOR_SIGN);
+    kart_set_dir_pwm(KART_LEFT_REAR_DIR_PIN, KART_LEFT_REAR_PWM_PIN, left_applied, KART_LEFT_MOTOR_SIGN);
+    kart_set_dir_pwm(KART_RIGHT_REAR_DIR_PIN, KART_RIGHT_REAR_PWM_PIN, right_applied, KART_RIGHT_MOTOR_SIGN);
 }
 
 void power_stop(void)
@@ -84,6 +147,25 @@ void power_stop(void)
     power_set_steer_duty(0);
     Power_now.Debug_Stage = 0;
     power_sync();
+}
+
+/* 硬兜底：直接写三路 PWM=0，绕过 Power_now/主循环/slew。
+ * 专给 5ms 中断失能分支调，作最后防线：主循环卡死也能停。
+ * 不碰 DIR（duty=0 方向无意义）、不碰 Power_now（不跟主循环抢结构体）。*/
+void power_force_pwm_zero(void)
+{
+    pwm_set_duty(KART_STEER_PWM_PIN, 0);
+    pwm_set_duty(KART_LEFT_REAR_PWM_PIN, 0);
+    pwm_set_duty(KART_RIGHT_REAR_PWM_PIN, 0);
+}
+
+/* 硬兜底(只清后轮版):直接写两路后轮 PWM=0,不碰转向。
+ * 专给 5ms 中断失能分支调:速度环未使能时急停后轮,但让转向串级独立驱动
+ * (复现/调航向时速度环常关,转向仍需能动)。 */
+void power_force_rear_pwm_zero(void)
+{
+    pwm_set_duty(KART_LEFT_REAR_PWM_PIN, 0);
+    pwm_set_duty(KART_RIGHT_REAR_PWM_PIN, 0);
 }
 
 uint8 power_check_is_done(void)
@@ -167,140 +249,4 @@ void power_check_poll(void)
 #else
     Power_now.Debug_Stage = 0;
 #endif
-}
-
-volatile kart_remote_t kart_remote = {0};
-
-static uint8 kart_remote_raw[KART_REMOTE_FRAME_LEN] = {0};
-static volatile uint16 kart_remote_timeout_ticks = 0;
-
-static int16 kart_remote_limit(int32 value)
-{
-    if(value > 10000)  { return 10000; }
-    if(value < -10000) { return -10000; }
-    return (int16)value;
-}
-
-static int16 kart_remote_map_channel(uint16 value, int8 reverse)
-{
-    int32 out = 0;
-
-    if(value > KART_REMOTE_CH_MID - KART_REMOTE_CH_DEAD_ZONE &&
-       value < KART_REMOTE_CH_MID + KART_REMOTE_CH_DEAD_ZONE)
-    {
-        return 0;
-    }
-
-    if(value < KART_REMOTE_CH_MID)
-    {
-        out = -((int32)(KART_REMOTE_CH_MID - KART_REMOTE_CH_DEAD_ZONE - value) * 10000) /
-              (KART_REMOTE_CH_MID - KART_REMOTE_CH_DEAD_ZONE - KART_REMOTE_CH_MIN);
-    }
-    else
-    {
-        out = ((int32)(value - KART_REMOTE_CH_MID - KART_REMOTE_CH_DEAD_ZONE) * 10000) /
-              (KART_REMOTE_CH_MAX - KART_REMOTE_CH_MID - KART_REMOTE_CH_DEAD_ZONE);
-    }
-
-    if(reverse)
-    {
-        out = -out;
-    }
-
-    return kart_remote_limit(out);
-}
-
-static void kart_remote_parse_frame(uint8 *buffer)
-{
-    uint8 num = 0;
-    uint16 ch4 = 0;
-
-    kart_remote.channel[num++] = (buffer[1] | buffer[2] << 8) & 0x07FF;
-    kart_remote.channel[num++] = (buffer[2] >> 3 | buffer[3] << 5) & 0x07FF;
-    kart_remote.channel[num++] = (buffer[3] >> 6 | buffer[4] << 2 | buffer[5] << 10) & 0x07FF;
-    kart_remote.channel[num++] = (buffer[5] >> 1 | buffer[6] << 7) & 0x07FF;
-    kart_remote.channel[num++] = (buffer[6] >> 4 | buffer[7] << 4) & 0x07FF;
-    kart_remote.channel[num++] = (buffer[7] >> 7 | buffer[8] << 1 | buffer[9] << 9) & 0x07FF;
-
-    kart_remote.online = ((buffer[23] & KART_REMOTE_FAILSAFE_FLAG) == 0) ? 1 : 0;
-    kart_remote.steering = kart_remote_map_channel(kart_remote.channel[0], 1);
-    kart_remote.throttle = kart_remote_map_channel(kart_remote.channel[1], 0);
-
-    ch4 = kart_remote.channel[3];
-    if(ch4 >= KART_REMOTE_ENABLE_CH_HIGH)
-    {
-        kart_remote.switch_stage = 2;
-    }
-    else if(ch4 >= KART_REMOTE_ENABLE_CH_LOW)
-    {
-        kart_remote.switch_stage = 1;
-    }
-    else
-    {
-        kart_remote.switch_stage = 0;
-    }
-
-    kart_remote.frame_ready = 1;
-    kart_remote_timeout_ticks = KART_REMOTE_TIMEOUT_TICKS;
-}
-
-void kart_remote_init(void)
-{
-    uart_sbus_init(BOARD_GPS_UART_INDEX,
-                   KART_REMOTE_UART_BAUD,
-                   BOARD_GPS_UART_TX_PIN,
-                   BOARD_GPS_UART_RX_PIN);
-    kart_remote_timeout_ticks = 0;
-}
-
-void kart_remote_uart_callback(void)
-{
-    static uint8 length = 0;
-    uint8 dat = 0;
-
-    if(uart_query_byte(BOARD_GPS_UART_INDEX, &dat) == 0)
-    {
-        return;
-    }
-
-    if(length == 0 && dat != KART_REMOTE_FRAME_HEAD)
-    {
-        return;
-    }
-
-    kart_remote_raw[length++] = dat;
-
-    if(length >= KART_REMOTE_FRAME_LEN)
-    {
-        if(kart_remote_raw[0] == KART_REMOTE_FRAME_HEAD &&
-           kart_remote_raw[KART_REMOTE_FRAME_LEN - 1] == KART_REMOTE_FRAME_TAIL)
-        {
-            kart_remote_parse_frame(kart_remote_raw);
-        }
-        length = 0;
-    }
-}
-
-void kart_remote_poll(void)
-{
-    if(kart_remote_timeout_ticks > 0)
-    {
-        kart_remote_timeout_ticks--;
-    }
-    else
-    {
-        kart_remote.online = 0;
-        kart_remote.frame_ready = 0;
-    }
-
-    if(kart_remote.online && kart_remote.switch_stage == 2)
-    {
-        power_set_rear_duty(kart_remote.throttle, kart_remote.throttle);
-        power_set_steer_duty(kart_remote.steering);
-    }
-    else
-    {
-        power_set_rear_duty(0, 0);
-        power_set_steer_duty(0);
-    }
 }

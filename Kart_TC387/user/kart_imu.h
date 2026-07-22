@@ -5,16 +5,16 @@
 #include "kart_calc.h"
 
 /*
- * 卡丁车航向解算库(IMU963RA + Madgwick 6DOF)
+ * 卡丁车航向解算库(IMU660RA + Madgwick 6DOF)
  * ------------------------------------------------------------------
- * 移植自 TopSpeed 的 IMU.c(USE_6DOF_AHRS + USE_IMU963RA 两个分支)。
+ * 姿态算法参考 TopSpeed，传感器读数按本车 IMU660RA 重新适配。
  * 移植原则:数学部分一字不改照搬。相对原工程做了三处"减法":
  *   1. 砍掉 Subject 发射方向偏置(科目一以后再加,现在只要纯 yaw)
  *   2. 砍掉撞击检测、自由落体检测(卡丁车用不上)
  *   3. 零偏标定不写 Flash、不刷 IPS 屏,只算到内存里(先跑起来)
  * 结构体名、字段名尽量与 TopSpeed 保持一致,方便以后接科目状态机。
  * ------------------------------------------------------------------
- * 硬件:IMU963RA 挂 SPI_0,引脚见 board_pins.h / 逐飞库 zf_device_imu963ra.h。
+ * 硬件:IMU660RA 挂 SPI_0,引脚见 board_pins.h / 逐飞库 zf_device_imu660ra.h。
  * 采样:200Hz(5ms),必须由 5ms 定时中断稳定驱动 kart_imu_update()。
  * ------------------------------------------------------------------
  */
@@ -73,6 +73,7 @@ extern IMU_Handle_struct IMU_Handle;
 void  kart_imu_init(void);      // 初始化 + 上电静止标定零偏(车必须放稳别动)
 void  kart_imu_update(void);    // 读数 + Madgwick 解算,放 5ms 定时中断里调
 float kart_imu_get_yaw(void);   // 取当前航向角(度,-180~180)
+float kart_imu_get_yaw_filtered(void);  // 取滤波后航向角(5拍滑动平均,抑制抖动)
 
 /* --- 内部函数(照搬 TopSpeed,一并暴露方便调试) --- */
 void reset_attitude(void);              // 把四元数复位成单位四元数(航向清零)
