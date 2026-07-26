@@ -16,14 +16,10 @@
  *
  * 设计边界：
  * - 5 ms中断只增加tick，不在中断内读传感器或发串口；
- * - 主循环每4 tick(50Hz)发送一帧：31个小端float32 + 帧尾00 00 80 7F；
+ * - 主循环每4 tick(50Hz)发送一帧：33个小端float32 + 帧尾00 00 80 7F；
  * - VOFA选JustFloat即可实时显示并导出CSV；不用printf、动态内存、DMA；
  * - 继续沿用原调试串口文件名，避免扩大工程改动。
  */
-
-#define KART_LOG_MAGIC              (0x474F4C4BU) /* 小端字节：K L O G */
-#define KART_LOG_VERSION            (1U)
-#define KART_LOG_END                (0x55AAU)
 
 #define KART_LOG_CHANNELS           (33U)  /* VOFA JustFloat 浮点通道数 */
 
@@ -41,11 +37,11 @@ static uint16 kart_log_skipped_frames = 0U;
 
 /* ===== VOFA 发送环形缓冲(非阻塞后台发送)=====
  * 底层 uart_write_buffer→IfxAsclin_write8 是全阻塞:每字节写完 spin 等 TX FIFO 排空。
- * 一帧 25ch=104 字节 @460800 直发≈2.26ms,放 5ms 调度里会把控制拍打爆。
+ * 一帧 33ch=136 字节 @460800 直发≈2.95ms,放 5ms 调度里会把控制拍打爆。
  * 方案:poll 只把整帧塞进环形缓冲;background 每次主循环 spin 排 ≤16 字节
  * (=TX FIFO 深度,单次阻塞≤347us),loop 空转多拍即可发完整帧,永不长阻塞控制窗口。
  * head/tail 均只在主循环访问(poll 与 background 同在主循环,无 ISR 并发)。 */
-#define KART_LOG_RING_SIZE          (512U)  /* 2 的幂,位与回绕;容纳数帧 104 字节 */
+#define KART_LOG_RING_SIZE          (512U)  /* 2 的幂,位与回绕;容纳数帧 136 字节 */
 #define KART_LOG_TX_CHUNK           (16U)   /* 后台单次最多发字节数(TX FIFO 深度) */
 
 static uint8  kart_log_ring[KART_LOG_RING_SIZE];

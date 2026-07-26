@@ -142,16 +142,11 @@
 #define BOARD_MIC_ADC_CH               (ADC0_CH0_A0)    /* 硅麦采集(发车声控) */
 #define BOARD_VBAT_ADC_CH              (ADC1_CH3_A11)   /* 电池电压检测,分压比待硬件标注 */
 
-/* ---------------- 灯板 TLD7002(第一版,交接文档 3.6)---------------- */
-/* 灯板 7x15 单色点阵,TLD7002驱动 + 3位行选译码。P14.0/P14.1 对应 UART0。 */
-#define BOARD_LED_UART_INDEX           (UART_0)
-#define BOARD_LED_UART_TX_PIN          (UART0_TX_P14_0)
-#define BOARD_LED_UART_RX_PIN          (UART0_RX_P14_1)
-#define BOARD_LED_UART_BAUD            (2000000)    /* TLD7002波特率,待硬件确认 */
-#define BOARD_LED_ROW_A0_PIN           (P20_8)
-#define BOARD_LED_ROW_A1_PIN           (P20_9)
-#define BOARD_LED_ROW_A2_PIN           (P20_10)
-#define BOARD_LED_ROW_EN_PIN           (P33_8)
+/* ---------------- 灯板 TLD7002 ---------------- */
+/* 引脚定义不在这里 —— 见 zf_device_dot_matrix_screen.h(行译码 A0/A1/A2/EN、SYNC)
+ * 与 zf_device_tld7002.h(TLD7002_UART_* = ASCLIN1 @2M,P11.12/P11.10)。
+ * 注意:第一版曾把灯板挂 UART0/P14.0/P14.1,已废弃且不可复用 ——
+ * P14.x 属 boot 相关引脚,占用会导致 MCU 下载不进去(见项目根 不建议使用的引脚.txt)。 */
 
 #define KART_MAIN_LOOP_PERIOD_MS        (5)
 

@@ -89,7 +89,6 @@ void dot_matrix_screen_clear            (void);
 void dot_matrix_screen_set_brightness   (uint16 brightness);
 void dot_matrix_screen_set_all_on       (uint8 on);
 void dot_matrix_screen_test_row0_static (uint16 hold_ms);
-void dot_matrix_screen_test_all_on_scan (uint8 en_active_high);
 void dot_matrix_screen_test_rows_static (void);
 void dot_matrix_screen_test_all_on_sync (void);
 void dot_matrix_screen_init             (void);

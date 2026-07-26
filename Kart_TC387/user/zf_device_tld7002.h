@@ -78,7 +78,6 @@ void    tld7002_init            (void);
 
 /* 诊断用:只重跑芯片 init(不重配 UART/GPIO/fifo),返回 initDevice 返回码。
  * 0=NO_ERR(芯片正确应答) 1=COMM_ERROR(无有效应答)。供点阵屏自检每秒重试一次。 */
-int     tld7002_reinit_device   (uint8 tld7002_id);
 
 
 

@@ -5,12 +5,11 @@
 #include "board_pins.h"
 
 /*
- * 科目一TF卡串口日志。
- * UART1/P33.12 TX，460800 baud，VOFA JustFloat(31通道float32+帧尾)。
+ * 科目一串口日志。
+ * UART_10/P13.0 TX，460800 baud，VOFA JustFloat(33通道float32+帧尾,共136字节)。
  * 5 ms中断只维护tick，组帧和发送全部放在CPU0主循环。
  */
 #define KART_LOG_PERIOD_TICKS           (4U)   /* 4 * 5 ms = 20 ms，50 Hz */
-#define KART_LOG_FRAME_SIZE             (64U)
 
 void kart_debug_uart_init(void);
 

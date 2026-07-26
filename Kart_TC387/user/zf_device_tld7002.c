@@ -230,24 +230,3 @@ void tld7002_init(void)
     tld7002_tx_after_init = tld7002_tx_count;    /* 芯片应答字节 = rx_after_init - tx_after_init */
     system_delay_us_register(100);
 }
-
-//-------------------------------------------------------------------------------------------------------------------
-//  函数简介      TLD7002 芯片 init 重跑(诊断用)
-//  参数说明      tld7002_id      芯片ID 默认为1
-//  返回参数      int             initDevice 返回码 0=NO_ERR 1=COMM_ERROR
-//  注意事项      只重跑芯片侧 PM_CHANGE/HWCR/DC_UPDATE 序列,不重配 UART/GPIO/fifo。
-//                供点阵屏自检每秒重试,观察是否偶发能通(排"芯片未上电/上电慢"的可能)。
-//-------------------------------------------------------------------------------------------------------------------
-int tld7002_reinit_device(uint8 tld7002_id)
-{
-    int err;
-
-    fifo_clear(&tld7002_fifo);
-    err = (int)TLD7002initDevice(&tld7002_device, tld7002_id);
-    tld7002_init_err      = err;
-    tld7002_rx_after_init = tld7002_rx_count;
-    tld7002_tx_after_init = tld7002_tx_count;
-    system_delay_us_register(100);
-
-    return err;
-}

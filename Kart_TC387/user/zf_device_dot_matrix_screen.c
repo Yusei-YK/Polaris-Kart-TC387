@@ -76,7 +76,6 @@
 
 /* 初值填空格(0x20):防止首个全帧 memcpy 前 scan() 用零初值算 font[0-' ']=font[-32] 越界读 */
 int8    dot_matrix_screen_data[3]        = {' ', ' ', ' '};
-int8    dot_matrix_screen_data_backup[3] = {' ', ' ', ' '};
 uint16  dot_matrix_screen_brightness = 10000;
 uint8   dot_matrix_screen_all_on = 0;   // =1 时忽略字库,15 列全亮(标定中指示)
 
@@ -430,6 +429,12 @@ void dot_matrix_screen_test_row0_static(uint16 hold_ms)
     uint8  i;
     uint16 t;
 
+    /* 独占硬件(2026-07-26 修):置 probe 让 scan() 空转。
+     * 原来靠"扫描由 SYNC 驱动、这里不开 EXTI"隐式独占,
+     * 但 DOT_MATRIX_SCREEN_USE_PIT_SCAN=1 后扫描改由 1ms PIT 驱动,
+     * 不置 probe 就会被 scan() 抢 A0/A1/A2/EN/duty → 本函数不再是"静态"。 */
+    dot_matrix_screen_probe = 1;
+
     /* 选中第 0 行:A0/A1/A2 = 000 */
     gpio_low(DOT_MATRIX_SCREEN_ROW_A0_PIN);
     gpio_low(DOT_MATRIX_SCREEN_ROW_A1_PIN);
@@ -524,46 +529,6 @@ void dot_matrix_screen_test_row0_static(uint16 hold_ms)
 }
 
 //-------------------------------------------------------------------------------------------------------------------
-//  函数简介      整屏全亮扫描自检(死循环,永不返回):7 行逐行快扫,每行 15 列全拉满
-//  参数说明      en_active_high  1=EN 高有效(拉高选中行)  0=EN 低有效(拉低选中行)
-//  返回参数      void(死循环)
-//  说明          肉眼看整块点阵全亮。en_active_high 传 0/1 两次烧录对比,哪个亮就是对的极性。
-//                行线 15 列全满,若某行不亮 → 该行 238 输出/行驱动坏;若整屏黑 → 列(TLD7002)或供电。
-//-------------------------------------------------------------------------------------------------------------------
-void dot_matrix_screen_test_all_on_scan(uint8 en_active_high)
-{
-    uint8 row, i;
-
-    for(;;)
-    {
-        for(row = 0; row < DOT_MATRIX_SCREEN_ROW_NUM; row++)
-        {
-            /* 消隐:先禁用译码器再改行地址,防拖影 */
-            if(en_active_high) gpio_low(DOT_MATRIX_SCREEN_ROW_EN_PIN);
-            else               gpio_high(DOT_MATRIX_SCREEN_ROW_EN_PIN);
-
-            /* 行地址 A0/A1/A2 = row 的低三位 */
-            if(row & 0x01) gpio_high(DOT_MATRIX_SCREEN_ROW_A0_PIN); else gpio_low(DOT_MATRIX_SCREEN_ROW_A0_PIN);
-            if(row & 0x02) gpio_high(DOT_MATRIX_SCREEN_ROW_A1_PIN); else gpio_low(DOT_MATRIX_SCREEN_ROW_A1_PIN);
-            if(row & 0x04) gpio_high(DOT_MATRIX_SCREEN_ROW_A2_PIN); else gpio_low(DOT_MATRIX_SCREEN_ROW_A2_PIN);
-
-            /* 15 列全拉满 */
-            for(i = 0; 15 > i; i++)
-            {
-                tld7002_duty[i] = dot_matrix_screen_brightness;
-            }
-            tld7002_set_duty(1);
-
-            /* 使能该行点亮 */
-            if(en_active_high) gpio_high(DOT_MATRIX_SCREEN_ROW_EN_PIN);
-            else               gpio_low(DOT_MATRIX_SCREEN_ROW_EN_PIN);
-
-            system_delay_ms(1);     /* 每行驻留 1ms,7 行≈7ms 一帧,肉眼常亮 */
-        }
-    }
-}
-
-//-------------------------------------------------------------------------------------------------------------------
 //  函数简介      静态逐行硬件排查(死循环,永不返回):15 列只写一次全亮,逐行切地址每行保持 1s
 //  参数说明      void
 //  返回参数      void(死循环)
@@ -579,9 +544,13 @@ void dot_matrix_screen_test_rows_static(void)
     uint8 i;
     uint8 row;
 
-    /* 关键:先关 SYNC 中断,否则 scan() 会与本静态测试抢 EN/地址/列数据 → 乱闪。
-     * (init() 里已 exti_init 开了中断,静态测试必须独占硬件才能真正\"静态\"。) */
-    exti_disable(DOT_MATRIX_SCREEN_SYNC_PIN);
+    /* 独占硬件(2026-07-26 修):必须置 probe,不能只关 EXTI。
+     * 原来只 exti_disable() —— 那在 SYNC 驱动扫描的年代成立;
+     * 现在 DOT_MATRIX_SCREEN_USE_PIT_SCAN=1,扫描时基是 1ms PIT(CCU61_CH0),
+     * 关 EXTI 根本停不掉 scan(),本函数会被抢 EN/地址/列数据 → 乱闪,
+     * 也就是说改软扫之后这个诊断工具一直是坏的。probe=1 才真能独占。 */
+    dot_matrix_screen_probe = 1;
+    exti_disable(DOT_MATRIX_SCREEN_SYNC_PIN);   /* SYNC 已降级为诊断计数,顺手关掉省中断 */
 
     gpio_low(DOT_MATRIX_SCREEN_ROW_EN_PIN);     /* 先全消隐 */
 
@@ -629,16 +598,12 @@ void dot_matrix_screen_test_rows_static(void)
 //  函数简介      静态点亮 + SYNC 测频探针(死循环,永不返回)
 //  参数说明      void
 //  返回参数      void(死循环)
-//  说明          2026-07-26 上一版自检的三个自毁点已全部去掉:
-//                  ①只置 all_on 标志 —— 而 all_on 只在 scan() 里才展开成 duty,
-//                    scan() 不跑时 duty[0..14] 恒为 0 → 那版根本不可能亮;现直接写 duty。
-//                  ②每秒 tld7002_reinit_device() —— 内含 PM_CHANGE(INIT)x2 会关掉全部输出,
-//                    等于每秒把灯灭一次;现只用开机那一次 init,循环里绝不 reinit。
-//                  ③delay_ms(1000) 期间不刷占空比 —— TLD7002 通信看门狗 2000ms
-//                    (otp_reg[33]=0x8007 → DIAG_WDT_SET=7),现每 10ms 重发一次喂狗。
-//
-//                本函数置 dot_matrix_screen_probe=1 让 scan() 空转,独占行译码硬件;
-//                15 列写满,7 行逐行各静态点亮 1s;EXTI 保持开启,只用于累计 SYNC 边沿。
+//  说明          置 dot_matrix_screen_probe=1 让 scan() 空转,独占行译码硬件;
+//                15 列直接写 duty(不走 all_on 标志,那个标志只在 scan() 里才展开),
+//                7 行逐行各静态点亮 1s;EXTI 保持开启,只用于累计 SYNC 边沿。
+//                循环里每 10ms 重发一次占空比喂 TLD7002 通信看门狗(2000ms,
+//                otp_reg[33]=0x8007 → DIAG_WDT_SET=7),且全程不 reinit 芯片 ——
+//                PM_CHANGE(INIT) 会关掉全部输出。
 //
 //                每 1s(=每换一行)往 VOFA 发 6 通道 JustFloat:
 //                  ch0 = 本秒 SYNC 边沿数 ≈ SYNC 频率(Hz)
@@ -649,11 +614,11 @@ void dot_matrix_screen_test_rows_static(void)
 //                  ch5 = init 阶段芯片应答字节 = rx_after_init - tx_after_init
 //                判读:
 //                  屏亮 + ch0≈2000  → 芯片/供电/列驱动/SYNC 全好 → 故障在 scan() 时序
-//                  屏亮 + ch0 只几十 → 芯片好但 SYNC 整形链(OUT15→LMV321→P15.8 飞线)不行,
-//                                      改用 1ms PIT 软扫,SYNC 只留作诊断
-//                  屏亮 + ch0==0    → 完全没 SYNC:同上,直接走软扫方案
+//                  屏亮 + ch0 偏低/为 0 → 芯片好但 SYNC 整形链(OUT15→LMV321→P15.8 飞线)不行
 //                  屏黑 + ch4>0     → MCU 侧通信正常但芯片不出流:查 VS/VDD/R3/GPIN0/芯片地址
 //                  屏黑 + ch4==0    → UART1 收发链断:查 P11.12/P11.10 复用与飞线
+//                本车实测结论:屏亮、ch0==0、ch4≈2300 → SYNC 整形链不振荡,
+//                故已改 1ms PIT 软扫(DOT_MATRIX_SCREEN_USE_PIT_SCAN=1),SYNC 只留作诊断。
 //                测完必须把 KART_DOT_ALLON_TEST 改回 0,否则死循环进不了主循环。
 //-------------------------------------------------------------------------------------------------------------------
 void dot_matrix_screen_test_all_on_sync(void)

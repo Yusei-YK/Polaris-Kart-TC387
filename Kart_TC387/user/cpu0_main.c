@@ -240,7 +240,9 @@ int core0_main(void)
     /* SYNC 驱动全亮自检(死循环永不返回):必须放在 dot_matrix_screen_init() 之后
      * (init 里已 exti_init 开了 P15.8 中断),且放在 kart_imu_init() 之前 ——
      * IMU 标定要静置约 6s,没必要为看灯等它;此处也不需要 5ms 拍。
-     * 每秒 VOFA 4 通道:ch0=SYNC_Hz ch1=帧率 ch2=init_err ch3=芯片应答字节。
+     * 每秒(=每换一行)VOFA 6 通道,以被调函数为准:
+     *   ch0=本秒 SYNC 边沿数(≈SYNC_Hz)  ch1=累计 SYNC 边沿  ch2=开机 init 返回码
+     *   ch3=当前点亮行地址 0~6          ch4=本秒 UART1 收到字节  ch5=init 期芯片应答字节
      * 测完必须把 KART_DOT_ALLON_TEST 改回 0,否则死循环进不了主循环。 */
     dot_matrix_screen_test_all_on_sync();
 #endif
