@@ -30,11 +30,14 @@
 #define KART_LEFT_ENCODER_SIGN          (+1)
 #define KART_RIGHT_ENCODER_SIGN         (-1)
 
-/* 2026-07-17 修复 TIM2 丢余数后，地面手推 3 m 三次最终标定:
- * 左累计 7705/7730/7739，右累计 7759/7720/7766。
- * 六组车轮总路程 18 m / 总脉冲 46419 = 0.00038777 m/脉冲。 */
-#define KART_LEFT_ENC_PULSE_TO_M        (0.00038777f)
-#define KART_RIGHT_ENC_PULSE_TO_M       (0.00038777f)
+/* 2026-07-24 换新左编码器后重新标定(左右轮分别手掰十圈,大缓冲抓全):
+ * 左十圈累计 20481、右十圈累计 20489 → 均≈2048 脉冲/圈(512 线×4 正交),
+ * 左右 PPR 一致(比 1.0004),排除编码器量纲差异是起步打滑主因。
+ * 后轮实测直径 240 mm → 周长 π×0.240 = 0.753982 m,
+ * PULSE_TO_M = 0.753982 / 2048 = 0.00036816 m/脉冲。
+ * (旧值 0.00038777 偏大约 5.3%,里程会高估;手推5m因20s窗口截断作废。) */
+#define KART_LEFT_ENC_PULSE_TO_M        (0.00036816f)
+#define KART_RIGHT_ENC_PULSE_TO_M       (0.00036816f)
 
 #define KART_STEER_ABS_SPI_INDEX        (SPI_4)
 #define KART_STEER_ABS_SPI_MODE         (SPI_MODE0)
@@ -70,12 +73,46 @@
 #define BOARD_WIRELESS_RTS_PIN          (P10_2)     /* 无线模块 RTS(暂未用),v2 网表不变 */
 #define BOARD_WIRELESS_RST_PIN          (P11_6)     /* 无线模块复位(暂未用),v2 网表不变 */
 
-/* v2 新增第二路串口(无线串口1,4P 座),UART2 @ P14.2/P14.3。
- * 当前底盘固件未使用,预留给科目二离线语音/日志。启用时按需 uart_init。 */
-#define BOARD_AUX_UART_INDEX            (UART_2)
-#define BOARD_AUX_UART_TX_PIN          (UART2_TX_P14_2)
-#define BOARD_AUX_UART_RX_PIN          (UART2_RX_P14_3)
+/* VOFA 日志串口:接无线模块 @ UART10 P13.0(TX)/P13.1(RX)。
+ * 2026-07-24 由 UART2(P14.2/P14.3)改到 UART10(P13.0/P13.1)对接无线模块。 */
+#define BOARD_AUX_UART_INDEX            (UART_10)
+#define BOARD_AUX_UART_TX_PIN          (UART10_TX_P13_0)
+#define BOARD_AUX_UART_RX_PIN          (UART10_RX_P13_1)
 #define BOARD_AUX_UART_BAUD            (115200)
+#define BOARD_AUX_UART_BAUD_FAST       (460800)
+
+/* ---------------- 语音模块(科目二,2026-07-26 定案)----------------
+ * 背景:语音原接 P33.12/13,那是 UART_1=ASCLIN1,与 TLD7002 灯板飞线
+ * (P11.12/P11.10 @2M)是同一个硬件外设,谁后 init 谁改波特率 → 灯板灭。
+ * 库里 UART_1 只映射到 ASCLIN1,软件无法共存,所以必须换外设。
+ *
+ * 为什么落在 P13.0/P13.1(UART_10=ASCLIN10):
+ *   ① 全工程 ASCLIN10 只有 VOFA 日志一个用户,而比赛不接无线模块 → 该外设本就空闲;
+ *   ② 语音模块直接插原无线排针即可,不用飞线;
+ *   ③ 不动 ASCLIN1(灯板)、不动 ASCLIN3(SBUS 遥控)。遥控是唯一人工接管兜底,
+ *      不能为让位语音而拔掉,所以放弃了 P15.6/15.7 方案。
+ *
+ * 使用前提(硬件):科二运行前拔掉无线模块,把语音模块插上,
+ *   语音 TX → MCU P13.1(RX),语音 RX → MCU P13.0(TX)。
+ * 使用前提(软件):UART_10 平时是 460800 跑日志,进科目二要重配到 115200 并停日志,
+ *   见 kart_mission.c 的 mission_enter/mission_exit(MISSION_SUBJECT_2)。
+ *
+ * KART_VOICE_ON_AUX_UART=0 可一键退回旧接法(P33.12/13),但那样灯板与语音仍不能共存。 */
+#define KART_VOICE_ON_AUX_UART          (1)
+
+#if KART_VOICE_ON_AUX_UART
+#define BOARD_VOICE_UART_INDEX          (UART_10)
+#define BOARD_VOICE_UART_TX_PIN         (UART10_TX_P13_0)
+#define BOARD_VOICE_UART_RX_PIN         (UART10_RX_P13_1)
+#else
+#define BOARD_VOICE_UART_INDEX          (BOARD_WIRELESS_UART_INDEX)
+#define BOARD_VOICE_UART_TX_PIN         (BOARD_WIRELESS_UART_TX_PIN)
+#define BOARD_VOICE_UART_RX_PIN         (BOARD_WIRELESS_UART_RX_PIN)
+#endif
+#define BOARD_VOICE_UART_BAUD           (115200)    /* 语音模块固定 115200 8N1,不可改 */
+
+/* 语音与日志是否共用同一外设:为 1 时进科二必须切波特率 + 停日志。 */
+#define BOARD_VOICE_SHARES_AUX_UART     (KART_VOICE_ON_AUX_UART)
 
 /* ---------------- GPS(UART_3,交接文档 3.5)---------------- */
 /* 主板有 GPS,科目一先跑纯惯导,GPS 仅作辅助/以后融合用。

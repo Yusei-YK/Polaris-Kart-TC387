@@ -42,6 +42,16 @@ typedef struct
 
 extern kart_odom_t kart_odom;
 
+/* 一致位姿快照:x/y/yaw 一次性打包取出,避免分三次 get 期间被 5ms 中断改到
+ * 半路(取到旧 x + 新 yaw 这类撕裂值)。复现/路径跟踪按整帧位姿算才对得上。*/
+typedef struct
+{
+    float x;        // 东向(米)
+    float y;        // 北向(米)
+    float yaw;      // 航向(度)
+    float dist_sum; // 累计路程(米)
+} kart_odom_snapshot_t;
+
 /* --- 对外接口 --- */
 void     kart_odom_init(void);                          // 复位位置/脉冲基准
 void     kart_odom_update(void);                        // 放 5ms 中断,读 yaw+脉冲积分
@@ -54,5 +64,6 @@ float    kart_odom_get_x(void);
 float    kart_odom_get_y(void);
 float    kart_odom_get_yaw(void);                        // 最近积分用的航向(度)
 float    kart_odom_get_dist(void);                       // 累计路程(米)
+void     kart_odom_get_snapshot(kart_odom_snapshot_t *snap);  // 一次性取整帧位姿(x/y/yaw/路程)
 
 #endif

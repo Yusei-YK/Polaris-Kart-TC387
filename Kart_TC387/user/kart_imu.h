@@ -71,9 +71,11 @@ extern IMU_Handle_struct IMU_Handle;
 
 /* --- 对外接口 --- */
 void  kart_imu_init(void);      // 初始化 + 上电静止标定零偏(车必须放稳别动)
+void  kart_imu_set_calib_hook(void (*hook)(void));  // 注册标定期间刷新钩子(点阵扫描),NULL 关闭
 void  kart_imu_update(void);    // 读数 + Madgwick 解算,放 5ms 定时中断里调
 float kart_imu_get_yaw(void);   // 取当前航向角(度,-180~180)
 float kart_imu_get_yaw_filtered(void);  // 取滤波后航向角(5拍滑动平均,抑制抖动)
+void  kart_imu_set_yaw(float target_yaw); // 强制设定当前航向(度):保持 roll/pitch、只改 yaw(科目三反向复现用)
 
 /* --- 内部函数(照搬 TopSpeed,一并暴露方便调试) --- */
 void reset_attitude(void);              // 把四元数复位成单位四元数(航向清零)
@@ -81,5 +83,11 @@ void IMU_check(void);                   // 静止采样求陀螺零偏
 void read_IMU(sSensorData *sd);         // 读一帧并换算单位
 void get_IMU_RAW(IMU_data_RAW_struct *data);        // 读原始寄存器 + 去零偏 + 换算
 void MadgwickAHRSupdateIMU(sSensorData *sd);        // Madgwick 6DOF 姿态更新
+
+/* TF卡运行日志使用的只读诊断量，不参与姿态反馈。 */
+float kart_imu_get_yaw_rate_dps(void);
+float kart_imu_get_yaw_bias_dps(void);
+float kart_imu_get_acc_norm_g(void);
+float kart_imu_get_dt_us(void);         // 取本帧实际积分步长(微秒),验证 5ms 中断是否稳定
 
 #endif

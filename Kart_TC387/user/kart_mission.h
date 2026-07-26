@@ -33,6 +33,7 @@ typedef enum
     MISSION_IDLE = 0,
     MISSION_SUBJECT_1,
     MISSION_SUBJECT_2,
+    MISSION_SUBJECT_4,          /* 科目四迷宫录制+开环反向复现(车头不掉转,按里程回放打角) */
     MISSION_REMOTE,             /* SBUS 遥控接管(调试/手动,VOFA m3 进入) */
     MISSION_FAULT,
 } kart_mission_mode_t;
@@ -47,6 +48,15 @@ typedef enum
     S1_FINISHED,            /* 停车结束 */
     S1_FAULT,               /* 超时/传感器异常/急停 */
 } kart_subject1_stage_t;
+
+/* 科目四阶段(开环反向复现:车头不掉转,直接倒车原路返回)。 */
+typedef enum
+{
+    S4_PHASE1_RECORD = 0,   /* 第一阶段:遥控走迷宫+录制(到停车区人按 MID 停录) */
+    S4_PHASE2_REVERSE,      /* 第二阶段:开环倒车原路返回(停录同一按键直接触发) */
+    S4_FINISHED,            /* 返回完成 */
+    S4_FAULT,
+} kart_subject4_stage_t;
 
 /* -------------------- 倒库参数(第一版,实车再修)-------------------- */
 /* 倒车速度(脉冲/5ms,负值=倒退)。前向 playback 用 +50,倒车取半速求稳。 */
@@ -74,5 +84,8 @@ kart_mission_mode_t kart_mission_get_mode(void);
 
 /* 读科目一当前阶段(调试用)。 */
 kart_subject1_stage_t kart_mission_get_subject1_stage(void);
+
+/* 读科目四当前阶段(调试用)。 */
+kart_subject4_stage_t kart_mission_get_subject4_stage(void);
 
 #endif

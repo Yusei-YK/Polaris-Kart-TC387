@@ -2,333 +2,276 @@
 #include "kart_control.h"
 #include "kart_encoder.h"
 #include "kart_imu.h"
+#include "kart_mission.h"
 #include "kart_odom.h"
+#include "kart_playback.h"
+#include "kart_remote.h"
 #include "kart_steer_abs.h"
 #include "kart_steer_ctrl.h"
-#include "kart_voice.h"
-#include "kart_record.h"
-#include "kart_playback.h"
-#include "kart_mission.h"
-#include "kart_remote.h"        /* SBUS 遥控观测(纯只读上 VOFA) */
-#include "kart_hw_test.h"       /* 借用旋钮/按键引脚宏(屏坏后改用 VOFA 看按键输入) */
+#include "isr.h"                 /* 协作式调度器运行时监测 g_sched_* */
 #include <string.h>
-#include <stdlib.h>
 
 /*
- * 调参台实现 —— VOFA+ justfloat 波形 + 在线改参
- * ------------------------------------------------------------------
- * 数据源全部只读:速度环状态从 kart_control_get_xxx() 取,航向从 kart_imu_get_yaw() 取。
- * 关键:这里绝不再调 kart_encoder_update() —— 编码器 delta 的清零权已经独家交给
- *      5ms 中断里的 kart_control_speed_update()。若这里再调,会和中断互抢 delta,
- *      速度测量直接乱套。这是上一版 CSV 的隐患,这版彻底改掉。
- * ------------------------------------------------------------------
+ * 科目一串口日志（VOFA JustFloat）。
+ *
+ * 设计边界：
+ * - 5 ms中断只增加tick，不在中断内读传感器或发串口；
+ * - 主循环每4 tick(50Hz)发送一帧：31个小端float32 + 帧尾00 00 80 7F；
+ * - VOFA选JustFloat即可实时显示并导出CSV；不用printf、动态内存、DMA；
+ * - 继续沿用原调试串口文件名，避免扩大工程改动。
  */
 
-/* VOFA justfloat 通道定义(改通道要同步改上位机)。当前 34 通道: */
-#define KART_VOFA_CH_NUM    (34)
-/*  ch0  = 目标速度(脉冲/5ms)
- *  ch1  = 实测均值(左右滤波速度均值,脉冲/5ms)
- *  ch2  = 航向 yaw(度)
- *  ch3  = 转向中位偏差 center_delta(角度环误差反馈源)
- *  ch4  = 转向内环目标转角 target_delta(编码器计数;外环开时被航向环覆写)
- *  ch5  = 转向内环输出 duty
- *  ch6  = 外环目标航向 target_yaw(度)
- *  ch7  = 左后轮滤波速度(脉冲/5ms)
- *  ch8  = 右后轮滤波速度(脉冲/5ms)
- *  ch9  = 左后轮 PI 输出 duty
- *  ch10 = 右后轮 PI 输出 duty
- *  ch11 = 航位推算累计路程(m)
- *  ch12 = 航位推算 X 坐标(m)
- *  ch13 = 航位推算 Y 坐标(m)
- *  ch14 = 左后轮累计脉冲
- *  ch15 = 右后轮累计脉冲
- *  ch16 = 语音接收帧计数(校验通过的合法帧)
- *  ch17 = 语音最后一帧 TYPE
- *  ch18 = 语音最后一帧 CMD
- *  ch19 = 录制点数
- *  --- 以下为屏坏后新增,VOFA 直接看旋钮/按键输入(上拉输入:不按=1,按下=0)---
- *  ch20 = 旋钮 A 相电平(P11.2)
- *  ch21 = 旋钮 B 相电平(P11.3)
- *  ch22 = 旋钮 按下键 SW(P20.6)
- *  ch23 = 五向键 UP(P33.11)
- *  ch24 = 五向键 DOWN(P20.0)
- *  ch25 = 五向键 LEFT(P21.6)
- *  ch26 = 五向键 RIGHT(P21.7)
- *  ch27 = 五向键 MID(P33.4)
- *  --- 以下为 SBUS 遥控观测(第一版纯观测,不接管控制)---
- *  ch28 = 遥控在线态(1=在线/0=失联,综合超时+接收机失控标志)
- *  ch29 = SBUS 合法帧累计计数(看收帧是否稳定增长)
- *  ch30 = CH1 方向通道原始值(0~2047,中值约 1024)
- *  ch31 = CH2 油门通道原始值(0~2047,中值约 1024)
- *  ch32 = CH4 三段开关原始值(0~2047)
- *  ch33 = 遥控三段挡位解码(0=低急停/1=中只转向/2=高转向+速度) */
+#define KART_LOG_MAGIC              (0x474F4C4BU) /* 小端字节：K L O G */
+#define KART_LOG_VERSION            (1U)
+#define KART_LOG_END                (0x55AAU)
 
-static uint32 kart_debug_elapsed_ms = 0;
+#define KART_LOG_CHANNELS           (33U)  /* VOFA JustFloat 浮点通道数 */
 
-/* 命令接收缓冲:攒字符直到遇到结束符再解析 */
-static char  kart_cmd_buf[KART_DEBUG_CMD_BUF_LEN] = {0};
-static uint8 kart_cmd_len = 0;
+#define KART_LOG_FLAG_PLAYBACK      (1U << 0)
+#define KART_LOG_FLAG_SPEED_ENABLE  (1U << 1)
+#define KART_LOG_FLAG_REMOTE_ONLINE (1U << 2)
+#define KART_LOG_FLAG_REMOTE_LOW    (1U << 3)
+#define KART_LOG_FLAG_HEAD_ENABLE   (1U << 4)
+#define KART_LOG_FLAG_ANGLE_ENABLE  (1U << 5)
 
-/* =========================== 初始化 =========================== */
+static volatile uint32 kart_log_tick_5ms = 0U;
+static uint32 kart_log_last_sent_tick = 0U;
+static uint32 kart_log_sequence = 0U;
+static uint16 kart_log_skipped_frames = 0U;
+
+/* ===== VOFA 发送环形缓冲(非阻塞后台发送)=====
+ * 底层 uart_write_buffer→IfxAsclin_write8 是全阻塞:每字节写完 spin 等 TX FIFO 排空。
+ * 一帧 25ch=104 字节 @460800 直发≈2.26ms,放 5ms 调度里会把控制拍打爆。
+ * 方案:poll 只把整帧塞进环形缓冲;background 每次主循环 spin 排 ≤16 字节
+ * (=TX FIFO 深度,单次阻塞≤347us),loop 空转多拍即可发完整帧,永不长阻塞控制窗口。
+ * head/tail 均只在主循环访问(poll 与 background 同在主循环,无 ISR 并发)。 */
+#define KART_LOG_RING_SIZE          (512U)  /* 2 的幂,位与回绕;容纳数帧 104 字节 */
+#define KART_LOG_TX_CHUNK           (16U)   /* 后台单次最多发字节数(TX FIFO 深度) */
+
+static uint8  kart_log_ring[KART_LOG_RING_SIZE];
+static uint32 kart_log_ring_head = 0U;      /* 写指针:poll 采样填 */
+static uint32 kart_log_ring_tail = 0U;      /* 读指针:background 排空 */
+static uint16 kart_log_ring_drop = 0U;      /* 环满丢帧计数(诊断) */
+
+/* 日志总闸(2026-07-26):科目二把 UART_10 让给语音模块时必须关闸。
+ * 默认开,行为与改动前一致。 */
+static uint8  kart_log_enabled = 1U;
+
+/* 环形缓冲可用空间(留 1 字节区分满/空)。 */
+static uint32 kart_log_ring_free(void)
+{
+    uint32 used = (kart_log_ring_head - kart_log_ring_tail) & (KART_LOG_RING_SIZE - 1U);
+    return (KART_LOG_RING_SIZE - 1U) - used;
+}
+
+/* 无检查写入(调用前必须已确认空间够,否则半帧)。 */
+static void kart_log_ring_push(const uint8 *data, uint32 len)
+{
+    uint32 i;
+    for(i = 0; i < len; i++)
+    {
+        kart_log_ring[kart_log_ring_head] = data[i];
+        kart_log_ring_head = (kart_log_ring_head + 1U) & (KART_LOG_RING_SIZE - 1U);
+    }
+}
+
+static uint8 kart_log_yaw_initialized = 0U;
+static float kart_log_last_yaw_deg = 0.0f;
+static float kart_log_yaw_unwrapped_deg = 0.0f;
+
+static float kart_log_update_unwrapped_yaw(float yaw_deg)
+{
+    float delta;
+
+    if(!kart_log_yaw_initialized)
+    {
+        kart_log_yaw_initialized = 1U;
+        kart_log_last_yaw_deg = yaw_deg;
+        kart_log_yaw_unwrapped_deg = yaw_deg;
+        return kart_log_yaw_unwrapped_deg;
+    }
+
+    delta = yaw_deg - kart_log_last_yaw_deg;
+    while(delta > 180.0f) delta -= 360.0f;
+    while(delta <= -180.0f) delta += 360.0f;
+
+    kart_log_yaw_unwrapped_deg += delta;
+    kart_log_last_yaw_deg = yaw_deg;
+    return kart_log_yaw_unwrapped_deg;
+}
+
+/* VOFA JustFloat：N 个小端 float32 + 帧尾 00 00 80 7F。
+ * TC387 为小端，float 内存布局与 JustFloat 一致，直接按字节入环形缓冲。
+ * 整帧原子:先查空间够 payload+4 帧尾才写,否则整帧丢弃(丢帧计数),
+ * 绝不写半帧——半帧会让 VOFA 后续所有帧错位。 */
+static void kart_log_send_justfloat(const float *ch, uint32 count)
+{
+    static const uint8 tail[4] = {0x00U, 0x00U, 0x80U, 0x7FU};
+    uint32 need = count * 4U + 4U;
+
+    if(kart_log_ring_free() < need)
+    {
+        if(kart_log_ring_drop < 65535U) kart_log_ring_drop++;
+        return;                         /* 环满:丢整帧,不阻塞、不写半帧 */
+    }
+    kart_log_ring_push((const uint8 *)ch, count * 4U);
+    kart_log_ring_push(tail, 4U);
+}
+
+/* 后台非阻塞发送:每次主循环 spin 调一次,最多排 KART_LOG_TX_CHUNK 字节。
+ * 单次 uart_write_buffer(≤16B) 阻塞 ≤347us,远小于 5ms 控制窗口。
+ * 环形缓冲有货就发一块,空转即返回,整帧靠多拍 spin 累计发完。 */
+void kart_debug_uart_background_poll(void)
+{
+    uint32 used;
+    uint32 n;
+    uint32 i;
+    uint8  chunk[KART_LOG_TX_CHUNK];
+
+    if(!kart_log_enabled) return;       /* 关闸:一个字节都不许出去(口可能已让给语音) */
+
+    used = (kart_log_ring_head - kart_log_ring_tail) & (KART_LOG_RING_SIZE - 1U);
+    if(used == 0U) return;
+
+    n = (used < KART_LOG_TX_CHUNK) ? used : KART_LOG_TX_CHUNK;
+    for(i = 0; i < n; i++)
+    {
+        chunk[i] = kart_log_ring[kart_log_ring_tail];
+        kart_log_ring_tail = (kart_log_ring_tail + 1U) & (KART_LOG_RING_SIZE - 1U);
+    }
+    uart_write_buffer(BOARD_AUX_UART_INDEX, chunk, n);
+}
+
 void kart_debug_uart_init(void)
 {
-    uart_init(BOARD_WIRELESS_UART_INDEX, BOARD_WIRELESS_UART_BAUD,
-              BOARD_WIRELESS_UART_TX_PIN, BOARD_WIRELESS_UART_RX_PIN);
+    kart_log_tick_5ms = 0U;
+    kart_log_last_sent_tick = 0U;
+    kart_log_sequence = 0U;
+    kart_log_skipped_frames = 0U;
+    kart_log_yaw_initialized = 0U;
+    kart_log_last_yaw_deg = 0.0f;
+    kart_log_yaw_unwrapped_deg = 0.0f;
 
-    /* 屏坏后改用 VOFA 观测旋钮/按键:统一初始化为上拉输入(按下接地读 0)。 */
-    gpio_init(KART_KNOB_A_PIN,    GPI, 0, GPI_PULL_UP);
-    gpio_init(KART_KNOB_B_PIN,    GPI, 0, GPI_PULL_UP);
-    gpio_init(KART_KNOB_SW_PIN,   GPI, 0, GPI_PULL_UP);
-    gpio_init(KART_KEY_UP_PIN,    GPI, 0, GPI_PULL_UP);
-    gpio_init(KART_KEY_DOWN_PIN,  GPI, 0, GPI_PULL_UP);
-    gpio_init(KART_KEY_LEFT_PIN,  GPI, 0, GPI_PULL_UP);
-    gpio_init(KART_KEY_RIGHT_PIN, GPI, 0, GPI_PULL_UP);
-    gpio_init(KART_KEY_MID_PIN,   GPI, 0, GPI_PULL_UP);
+    kart_log_ring_head = 0U;
+    kart_log_ring_tail = 0U;
+    kart_log_ring_drop = 0U;
+
+    kart_log_enabled = 1U;
+
+    uart_init(BOARD_AUX_UART_INDEX, BOARD_AUX_UART_BAUD_FAST,
+              BOARD_AUX_UART_TX_PIN, BOARD_AUX_UART_RX_PIN);
 }
 
-/* =========================== VOFA justfloat 下发 =========================== */
-/* 组一帧:N 个小端 float + 帧尾 0x00,0x00,0x80,0x7F,一次性 uart_write_buffer 发出。
- * TC387 是小端,float 内存布局和 justfloat 要求一致,直接 memcpy 即可。 */
-static void kart_debug_send_vofa(void)
+/* 关闸时清空环形缓冲:否则重新开闸后先吐出一堆过期帧,VOFA 波形会有一段假历史;
+ * 而且残留可能是半帧,会让后续所有 JustFloat 帧错位。 */
+void kart_debug_uart_set_enabled(uint8 enabled)
 {
-    uint8  frame[KART_VOFA_CH_NUM * 4 + 4];
-    float  ch[KART_VOFA_CH_NUM];
-    static const uint8 tail[4] = {0x00, 0x00, 0x80, 0x7F};
+    kart_log_enabled = enabled ? 1U : 0U;
 
-    ch[0]  = kart_control_get_target();
-    ch[1]  = kart_control_get_meas();
-    ch[2]  = kart_imu_get_yaw();
-    ch[3]  = (float)kart_steer_abs_get_center_delta();
-    ch[4]  = kart_steer_get_target_delta();
-    ch[5]  = (float)kart_steer_get_output();
-    ch[6]  = kart_steer_get_target_yaw();
-    ch[7]  = kart_control_get_left_meas();
-    ch[8]  = kart_control_get_right_meas();
-    ch[9]  = (float)kart_control_get_left_output();
-    ch[10] = (float)kart_control_get_right_output();
-    ch[11] = kart_odom_get_dist();
-    ch[12] = kart_odom_get_x();
-    ch[13] = kart_odom_get_y();
-    ch[14] = (float)kart_encoder_get_left_sum();
-    ch[15] = (float)kart_encoder_get_right_sum();
-    ch[16] = (float)kart_voice_get_frame_count();
-    ch[17] = (float)kart_voice_get_last_type();
-    ch[18] = (float)kart_voice_get_last_cmd();
-    ch[19] = (float)kart_record_get_count();
-
-    /* 旋钮 + 五向键实时电平(上拉:不按=1,按下=0)。屏坏后靠这几路看按键输入。 */
-    ch[20] = (float)gpio_get_level(KART_KNOB_A_PIN);
-    ch[21] = (float)gpio_get_level(KART_KNOB_B_PIN);
-    ch[22] = (float)gpio_get_level(KART_KNOB_SW_PIN);
-    ch[23] = (float)gpio_get_level(KART_KEY_UP_PIN);
-    ch[24] = (float)gpio_get_level(KART_KEY_DOWN_PIN);
-    ch[25] = (float)gpio_get_level(KART_KEY_LEFT_PIN);
-    ch[26] = (float)gpio_get_level(KART_KEY_RIGHT_PIN);
-    ch[27] = (float)gpio_get_level(KART_KEY_MID_PIN);
-
-    /* SBUS 遥控观测(只读,不接管控制)。 */
-    ch[28] = (float)kart_remote_is_online();
-    ch[29] = (float)kart_remote_get_frame_count();
-    ch[30] = (float)kart_remote_get_channel(KART_REMOTE_CH_STEER);
-    ch[31] = (float)kart_remote_get_channel(KART_REMOTE_CH_THROTTLE);
-    ch[32] = (float)kart_remote_get_channel(KART_REMOTE_CH_SW3);
-    ch[33] = (float)kart_remote_get_sw3();
-
-    memcpy(&frame[0], ch, KART_VOFA_CH_NUM * 4);
-    memcpy(&frame[KART_VOFA_CH_NUM * 4], tail, 4);
-
-    uart_write_buffer(BOARD_WIRELESS_UART_INDEX, frame, sizeof(frame));
-}
-
-/* =========================== 命令解析 =========================== */
-/* 一条完整命令(已去掉结束符)交给这里。首字符是指令,其余是数值。 */
-static void kart_debug_parse_cmd(const char *cmd, uint8 len)
-{
-    float val;
-
-    if(len < 1)
+    if(!kart_log_enabled)
     {
-        return;                         // 空命令,忽略
+        kart_log_ring_head = 0U;
+        kart_log_ring_tail = 0U;
+    }
+    else
+    {
+        /* 重新开闸:把节拍基准对齐到当前,避免 elapsed_ticks 一次跨过很多拍
+         * 被 poll() 当成"漏帧"累加进 skipped 统计。 */
+        kart_log_last_sent_tick = kart_log_tick_5ms;
+    }
+}
+
+uint8 kart_debug_uart_is_enabled(void)
+{
+    return kart_log_enabled;
+}
+
+void kart_debug_uart_tick_5ms(void)
+{
+    kart_log_tick_5ms++;
+}
+
+void kart_debug_uart_poll(void)
+{
+    uint32 now_tick = kart_log_tick_5ms;
+    uint32 elapsed_ticks = now_tick - kart_log_last_sent_tick;
+    uint32 elapsed_periods;
+    uint32 skipped_now;
+    uint8 flags = 0U;
+    float yaw_deg;
+    float yaw_unwrapped_deg;
+
+    if(!kart_log_enabled)
+    {
+        return;                         /* 关闸期间连组帧都不做,省 CPU 也不污染环形缓冲 */
     }
 
-    /* 转向串级用两字符前缀(s=内环转角 / h=外环航向),避免和速度环单字符命令撞车。
-     * 数值从第 3 个字符起取。放在单字符 switch 之前拦截。 */
-    if((cmd[0] == 's' || cmd[0] == 'S') && len >= 2)
+    if(elapsed_ticks < KART_LOG_PERIOD_TICKS)
     {
-        float sval = (float)atof(&cmd[2]);
-        switch(cmd[1])
-        {
-            case 'e': case 'E':                                     // se<0/1> 内环使能
-                kart_steer_set_angle_enable((sval != 0.0f) ? 1 : 0);
-                break;
-            case 'a': case 'A':                                     // sa<val> 直给内环目标转角(外环关时单测用)
-                kart_steer_set_target_delta(sval);
-                break;
-            case 'p': case 'P':                                     // sp<val> 内环 Kp
-                kart_steer_set_angle_pid(sval, kart_steer.angle_pid.Ki, kart_steer.angle_pid.Kd);
-                break;
-            case 'i': case 'I':                                     // si<val> 内环 Ki
-                kart_steer_set_angle_pid(kart_steer.angle_pid.Kp, sval, kart_steer.angle_pid.Kd);
-                break;
-            case 'd': case 'D':                                     // sd<val> 内环 Kd
-                kart_steer_set_angle_pid(kart_steer.angle_pid.Kp, kart_steer.angle_pid.Ki, sval);
-                break;
-            default:
-                break;
-        }
         return;
     }
 
-    if((cmd[0] == 'h' || cmd[0] == 'H') && len >= 2)
+    elapsed_periods = elapsed_ticks / KART_LOG_PERIOD_TICKS;
+    if(elapsed_periods > 1U)
     {
-        float hval = (float)atof(&cmd[2]);
-        switch(cmd[1])
+        skipped_now = elapsed_periods - 1U;
+        if(skipped_now >= (uint32)(65535U - kart_log_skipped_frames))
         {
-            case 'e': case 'E':                                     // he<0/1> 外环使能(连带开内环)
-                kart_steer_set_head_enable((hval != 0.0f) ? 1 : 0);
-                break;
-            case 't': case 'T':                                     // ht<val> 外环目标航向(度)
-                kart_steer_set_target_yaw(hval);
-                break;
-            case 'p': case 'P':                                     // hp<val> 外环 Kp
-                kart_steer_set_head_pid(hval, kart_steer.head_pid.Ki, kart_steer.head_pid.Kd);
-                break;
-            case 'i': case 'I':                                     // hi<val> 外环 Ki
-                kart_steer_set_head_pid(kart_steer.head_pid.Kp, hval, kart_steer.head_pid.Kd);
-                break;
-            case 'd': case 'D':                                     // hd<val> 外环 Kd
-                kart_steer_set_head_pid(kart_steer.head_pid.Kp, kart_steer.head_pid.Ki, hval);
-                break;
-            default:
-                break;
-        }
-        return;
-    }
-
-    val = (float)atof(&cmd[1]);         // 从第 2 个字符起转数值(没有数值时 atof 返回 0)
-
-    switch(cmd[0])
-    {
-        case 'p': case 'P':
-            kart_control_set_pid(val,
-                                 kart_speed.pid.Ki,
-                                 kart_speed.pid.Kd);
-            break;
-
-        case 'i': case 'I':
-            kart_control_set_pid(kart_speed.pid.Kp,
-                                 val,
-                                 kart_speed.pid.Kd);
-            break;
-
-        case 'd': case 'D':
-            kart_control_set_pid(kart_speed.pid.Kp,
-                                 kart_speed.pid.Ki,
-                                 val);
-            break;
-
-        case 't': case 'T':
-            kart_control_set_target(val);
-            break;
-
-        case 'e': case 'E':
-            kart_control_set_enable((val != 0.0f) ? 1 : 0);
-            break;
-
-        case 'z': case 'Z':
-            if(!kart_control_is_enabled())
-            {
-                uint32 interrupt_state = interrupt_global_disable();
-                kart_encoder_reset();
-                kart_odom_reset();
-                interrupt_global_enable(interrupt_state);
-            }
-            break;
-
-        case 'r': case 'R':
-            if(val != 0.0f)
-                kart_record_start();
-            else
-                kart_record_stop();
-            break;
-
-        case 'b': case 'B':
-            if(val != 0.0f)
-                kart_playback_start();
-            else
-                kart_playback_stop();
-            break;
-
-        case 'w': case 'W':             // w<slot> 把当前 RAM 路径存进 Flash 槽位(阻塞擦写,仅停车静止时用)
-            if(!kart_control_is_enabled())
-                kart_record_save_to_flash((uint8)(int)val);
-            break;
-
-        case 'f': case 'F':             // f<slot> 从 Flash 槽位读回路径到 RAM(看 ch19 点数验证)
-            if(!kart_control_is_enabled())
-                kart_record_load_from_flash((uint8)(int)val);
-            break;
-
-        case 'm': case 'M':             // m0=IDLE m1=科目一 m2=科目二 m3=遥控(切模式统一走停机)
-            switch((int)val)
-            {
-                case 1:  kart_mission_set_mode(MISSION_SUBJECT_1); break;
-                case 2:  kart_mission_set_mode(MISSION_SUBJECT_2); break;
-                case 3:  kart_mission_set_mode(MISSION_REMOTE);    break;
-                default: kart_mission_set_mode(MISSION_IDLE);      break;
-            }
-            break;
-
-        default:
-            break;                      // 不认识的指令,丢弃
-    }
-}
-
-/* 把串口收到的字节攒进缓冲,遇到 \r / \n / 空格 就当一条命令解析。 */
-static void kart_debug_recv_cmd(void)
-{
-    uint8 byte;
-
-    /* 一次 poll 把 FIFO 里攒着的字节都收完,别留到下一拍 */
-    while(uart_query_byte(BOARD_WIRELESS_UART_INDEX, &byte))
-    {
-        /* 结束符:回车/换行/空格都算(兑现头文件"兼容空格结尾"的承诺)。
-         * 很多串口助手/VOFA 默认不追加换行,只靠 \r\n 会导致命令永远攒着不解析。 */
-        if(byte == '\r' || byte == '\n' || byte == ' ')
-        {
-            if(kart_cmd_len > 0)
-            {
-                kart_cmd_buf[kart_cmd_len] = '\0';
-                kart_debug_parse_cmd(kart_cmd_buf, kart_cmd_len);
-                kart_cmd_len = 0;               // 收完清空,准备下一条
-            }
-        }
-        else if(kart_cmd_len < (KART_DEBUG_CMD_BUF_LEN - 1))
-        {
-            kart_cmd_buf[kart_cmd_len++] = (char)byte;
+            kart_log_skipped_frames = 65535U;
         }
         else
         {
-            kart_cmd_len = 0;                   // 溢出(没等到结束符),丢弃重来
+            kart_log_skipped_frames = (uint16)(kart_log_skipped_frames + skipped_now);
         }
     }
-}
+    kart_log_last_sent_tick = now_tick;  /* 不追发历史帧。 */
 
-/* =========================== 主循环调用 =========================== */
-void kart_debug_uart_poll(void)
-{
-    /* VOFA 已停用:改用 IPS200 屏幕调试,省算力。命令接收+波形下发整体注释,需要时恢复。
-    // 命令接收每拍都收,保证按键响应及时
-    kart_debug_recv_cmd();
+    if(kart_playback_is_running()) flags |= KART_LOG_FLAG_PLAYBACK;
+    if(kart_control_is_enabled()) flags |= KART_LOG_FLAG_SPEED_ENABLE;
+    if(kart_remote_is_online()) flags |= KART_LOG_FLAG_REMOTE_ONLINE;
+    if(kart_remote_get_sw3() == KART_REMOTE_SW3_L) flags |= KART_LOG_FLAG_REMOTE_LOW;
+    if(kart_steer.head_enable) flags |= KART_LOG_FLAG_HEAD_ENABLE;
+    if(kart_steer.angle_enable) flags |= KART_LOG_FLAG_ANGLE_ENABLE;
 
-    // VOFA 波形按 KART_DEBUG_UART_PERIOD_MS 节流下发
-    kart_debug_elapsed_ms += KART_MAIN_LOOP_PERIOD_MS;
-    if(kart_debug_elapsed_ms < KART_DEBUG_UART_PERIOD_MS)
+    yaw_deg = kart_imu_get_yaw();
+    yaw_unwrapped_deg = kart_log_update_unwrapped_yaw(yaw_deg);
+
     {
-        return;
+        float ch[KART_LOG_CHANNELS];
+        ch[0]  = (float)kart_mission_get_mode();          /* 0 mission模式 */
+        ch[1]  = (float)kart_mission_get_subject1_stage(); /* 1 科目一阶段 */
+        ch[2]  = (float)flags;                             /* 2 状态标志位 */
+        ch[3]  = (float)kart_playback_get_index();         /* 3 播放索引 */
+        ch[4]  = kart_control_get_target();                /* 4 目标速度 */
+        ch[5]  = kart_control_get_left_meas();             /* 5 左轮实测 */
+        ch[6]  = kart_control_get_right_meas();            /* 6 右轮实测 */
+        ch[7]  = (float)kart_control_get_left_output();    /* 7 左输出 */
+        ch[8]  = (float)kart_control_get_right_output();   /* 8 右输出 */
+        ch[9]  = yaw_deg;                                  /* 9 yaw */
+        ch[10] = yaw_unwrapped_deg;                        /* 10 展开yaw */
+        ch[11] = kart_imu_get_yaw_rate_dps();              /* 11 yaw速率 */
+        ch[12] = kart_imu_get_yaw_bias_dps();              /* 12 yaw零偏 */
+        ch[13] = kart_steer_get_target_yaw();              /* 13 目标航向 */
+        ch[14] = (float)kart_steer_abs_get_raw();          /* 14 转向raw */
+        ch[15] = kart_steer_get_target_delta();            /* 15 目标转角 */
+        ch[16] = (float)kart_steer_get_output();           /* 16 转向输出 */
+        ch[17] = kart_odom_get_x();                        /* 17 odom x */
+        ch[18] = kart_odom_get_y();                        /* 18 odom y */
+        ch[19] = kart_odom_get_dist();                     /* 19 odom 里程 */
+        ch[20] = kart_playback_get_cur_x();                /* 20 诊断:投影当前x */
+        ch[21] = kart_playback_get_cur_y();                /* 21 诊断:投影当前y */
+        ch[22] = kart_playback_get_aim_x();                /* 22 诊断:瞄准点x */
+        ch[23] = kart_playback_get_aim_y();                /* 23 诊断:瞄准点y */
+        ch[24] = kart_imu_get_dt_us();                     /* 24 IMU积分步长(us):稳定应≈5000 */
+        ch[25] = (float)g_sched_last_exec_us;              /* 25 调度上拍分发耗时(us) */
+        ch[26] = (float)g_sched_max_exec_us;               /* 26 调度历史最大耗时(us):应<5000 */
+        ch[27] = (float)g_sched_overrun_count;             /* 27 漏周期累计:稳态应长期为0 */
+        ch[28] = kart_steer_get_meas_delta();              /* 28 转向内环实测转角(center_delta):与CH15目标对比判内环跟踪/回中 */
+        ch[29] = (float)kart_encoder_get_left_delta();     /* 29 左轮编码器原始delta(未滤波,脉冲/5ms):与CH5滤波值对比看滞后/抖动 */
+        ch[30] = (float)kart_encoder_get_right_delta();    /* 30 右轮编码器原始delta(未滤波,脉冲/5ms):与CH6滤波值对比看滞后/抖动 */
+        ch[31] = (float)kart_remote_get_channel(KART_REMOTE_CH_THROTTLE); /* 31 油门通道raw:静止应≈THR_CENTER(880),偏则映射出非0目标速度 */
+        ch[32] = (float)kart_remote_get_channel(KART_REMOTE_CH_STEER);    /* 32 方向通道raw:静止应≈STEER_CENTER(968) */
+        kart_log_send_justfloat(ch, KART_LOG_CHANNELS);
     }
-    kart_debug_elapsed_ms = 0;
-
-    kart_debug_send_vofa();
-    */
+    kart_log_sequence++;
 }

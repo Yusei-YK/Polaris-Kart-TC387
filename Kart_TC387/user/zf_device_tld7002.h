@@ -51,10 +51,14 @@
 #include "zf_common_typedef.h"
 
 
-#define TLD7002_UART_INDEX      (UART_0)            // ���ں�
-#define TLD7002_UART_BAUD       (2000000)           // ������
-#define TLD7002_UART_RX         (UART0_TX_P14_0)   // TLD7002����ģ���RX�뵥Ƭ����TX����
-#define TLD7002_UART_HLSIL      (UART0_RX_P14_1)   // TLD7002����ģ���HSLI_L�뵥Ƭ����RX��������
+/* 2026-07-24 从 UART0(P14.0/P14.1)飞线改到 UART1(P11.12/P11.10):
+ * UART0 实测收发不通(ERR=1/RX=0/回环0),疑引脚复用问题,改用 UART1 定位。
+ * 注意:UART1 与摄像头(SCC8660 P02)、无线模块(P33.12/13)、语音模块共用同一硬件外设,
+ *       此改动前提=摄像头/无线/语音当前不用。VOFA 遥测在 UART10(P13.0/13.1),不冲突。 */
+#define TLD7002_UART_INDEX      (UART_1)            // 串口号(飞线到 UART1)
+#define TLD7002_UART_BAUD       (2000000)           // 波特率
+#define TLD7002_UART_RX         (UART1_TX_P11_12)  // 接模块RX=MCU TX(P11.12)
+#define TLD7002_UART_HLSIL      (UART1_RX_P11_10)  // 接模块HSLI_L=MCU RX(P11.10)
 
 #define TLD7002_GPIN0_PIN       (P00_8)             // 最新网表:GPIN0=核心板U1.107(P00.8);P20.7是START
 
@@ -62,9 +66,19 @@
 
 extern uint16 tld7002_duty[16];
 
+extern volatile int    tld7002_init_err;   // 诊断:initDevice 返回码,0=应答正常,非0=通信失败
+extern volatile uint32 tld7002_rx_count;   // 诊断:init 阶段 UART 收到字节数(含半双工回环)
+extern volatile uint32 tld7002_tx_count;      // 诊断:累计发出字节数(半双工必回环)
+extern volatile uint32 tld7002_rx_after_init; // 诊断:init 返回瞬间 rx_count 快照
+extern volatile uint32 tld7002_tx_after_init; // 诊断:init 返回瞬间 tx_count 快照;芯片应答=rx_after-tx_after
+
 void    tld7002_set_duty        (uint8 tld7002_id);
 void    tld7002_callback        (void);
 void    tld7002_init            (void);
+
+/* 诊断用:只重跑芯片 init(不重配 UART/GPIO/fifo),返回 initDevice 返回码。
+ * 0=NO_ERR(芯片正确应答) 1=COMM_ERROR(无有效应答)。供点阵屏自检每秒重试一次。 */
+int     tld7002_reinit_device   (uint8 tld7002_id);
 
 
 

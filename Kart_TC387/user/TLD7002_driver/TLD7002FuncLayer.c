@@ -80,7 +80,7 @@ enum TLDerr TLD7002initDevice(TLD7002_NetworkInstance_t *HSLInetwork, uint8 add 
     TLD7002_TRX_HWCR_ALL (HSLInetwork, gBuffTxRx,  add);    /* clear all TLD7002 error flags */
     system_delay_us_register(INTERFR_DELAY);
 
-    // ≈‰÷√≤Œ ˝
+    // ÈÖçÁΩÆÂèÇÊï∞
     TLD7002_TRX_DC_UPDATE_DLC0(HSLInetwork, gBuffTxRx, add);/* send a DC_UPDATE to move the TLD7002 to active
                                                                         mode & to set all DC to 0 */
     system_delay_us_register(tINIT2ACTIVE);                                   /* wait for the device to move to ACTIVE */
@@ -446,7 +446,7 @@ enum TLDerr TLD7002readExtNTC(float *tempNTC, TLD7002_NetworkInstance_t *HSLInet
 
 /**
  * @brief TLD7002readDTS: reads TLD7002-16 internal temp (DTS Die Temp Sensor)
- * and print it in the serial monitor in ¬∞C. It reads also if the TLD7002-16 thermal derating is active
+ * and print it in the serial monitor in Êé≥C. It reads also if the TLD7002-16 thermal derating is active
  * @return: error on the conversion or in the device operating mode
  */
 enum TLDerr TLD7002readDTS( uint16 *DTS_temp, TLD7002_NetworkInstance_t *HSLInetwork, uint8 address)

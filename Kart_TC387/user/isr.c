@@ -40,7 +40,18 @@
 #include "kart_odom.h"
 #include "kart_power.h"
 #include "kart_horn.h"
+#include "kart_multicore.h"
 #include "kart_remote.h"
+#include "kart_debug_uart.h"
+#include "zf_device_tld7002.h"
+#include "zf_device_dot_matrix_screen.h"
+
+/* 5ms PIT 节拍计数器:主循环协作式调度的时基,每个 5ms 中断 +1。 */
+volatile uint32 g_kart_tick_5ms = 0;
+
+/* 点阵屏 SYNC(P15.8)下降沿累计:诊断用,VOFA/主循环每秒读一次清零 → SYNC_Hz。
+ * 因扫描为 14 边沿/帧,帧率 = SYNC_Hz / 14。计数低/忽高忽低 → SYNC 整形链或 EXTI 丢中断。 */
+volatile uint32 g_dot_sync_edges = 0;
 
 // ����TCϵ��Ĭ���ǲ�֧���ж�Ƕ�׵ģ�ϣ��֧���ж�Ƕ����Ҫ���ж���ʹ�� interrupt_global_enable(0); �������ж�Ƕ��
 // �򵥵�˵ʵ���Ͻ����жϺ�TCϵ�е�Ӳ���Զ������� interrupt_global_disable(); ���ܾ���Ӧ�κε��жϣ������Ҫ�����Լ��ֶ����� interrupt_global_enable(0); �������жϵ���Ӧ��
@@ -50,15 +61,20 @@ IFX_INTERRUPT(cc60_pit_ch0_isr, CCU6_0_CH0_INT_VECTAB_NUM, CCU6_0_CH0_ISR_PRIORI
 {
     interrupt_global_enable(0);
     pit_clear_flag(CCU60_CH0);
+    kart_debug_uart_tick_5ms();
 
-    kart_imu_update();
+    kart_multicore_imu_update();
     kart_control_speed_update();
-    kart_odom_update();
+    kart_multicore_odom_update();
 
     if(!kart_control_is_enabled())
     {
         power_force_rear_pwm_zero();
     }
+
+    /* 末尾递增 5ms 节拍:主循环协作式调度的时基。放最后,保证本拍传感器/控制
+     * 已更新完再放行主循环任务。 */
+    g_kart_tick_5ms++;
 
 }
 
@@ -74,12 +90,18 @@ IFX_INTERRUPT(cc60_pit_ch1_isr, CCU6_0_CH1_INT_VECTAB_NUM, CCU6_0_CH1_ISR_PRIORI
 
 IFX_INTERRUPT(cc61_pit_ch0_isr, CCU6_1_CH0_INT_VECTAB_NUM, CCU6_1_CH0_ISR_PRIORITY)
 {
-    interrupt_global_enable(0);                     // �����ж�Ƕ��
+    interrupt_global_enable(0);                     // \xbf\xaa\xc6\xf0\xd6\xd0\xb6\xcf\xc7\xb6\xcc\xd7
     pit_clear_flag(CCU61_CH0);
 
-
-
-
+#if DOT_MATRIX_SCREEN_USE_PIT_SCAN
+    /* 点阵屏 1ms 软扫时基(2026-07-26)。
+     * 原方案靠 TLD7002 SYNC(P15.8)下降沿驱动,但实测 SYNC 一整秒零边沿
+     * (灯板 OUT15→LMV321→飞线 这条整形链不出方波),故改用本 PIT 驱动。
+     * 每拖一个 entry,2 entry = 1 行,14 entry = 1 帧 → 帧率 1000/14 ≈ 71Hz,肉眼常亮。
+     * 本中断优先级已降到 9(< UART1_RX=14),保证 scan() 里 set_duty 的
+     * 半双工回环字节能被 uart1_rx_isr 及时搬走(RX 软 FIFO 只 1 字节深)。 */
+    dot_matrix_screen_scan();
+#endif
 }
 
 IFX_INTERRUPT(cc61_pit_ch1_isr, CCU6_1_CH1_INT_VECTAB_NUM, CCU6_1_CH1_ISR_PRIORITY)
@@ -107,13 +129,12 @@ IFX_INTERRUPT(exti_ch0_ch4_isr, EXTI_CH0_CH4_INT_VECTAB_NUM, EXTI_CH0_CH4_INT_PR
 
     }
 
-    if(exti_flag_get(ERU_CH4_REQ13_P15_5))          // ͨ��4�ж�
+    if(exti_flag_get(ERU_CH4_REQ13_P15_5))          // 通道4中断:空闲
     {
         exti_flag_clear(ERU_CH4_REQ13_P15_5);
 
-
-
-
+        /* 2026-07-26 实车确认 SYNC 在 P15.8(ERU_CH5,见 exti_ch1_ch5_isr),
+         * P15.5 无设备接入,此处仅清标志占位。 */
     }
 }
 
@@ -129,12 +150,19 @@ IFX_INTERRUPT(exti_ch1_ch5_isr, EXTI_CH1_CH5_INT_VECTAB_NUM, EXTI_CH1_CH5_INT_PR
 
     }
 
-    if(exti_flag_get(ERU_CH5_REQ1_P15_8))           // ͨ��5�ж�
+    if(exti_flag_get(ERU_CH5_REQ1_P15_8))           // 通道5中断:TLD7002 点阵屏 SYNC 下降沿
     {
         exti_flag_clear(ERU_CH5_REQ1_P15_8);
 
-         
+        g_dot_sync_edges++;                         /* 诊断:累计 SYNC 边沿,主循环每秒读一次算 SYNC_Hz */
 
+        /* 点阵屏 SYNC(P15.8)每个 PWM 周期触发,逐 entry 推进扫描。
+         * 直接在此调 scan():其内 tld7002_set_duty 回读会因本 ISR(pri 61)>UART1_RX(pri 14)
+         * 无法被抢占而拿不到应答(返回 COMM_ERROR,被 set_duty 忽略),但 TX+DC_SYNC 照发,
+         * 占空比仍下发生效 → 显示正常,无死锁(回读为单次非阻塞 fifo_read)。 */
+#if !DOT_MATRIX_SCREEN_USE_PIT_SCAN
+        dot_matrix_screen_scan();
+#endif
     }
 }
 
@@ -189,11 +217,15 @@ IFX_INTERRUPT(uart0_tx_isr, UART0_INT_VECTAB_NUM, UART0_TX_INT_PRIO)
 }
 IFX_INTERRUPT(uart0_rx_isr, UART0_INT_VECTAB_NUM, UART0_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // �����ж�Ƕ��
+    interrupt_global_enable(0);                     // 开启中断嵌套
 
-#if DEBUG_UART_USE_INTERRUPT                        // ������� debug �����ж�
-        debug_interrupr_handler();                  // ���� debug ���ڽ��մ������� ���ݻᱻ debug ���λ�������ȡ
-#endif                                              // ����޸��� DEBUG_UART_INDEX ����δ�����Ҫ�ŵ���Ӧ�Ĵ����ж�ȥ
+    /* 2026-07-24 TLD7002 已飞线到 UART1(见 zf_device_tld7002.h),此处回调挪到 uart1_rx_isr。
+     * UART0(P14.0/P14.1)现已空出,飞线后无设备接入,一般不再触发本 ISR;
+     * 若有噪声触发,轮询读掉一个字节清 FIFO/中断标志,防悬挂(uart_query_byte 非阻塞)。 */
+    {
+        uint8 discard;
+        (void)uart_query_byte(UART_0, &discard);
+    }
 }
 
 
@@ -208,8 +240,12 @@ IFX_INTERRUPT(uart1_tx_isr, UART1_INT_VECTAB_NUM, UART1_TX_INT_PRIO)
 }
 IFX_INTERRUPT(uart1_rx_isr, UART1_INT_VECTAB_NUM, UART1_RX_INT_PRIO)
 {
-    interrupt_global_enable(0);                     // �����ж�Ƕ��
-    camera_uart_handler();                          // ����ͷ��������ͳһ�ص�����
+    interrupt_global_enable(0);                     // 开启中断嵌套
+
+    /* 2026-07-24 TLD7002 飞线到 UART1(P11.12/P11.10),原摄像头回调 camera_uart_handler
+     * 暂停用(摄像头当前不用)。喂 TLD7002 回调:把芯片响应/半双工回环字节写入 fifo,
+     * 否则 init/setDuty 诊断永不完成,列输出停在高阻态。 */
+    tld7002_callback();
 }
 
 // ����2Ĭ�����ӵ�����ת����ģ��

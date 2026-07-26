@@ -7,7 +7,7 @@
  * 路径录制模块
  * ------------------------------------------------------------------
  * 车辆行驶时按"距离或转角阈值"自适应采样,把航位推算坐标 + 速度打包
- * 存入 RAM 环形缓冲。坐标/yaw 均取相对录制起点的增量,不依赖绝对零点,
+ * 存入 RAM 缓冲。坐标旋转到录制起点车体系(x向右、y向前)，yaw取相对起点增量，
  * 规避 IMU 漂移和重启后零点不一致的问题。
  * ------------------------------------------------------------------
  * 调用位置:
@@ -39,6 +39,19 @@ void   kart_record_poll(void);
 uint8  kart_record_is_running(void);
 uint16 kart_record_get_count(void);
 const  kart_waypoint_t* kart_record_get_waypoints(void);
+
+/* 取本次录制起点航向(度,世界系):录制坐标系相对里程计世界系的旋转量。
+ * 科目三反向复现用它把世界 odom 投影回录制坐标系,与倒序数组同系。 */
+float  kart_record_get_origin_yaw(void);
+
+/* -------------------- 科目四开环反向复现数据(RAM only,不入 Flash)-------------------- */
+/* 与 record 路径点同索引、同帧采样的两个并行数组:
+ *   steer[i] = 第 i 点录制瞬间转向绝对编码器 center_delta(真实物理打角);
+ *   dist[i]  = 第 i 点相对录制起点的累计里程(米,单调增)。
+ * 开环倒车按里程 s=total-d 索引回放同一打角,不走 Pure Pursuit/航向外环。 */
+const int16* kart_record_get_steer(void);       /* 打角数组首址 */
+const float* kart_record_get_dist(void);        /* 累计里程数组首址 */
+float  kart_record_get_total_dist(void);        /* 全程总里程(=末点 dist) */
 
 /* -------------------- Flash 持久化便捷接口 -------------------- */
 /* 把当前 RAM 里录好的路径存进 Flash 指定槽位(阻塞擦写,只能停车静止时调)。

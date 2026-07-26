@@ -5,8 +5,11 @@
 #include "kart_record.h"
 #include "kart_voice.h"
 #include "kart_horn.h"
+#include "kart_motion.h"
 #include "kart_odom.h"
 #include "kart_remote.h"
+#include "kart_debug_uart.h"
+#include "kart_light.h"
 #include "board_pins.h"
 #include <math.h>
 
@@ -21,6 +24,7 @@
 
 static kart_mission_mode_t   mission_mode  = MISSION_IDLE;
 static kart_subject1_stage_t subject1_stage = S1_WAIT_START;
+static kart_subject4_stage_t subject4_stage = S4_PHASE1_RECORD;
 
 /* 倒库里程基准:进 S1_REVERSE_IN 时记下当前累计路程,增量到阈值判停。 */
 static float subject1_reverse_dist0 = 0.0f;
@@ -33,9 +37,10 @@ static void mission_stop_all(void)
 {
     kart_voice_cmd_t drop;
 
-    /* 1. 停录制/复现 */
+    /* 1. 停录制/复现/语音运动 */
     kart_playback_stop();               /* 内部已关速度环+航向外环+清目标 */
     kart_record_stop();
+    kart_motion_stop();                 /* 复位运动状态机,防切模式后残留 busy 阻塞分发 */
 
     /* 2. 后轮目标清零 + 关速度环(playback_stop 已做,这里兜底保证) */
     kart_control_set_target(0.0f);
@@ -63,7 +68,32 @@ static void mission_enter(kart_mission_mode_t mode)
 
         case MISSION_SUBJECT_2:
             /* 语音/鸣笛 init 在 cpu0_main 启动时已做一次;这里不重复 init。
-             * 进入即准备接收,poll/dispatch 交给本模式 loop。 */
+             * 进入即准备接收,poll/dispatch 交给本模式 loop。
+             *
+             * 2026-07-26 串口交接(见 board_pins.h 语音模块段):
+             * 语音模块与 VOFA 日志共用 UART_10(P13.0/13.1),波特率不同(115200 / 460800)。
+             * 顺序必须是"先停日志、再切波特率",不能反:
+             *   若先切到 115200,background_poll 还会把已在环里的 JustFloat 字节
+             *   以 115200 喷出去,直接灌进语音模块 RX,可能被它当指令误解析。
+             * 硬件前提:进科目二前拔掉无线模块,插上语音模块。 */
+#if BOARD_VOICE_SHARES_AUX_UART
+            kart_debug_uart_set_enabled(0);
+#endif
+            kart_voice_uart_acquire();
+            break;
+
+        case MISSION_SUBJECT_4:
+            /* 科目四第一阶段:与科目三录制完全相同(遥控走迷宫 + 录制)。
+             * 区别只在返程:科目四不掉头,停车区按同一键直接开环倒车原路返回。
+             *   ① odom 清零(录制起点车体系对齐);② 开录制(CPU2 采样,同帧记打角+里程);
+             *   ③ 遥控急停一次防残留,之后 remote_control_update 接管。
+             * 注意:开环倒车靠 odom 累计里程映射,故录制到倒车全程 odom 不再 reset。 */
+            subject4_stage = S4_PHASE1_RECORD;
+            subject1_start_key_last = gpio_get_level(BOARD_START_KEY_PIN);
+            kart_odom_reset();
+            kart_odom_set_active(1);
+            kart_record_start();
+            kart_remote_control_stop();
             break;
 
         case MISSION_REMOTE:
@@ -124,8 +154,16 @@ static void subject1_loop(void)
              * (绕桩方向已烘在轨迹里)。playback_start 内部会开速度环+航向外环。 */
             if(subject1_start_pressed())
             {
-                kart_playback_start();
-                subject1_stage = S1_CONE_ROUTE;
+                if(kart_playback_start())
+                {
+                    subject1_stage = S1_CONE_ROUTE;
+                }
+                else
+                {
+                    /* 空路径或加载失败绝不能继续进入倒库流程。 */
+                    mission_stop_all();
+                    subject1_stage = S1_FAULT;
+                }
             }
             break;
 
@@ -201,6 +239,10 @@ static void subject2_loop(void)
      * 鸣笛节拍机已迁移至 CCU60_CH1 独立1ms中断,不再需要主循环轮询。 */
     kart_voice_poll();
     kart_voice_dispatch();
+
+    /* 运动动作状态机一拍:推进当前动作 + deadman 急停(idle 时空操作)。
+     * 实际转向/速度 PWM 仍由主循环控制环产生,本调用只设目标+判完成。 */
+    kart_motion_update();
 }
 
 static void remote_loop(void)
@@ -212,9 +254,78 @@ static void remote_loop(void)
     kart_remote_control_update();
 }
 
+static void subject4_loop(void)
+{
+    /* 开环倒车阶段接受遥控急停:命中即完整停机回 IDLE(全程 deadman 保护)。
+     * 录制阶段的急停由 remote_control_update 内部处理(遥控本身即 deadman)。 */
+    if(subject4_stage == S4_PHASE2_REVERSE && subject1_estop_requested())
+    {
+        kart_mission_set_mode(MISSION_IDLE);
+        return;
+    }
+
+    switch(subject4_stage)
+    {
+        case S4_PHASE1_RECORD:
+            /* 第一阶段:遥控走迷宫 + 录制(同科目三)。转向/速度由遥控接管,
+             * 录制采样 + 同帧打角/里程由 CPU2 的 kart_record_poll 每拍做。
+             * 人开到停车区后按 MID/START 键 → 停录,同一按键直接触发开环倒车:
+             * 车头不掉转,不搬车,不掉头,odom 不 reset(倒车里程接着录制里程算)。 */
+            kart_remote_control_update();
+
+            if(subject1_start_pressed())
+            {
+                kart_record_stop();
+                /* 不调 kart_remote_control_stop():它第一行强制 sw3=L,而本函数在同一
+                 * 次按键里紧接着启动开环倒车,下一个 5ms 拍 kart_playback_poll 的 deadman
+                 * (sw3==L 即停)会读到这个假 L,在 kart_remote_poll(10ms 隔拍)恢复真实
+                 * 挡位前就把倒车杀掉 → 车只动 1 拍等于不动。科目三因两次按键间有搬车间隔,
+                 * poll 早已恢复 sw3 故无此问题。start_openloop_reverse 已完整设置转向内环
+                 * (angle_enable+目标打角)与速度环(enable+OL_SPEED),无需再 stop 遥控;
+                 * 失败分支有 mission_stop_all() 兜底。
+                 * 开环倒车:按里程回放录制打角。odom 保持 active(不 reset),
+                 * start 内部取当前 odom 里程作倒车基准 dist0。 */
+                if(kart_playback_start_openloop_reverse())
+                {
+                    subject4_stage = S4_PHASE2_REVERSE;
+                }
+                else
+                {
+                    /* 路径无效(点数<2):绝不进入倒车,直接故障锁止。 */
+                    mission_stop_all();
+                    subject4_stage = S4_FAULT;
+                }
+            }
+            break;
+
+        case S4_PHASE2_REVERSE:
+            /* 第二阶段:开环倒车原路返回发车区。实际打角/速度由主循环
+             * kart_playback_poll() 的开环分支执行(按里程查表回放打角),
+             * deadman(遥控失联/低挡)在 poll 入口判。返回发车区(剩余里程<阈值)
+             * 或查到起点自动 stop → is_running 变 0,车停稳,返回完成。 */
+            if(!kart_playback_is_running())
+            {
+                subject4_stage = S4_FINISHED;
+            }
+            break;
+
+        case S4_FINISHED:
+            /* 返回完成:保持无输出。停机已在 playback 跑完时做完。 */
+            break;
+
+        case S4_FAULT:
+            /* 故障锁止:不产生任何运动输出。 */
+            break;
+
+        default:
+            break;
+    }
+}
+
 /* ============ 对外接口 ============ */
 void kart_mission_init(void)
 {
+    gpio_init(BOARD_START_KEY_PIN, GPI, 0, GPI_PULL_UP);
     mission_mode   = MISSION_IDLE;
     subject1_stage = S1_WAIT_START;
     mission_stop_all();                 /* 上电即保证无残留输出 */
@@ -230,6 +341,19 @@ void kart_mission_set_mode(kart_mission_mode_t mode)
     /* 统一 exit:任何模式退出都执行完整停机(清运动+蜂鸣器+队列)。 */
     mission_stop_all();
 
+    /* 退出科目二:把共用串口还给 VOFA 日志(切回 460800)再开闸。
+     * 放在 mission_enter 之前,避免与新模式的 enter 抢同一外设。
+     * 顺序与进入时相反:先切波特率、后开闸 —— 开闸后立刻可能发字节,
+     * 此时外设必须已经是 460800,否则第一批帧以 115200 发出会是乱码。 */
+    if(MISSION_SUBJECT_2 == mission_mode)
+    {
+        kart_light_set_command(KART_LIGHT_CMD_OFF);   /* 灯板图案归零,屏幕交回模式号显示 */
+        kart_voice_uart_release();
+#if BOARD_VOICE_SHARES_AUX_UART
+        kart_debug_uart_set_enabled(1);
+#endif
+    }
+
     mission_mode = mode;
     mission_enter(mode);
 }
@@ -243,6 +367,9 @@ void kart_mission_poll(void)
             break;
         case MISSION_SUBJECT_2:
             subject2_loop();
+            break;
+        case MISSION_SUBJECT_4:
+            subject4_loop();
             break;
         case MISSION_REMOTE:
             remote_loop();
@@ -263,4 +390,9 @@ kart_mission_mode_t kart_mission_get_mode(void)
 kart_subject1_stage_t kart_mission_get_subject1_stage(void)
 {
     return subject1_stage;
+}
+
+kart_subject4_stage_t kart_mission_get_subject4_stage(void)
+{
+    return subject4_stage;
 }
