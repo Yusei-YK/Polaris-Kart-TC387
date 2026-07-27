@@ -19,6 +19,7 @@
 #include "zf_device_dot_matrix_screen.h"
 #include "kart_light.h"
 #include "kart_multicore.h"
+#include "kart_params.h"
 #include "isr.h"                 /* g_kart_tick_5ms + 调度器监测 g_sched_* */
 
 /* 硬件自测开关:=1 时开机进 kart_hw_test_run() 死循环(验证并口屏/旋钮/按键),
@@ -177,11 +178,17 @@ static void kart_task_10ms(void)
     kart_debug_uart_poll();     /* 只采样组帧入环形缓冲(内部再 4tick=20ms 门控) */
 
     kart_task_light_10ms();     /* 灯板动画推进 + 帧下发(仅科目二有灯光命令时生效) */
+
+#if KART_USE_MENU
+    /* 旋钮正交解码只能放这一拍,不能跟 kart_menu_poll 一起放 50ms:
+     * EC11 一格 4 个边沿,手旋时单相最快约 25ms 一变,50ms 采样必漏边沿。
+     * 只读两个 GPIO,不刷屏不写 Flash,进控制窗口无风险。 */
+    kart_menu_enc_poll();
+#endif
 }
 
 /* 50ms 拍:菜单按键扫描 + IPS200 屏幕刷新(全屏刷新耗时大,严禁进控制窗口)。 */
-static void kart_task_50ms(void)
-{
+static void kart_task_50ms(void){
 #if KART_USE_MENU
     kart_menu_poll();
 #endif
@@ -298,6 +305,11 @@ int core0_main(void)
     kart_record_init();
     kart_playback_init();
 
+    /* 现场可调参数表:从 DFlash 页127 载入上次存的值(无有效数据则用各模块宏的
+     * 出厂默认),再推给速度环/航向外环。必须放在 control/steer_ctrl init 之后,
+     * 否则会被它们的默认值覆盖回去。 */
+    kart_params_init();
+
     /* 科目状态机:置 IDLE 并执行统一停机,保证上电无残留输出。 */
     kart_mission_init();
 
@@ -401,6 +413,7 @@ int core0_main(void)
         kart_debug_uart_poll();
 
 #if KART_USE_MENU
+        kart_menu_enc_poll();       /* 旋钮解码,旧主循环里 5ms 一次,采样更充裕 */
         kart_menu_poll();
 #endif
 

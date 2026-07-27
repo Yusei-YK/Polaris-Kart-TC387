@@ -1,6 +1,7 @@
 #include "kart_remote.h"
 #include "kart_control.h"
 #include "kart_steer_ctrl.h"
+#include "kart_params.h"
 
 /*
  * SBUS 枪式遥控接收 —— 解析 + 失联兜底层实现(第一版:纯观测)
@@ -263,10 +264,13 @@ static float remote_map_steer(uint16 raw)
 }
 
 /* 油门扳机 → 目标速度(脉冲/5ms),带死区。
- * 中位 880=停;扳到底 579(<center)=前进满 → +MAX;前推 1180(>center)=倒车满 → −MAX。 */
+ * 中位 880=停;扳到底 579(<center)=前进满 → +MAX;前推 1180(>center)=倒车满 → −MAX。
+ * 满油门速度改走 kart_params(菜单 RC Vmax),默认值仍是 KART_REMOTE_MAX_SPEED。
+ * 录路径要慢、试车要快,不用为了改这个值重编译烧写。 */
 static float remote_map_throttle(uint16 raw)
 {
     int diff = (int)raw - KART_REMOTE_THR_CENTER;
+    float vmax = kart_params_get(KART_PARAM_RC_VMAX);
     float spd;
 
     if(diff > -KART_REMOTE_DEADZONE && diff < KART_REMOTE_DEADZONE)
@@ -279,19 +283,19 @@ static float remote_map_throttle(uint16 raw)
         /* 前进:[fwd, center-dz] → [+MAX, 0] */
         int span = KART_REMOTE_THR_CENTER - KART_REMOTE_THR_FWD;        /* 正 */
         if(span == 0) return 0.0f;
-        spd = (float)(-diff) / (float)span * KART_REMOTE_MAX_SPEED;     /* 正=前进 */
+        spd = (float)(-diff) / (float)span * vmax;                       /* 正=前进 */
     }
     else
     {
         /* 倒车:[center+dz, rev] → [0, −MAX] */
         int span = KART_REMOTE_THR_REV - KART_REMOTE_THR_CENTER;        /* 正 */
         if(span == 0) return 0.0f;
-        spd = -(float)(diff) / (float)span * KART_REMOTE_MAX_SPEED;     /* 负=倒车 */
+        spd = -(float)(diff) / (float)span * vmax;                       /* 负=倒车 */
     }
 
     /* 幅值封顶(摇杆超标定端点时) */
-    if(spd >  KART_REMOTE_MAX_SPEED) spd =  KART_REMOTE_MAX_SPEED;
-    if(spd < -KART_REMOTE_MAX_SPEED) spd = -KART_REMOTE_MAX_SPEED;
+    if(spd >  vmax) spd =  vmax;
+    if(spd < -vmax) spd = -vmax;
 
     return spd;
 }

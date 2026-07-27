@@ -73,11 +73,34 @@
 #define BOARD_WIRELESS_RTS_PIN          (P10_2)     /* 无线模块 RTS(暂未用),v2 网表不变 */
 #define BOARD_WIRELESS_RST_PIN          (P11_6)     /* 无线模块复位(暂未用),v2 网表不变 */
 
-/* VOFA 日志串口:接无线模块 @ UART10 P13.0(TX)/P13.1(RX)。
- * 2026-07-24 由 UART2(P14.2/P14.3)改到 UART10(P13.0/P13.1)对接无线模块。 */
+/* VOFA 日志串口。
+ * 2026-07-24 由 UART2(P14.2/P14.3)改到 UART10(P13.0/P13.1)对接无线模块。
+ *
+ * 2026-07-27 增加 UART0(P14.0/P14.1)选项:现场没带无线模块,只能用 USB-TTL 直插
+ * 抓 VOFA。P13.0/P13.1 是无线模块排针位,不方便接 TTL 线,故改用空闲的 ASCLIN0。
+ *   KART_LOG_ON_UART0 = 1 → UART_0 / P14.0(TX) / P14.1(RX)  ← 当前
+ *   KART_LOG_ON_UART0 = 0 → UART_10 / P13.0 / P13.1(无线模块,赛前改回)
+ *
+ * 前提与已知风险:
+ *   ① P14.0/P14.1 不在《尽量不要使用的引脚.txt》禁用表内(表里是 P14.2~P14.6);
+ *   ② 全工程 ASCLIN0 无其他用户,uart0_rx_isr(isr.c)只做丢弃兜底,不冲突;
+ *   ③ 【历史结论】cpu0_main.c 注释记着 2026-07-26 给 TLD7002 挪线时"UART0 实测
+ *      收发不通"(ERR=1/RX=0/回环 0)。但那次是灯板 2M 半双工用法,与本处 460800
+ *      单向 TX 不同,未必同因。若实测仍不通,把 KART_LOG_ON_UART0 改回 0。
+ *
+ * 切到 UART0 后日志与语音不再共用外设 → BOARD_VOICE_SHARES_AUX_UART 自动变 0,
+ * 进出科目二不再切波特率/停日志(语音仍独占 UART_10)。 */
+#define KART_LOG_ON_UART0               (1)
+
+#if KART_LOG_ON_UART0
+#define BOARD_AUX_UART_INDEX            (UART_0)
+#define BOARD_AUX_UART_TX_PIN          (UART0_TX_P14_0)
+#define BOARD_AUX_UART_RX_PIN          (UART0_RX_P14_1)
+#else
 #define BOARD_AUX_UART_INDEX            (UART_10)
 #define BOARD_AUX_UART_TX_PIN          (UART10_TX_P13_0)
 #define BOARD_AUX_UART_RX_PIN          (UART10_RX_P13_1)
+#endif
 #define BOARD_AUX_UART_BAUD            (115200)
 #define BOARD_AUX_UART_BAUD_FAST       (460800)
 
@@ -111,8 +134,10 @@
 #endif
 #define BOARD_VOICE_UART_BAUD           (115200)    /* 语音模块固定 115200 8N1,不可改 */
 
-/* 语音与日志是否共用同一外设:为 1 时进科二必须切波特率 + 停日志。 */
-#define BOARD_VOICE_SHARES_AUX_UART     (KART_VOICE_ON_AUX_UART)
+/* 语音与日志是否共用同一外设:为 1 时进科二必须切波特率 + 停日志。
+ * 2026-07-27:日志可切到 UART0,故不能再写死等于 KART_VOICE_ON_AUX_UART ——
+ * 两者都落在 UART_10 时才算共用。日志在 UART0 时科二无需停日志/切波特率。 */
+#define BOARD_VOICE_SHARES_AUX_UART     (KART_VOICE_ON_AUX_UART && !KART_LOG_ON_UART0)
 
 /* ---------------- GPS(UART_3,交接文档 3.5)---------------- */
 /* 主板有 GPS,科目一先跑纯惯导,GPS 仅作辅助/以后融合用。
@@ -132,9 +157,40 @@
 #define BOARD_LCD_CS_PIN               (P15_2)
 #define BOARD_LCD_BL_PIN               (P15_4)
 
-/* ---------------- 发车按键(v2 网表 H1 排针 START)---------------- */
-/* START 键接 P20.7,上拉输入,按下接地读 0。科目一等此键触发发车。
- * 若实测按下读 1(高有效),把 kart_mission 里的边沿判据取反即可。 */
+/* ---------------- 按键板(2026-07-28 新板,按键板.tel 网表)----------------
+ * 板上三个操作件,H1 是 2.54-2×6P 排线到主板:
+ *   SW1  EC11 旋转编码器  A=P11.2  B=P11.3  按下(D)=P20.6   (C/E 脚接 GND)
+ *   SW2  五向开关         UP=P33.11 DOWN=P20.0 LEFT=P21.6 RIGHT=P21.7 MID=P33.4
+ *   SW3  轻触开关         START=P20.7                        (3/4 脚接 GND)
+ *
+ * 电平:三个件的公共端全接 GND,按下/导通把信号脚拉低 → 按下读 0。
+ * 上拉在主板侧(按键板上的 R1/4.7k 是 LED1 限流,不是按键上拉),故软件用
+ * GPI_FLOATING_IN,不叠片内上拉。若日后换成不带上拉的主板,把 kart_menu_init /
+ * kart_mission_init 里这几个脚改 GPI_PULL_UP 即可,逻辑不用动。
+ *
+ * 与旧板的差异(换板后同步改的地方):
+ *   DOWN   P20.6 → P20.0    P20.6 让给旋钮按下
+ *   MID    P20.7 → P33.4    P20.7 让给独立 START 键
+ *   LEFT   P33.4 → P21.6    旧板 P21.6 与 UP 短路,故当年拿 P33.4 顶 LEFT,新板已修
+ *   START  仍是 P20.7,但不再与菜单 MID 共用一个脚 ——
+ *          就绪/科目四界面不必再屏蔽菜单 MID,menu 与 mission 也不会再对同一脚
+ *          做两种 gpio_init(旧板 menu 配 FLOATING、mission 配 PULL_UP,谁后 init 谁生效)。
+ *
+ * 引脚占用已核对:P11.2/11.3 空闲(灯板占 P11.10/11.12,无线 RST 占 P11.6);
+ * P20.0 空闲(isr.c 里 ERU_CH6_REQ9_P20_0 是注释掉的示例);P21.6/21.7 空闲
+ * (转向占 P21.2/21.3);均不在《尽量不要使用的引脚.txt》(P14.2~14.6/P10.5/P10.6)内。 */
+#define BOARD_KEY_UP_PIN               (P33_11)
+#define BOARD_KEY_DOWN_PIN             (P20_0)
+#define BOARD_KEY_LEFT_PIN             (P21_6)
+#define BOARD_KEY_RIGHT_PIN            (P21_7)
+#define BOARD_KEY_MID_PIN              (P33_4)
+
+#define BOARD_ENC_A_PIN                (P11_2)
+#define BOARD_ENC_B_PIN                (P11_3)
+#define BOARD_ENC_SW_PIN               (P20_6)      /* 旋钮按下,当第二个 MID 用 */
+
+/* 发车键(独立轻触开关)。上拉输入,按下接地读 0,科目一/科目四等此键触发。
+ * 若实测按下读 1,把 kart_mission 里的边沿判据取反即可。 */
 #define BOARD_START_KEY_PIN            (P20_7)
 
 /* ---------------- 蜂鸣器 / ADC 检测(交接文档 3.6 / 5)---------------- */

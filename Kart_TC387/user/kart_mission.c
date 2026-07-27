@@ -10,6 +10,7 @@
 #include "kart_remote.h"
 #include "kart_debug_uart.h"
 #include "kart_light.h"
+#include "kart_params.h"
 #include "board_pins.h"
 #include <math.h>
 
@@ -30,6 +31,8 @@ static kart_subject4_stage_t subject4_stage = S4_PHASE1_RECORD;
 static float subject1_reverse_dist0 = 0.0f;
 /* START 键上一拍电平(下降沿检测:上拉输入,按下 1→0)。 */
 static uint8 subject1_start_key_last = 1;
+/* 科目四自动停录:连续判到"车停住"的拍数(10ms/拍),达阈值即停录并开倒车。 */
+static uint16 subject4_autostop_hold = 0;
 
 /* ============ 统一停机:任意模式退出/进 IDLE/FAULT 都调 ============ */
 /* 覆盖交接文档指出的"b0 不关内环"的完整停机缺口。 */
@@ -89,6 +92,7 @@ static void mission_enter(kart_mission_mode_t mode)
              *   ③ 遥控急停一次防残留,之后 remote_control_update 接管。
              * 注意:开环倒车靠 odom 累计里程映射,故录制到倒车全程 odom 不再 reset。 */
             subject4_stage = S4_PHASE1_RECORD;
+            subject4_autostop_hold = 0;
             subject1_start_key_last = gpio_get_level(BOARD_START_KEY_PIN);
             kart_odom_reset();
             kart_odom_set_active(1);
@@ -190,7 +194,7 @@ static void subject1_loop(void)
                 kart_steer_set_target_delta(0.0f);
 
                 kart_control_set_enable(1);
-                kart_control_set_target(KART_S1_REVERSE_SPEED);
+                kart_control_set_target(kart_params_get(KART_PARAM_S1_REV_SPD));
 
                 subject1_stage = S1_REVERSE_IN;
             }
@@ -201,10 +205,18 @@ static void subject1_loop(void)
             /* 倒车里程增量(dist_sum 用 fabs 累加,倒车也往上加)。 */
             float d = kart_odom_get_dist() - subject1_reverse_dist0;
 
+            /* 停车里程走菜单(S1 RevStop):赛前量库位深浅不用重烧。
+             * 减速点仍用宏,但钉在停车点前 0.1m 以内,防停车点调得比减速点
+             * 还近时"永远不降速直接撞库底"。 */
+            float stop_d = kart_params_get(KART_PARAM_S1_REV_STOP);
+            float slow_d = KART_S1_REVERSE_SLOW_DIST;
+
             /* 全程保持方向回中(内环持续按住中位,抵抗地面扰动)。 */
             kart_steer_set_target_delta(0.0f);
 
-            if(d >= KART_S1_REVERSE_STOP_DIST)
+            if(slow_d > stop_d - 0.10f) slow_d = stop_d - 0.10f;
+
+            if(d >= stop_d)
             {
                 /* 到停车点:完整停机收车。 */
                 kart_control_set_target(0.0f);
@@ -212,7 +224,7 @@ static void subject1_loop(void)
                 kart_steer_set_angle_enable(0);
                 subject1_stage = S1_FINISHED;
             }
-            else if(d >= KART_S1_REVERSE_SLOW_DIST)
+            else if(d >= slow_d)
             {
                 /* 过减速点:降到慢速轻靠库底。 */
                 kart_control_set_target(KART_S1_REVERSE_SLOW_SPEED);
@@ -269,29 +281,59 @@ static void subject4_loop(void)
         case S4_PHASE1_RECORD:
             /* 第一阶段:遥控走迷宫 + 录制(同科目三)。转向/速度由遥控接管,
              * 录制采样 + 同帧打角/里程由 CPU2 的 kart_record_poll 每拍做。
-             * 人开到停车区后按 MID/START 键 → 停录,同一按键直接触发开环倒车:
+             * 结束不用按键:人把车开直回正再停住,车停 500ms 即自动停录并开倒车。
+             * START 键保留为手动提前触发(不想等那 500ms 时用)。
              * 车头不掉转,不搬车,不掉头,odom 不 reset(倒车里程接着录制里程算)。 */
             kart_remote_control_update();
 
-            if(subject1_start_pressed())
+            /* 自动停录判据:已走够 ARM_DIST(防发车前静止误触发)+ 左右轮测速幅值
+             * 连续低于 EPS 达 HOLD 拍。测速走的是 8 拍滑动平均,本身已滤过抖动。 */
             {
+                float vl = kart_control_get_left_meas();
+                float vr = kart_control_get_right_meas();
+
+                if(vl < 0.0f) vl = -vl;
+                if(vr < 0.0f) vr = -vr;
+
+                if(kart_odom_get_dist() >= KART_S4_AUTOSTOP_ARM_DIST
+                   && vl < KART_S4_AUTOSTOP_SPEED_EPS
+                   && vr < KART_S4_AUTOSTOP_SPEED_EPS)
+                {
+                    subject4_autostop_hold++;
+                }
+                else
+                {
+                    subject4_autostop_hold = 0;
+                }
+            }
+
+            if(subject1_start_pressed()
+               || subject4_autostop_hold >= KART_S4_AUTOSTOP_HOLD_TICKS)
+            {
+                uint16 n = kart_record_get_count();
+
                 kart_record_stop();
-                /* 不调 kart_remote_control_stop():它第一行强制 sw3=L,而本函数在同一
-                 * 次按键里紧接着启动开环倒车,下一个 5ms 拍 kart_playback_poll 的 deadman
-                 * (sw3==L 即停)会读到这个假 L,在 kart_remote_poll(10ms 隔拍)恢复真实
-                 * 挡位前就把倒车杀掉 → 车只动 1 拍等于不动。科目三因两次按键间有搬车间隔,
-                 * poll 早已恢复 sw3 故无此问题。start_openloop_reverse 已完整设置转向内环
-                 * (angle_enable+目标打角)与速度环(enable+OL_SPEED),无需再 stop 遥控;
-                 * 失败分支有 mission_stop_all() 兜底。
-                 * 开环倒车:按里程回放录制打角。odom 保持 active(不 reset),
-                 * start 内部取当前 odom 里程作倒车基准 dist0。 */
+
+                if(n < 2)
+                {
+                    /* 路径无效(点数<2):绝不进入倒车,直接故障锁止。 */
+                    mission_stop_all();
+                    subject4_stage = S4_FAULT;
+                    break;
+                }
+
+                /* 同一拍直接开倒车,不再插过渡等待:判停条件本身已含"连续 500ms
+                 * 车速≈0",车此刻确实停稳,odom 基准不含滑行余量;打角也已由人
+                 * 在停车前回正,录制末点打角≈0,起步不带角度。
+                 * 不调 kart_remote_control_stop():它第一行强制 sw3=L,而
+                 * kart_playback_poll 的 deadman(sw3==L 即停)会读到这个假 L
+                 * 把刚启动的倒车杀掉。 */
                 if(kart_playback_start_openloop_reverse())
                 {
                     subject4_stage = S4_PHASE2_REVERSE;
                 }
                 else
                 {
-                    /* 路径无效(点数<2):绝不进入倒车,直接故障锁止。 */
                     mission_stop_all();
                     subject4_stage = S4_FAULT;
                 }
@@ -325,7 +367,11 @@ static void subject4_loop(void)
 /* ============ 对外接口 ============ */
 void kart_mission_init(void)
 {
-    gpio_init(BOARD_START_KEY_PIN, GPI, 0, GPI_PULL_UP);
+    /* 发车键(按键板 SW3,P20.7)。主板侧有上拉,按下接地读 0,故浮空输入即可
+     * (与 kart_menu_init 里其余按键口一致)。
+     * 2026-07-28 换按键板后 START 已是独立引脚,不再与菜单 MID(P33.4)共用,
+     * 也就不存在过去 menu/mission 对同一脚配两种模式、谁后 init 谁生效的问题。 */
+    gpio_init(BOARD_START_KEY_PIN, GPI, 0, GPI_FLOATING_IN);
     mission_mode   = MISSION_IDLE;
     subject1_stage = S1_WAIT_START;
     mission_stop_all();                 /* 上电即保证无残留输出 */

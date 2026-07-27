@@ -21,7 +21,7 @@
  * - 继续沿用原调试串口文件名，避免扩大工程改动。
  */
 
-#define KART_LOG_CHANNELS           (33U)  /* VOFA JustFloat 浮点通道数 */
+#define KART_LOG_CHANNELS           (34U)  /* VOFA JustFloat 浮点通道数 */
 
 #define KART_LOG_FLAG_PLAYBACK      (1U << 0)
 #define KART_LOG_FLAG_SPEED_ENABLE  (1U << 1)
@@ -267,6 +267,7 @@ void kart_debug_uart_poll(void)
         ch[30] = (float)kart_encoder_get_right_delta();    /* 30 右轮编码器原始delta(未滤波,脉冲/5ms):与CH6滤波值对比看滞后/抖动 */
         ch[31] = (float)kart_remote_get_channel(KART_REMOTE_CH_THROTTLE); /* 31 油门通道raw:静止应≈THR_CENTER(880),偏则映射出非0目标速度 */
         ch[32] = (float)kart_remote_get_channel(KART_REMOTE_CH_STEER);    /* 32 方向通道raw:静止应≈STEER_CENTER(968) */
+        ch[33] = kart_control_get_target_cmd();            /* 33 斜坡前的请求目标(上层写入):与CH4(斜坡后)对比即斜坡曲线,CH4追不上CH33就是在爬坡 */
         kart_log_send_justfloat(ch, KART_LOG_CHANNELS);
     }
     kart_log_sequence++;

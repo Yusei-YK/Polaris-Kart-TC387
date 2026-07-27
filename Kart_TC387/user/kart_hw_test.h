@@ -16,24 +16,27 @@
  *        然后常驻显示旋钮计数 + 6 个按键实时电平。
  *   转旋钮看 ENC 数字增减;按键按下看对应位 0/1 翻转。
  *
- * 引脚(取自 v2 网表 H1 排针,已核对无冲突):
- *   旋钮 A/B/SW = P11.2 / P11.3 / P20.6
- *   UP/DOWN/LEFT/RIGHT/MID = P33.11 / P20.0 / P21.6 / P21.7 / P33.4
+ * 引脚:2026-07-28 起统一在 board_pins.h 定义(那里有 按键板.tel 网表出处),
+ *      这里只做别名。旧板的实测修正(DOWN=P20.6、MID=P20.7、LEFT 顶 P33.4)已作废,
+ *      新板 SW2 五个方向各自独立,不再有 UP/LEFT 短路。
  *   屏并口数据 D0~D7 = P11.9~P11.12 / P13.0~P13.3,控制线 P15.0~P15.5
  * ------------------------------------------------------------------
  */
 
-/* 旋钮引脚 */
-#define KART_KNOB_A_PIN         (P11_2)
-#define KART_KNOB_B_PIN         (P11_3)
-#define KART_KNOB_SW_PIN        (P20_0)         /* 实测旋钮按键是 P20.0 */
+#include "board_pins.h"
 
-/* 5 向按键引脚（硬件 UP/LEFT(P21.6) 短路，用 SW3(P20.7) 代替 LEFT）*/
-#define KART_KEY_UP_PIN         (P33_11)        /* UP (与P21.6短路) */
-#define KART_KEY_DOWN_PIN       (P20_6)         /* 实测 DOWN 是 P20.6 */
-#define KART_KEY_LEFT_PIN       (P33_4)         /* SW2.6 (实测是LEFT) */
-#define KART_KEY_RIGHT_PIN      (P21_7)
-#define KART_KEY_MID_PIN        (P20_7)         /* SW3 独立按键 (实测是MID) */
+/* 旋钮引脚(EC11:A/B 双相 + 按下) */
+#define KART_KNOB_A_PIN         (BOARD_ENC_A_PIN)
+#define KART_KNOB_B_PIN         (BOARD_ENC_B_PIN)
+#define KART_KNOB_SW_PIN        (BOARD_ENC_SW_PIN)
+
+/* 5 向按键 + 独立发车键 */
+#define KART_KEY_UP_PIN         (BOARD_KEY_UP_PIN)
+#define KART_KEY_DOWN_PIN       (BOARD_KEY_DOWN_PIN)
+#define KART_KEY_LEFT_PIN       (BOARD_KEY_LEFT_PIN)
+#define KART_KEY_RIGHT_PIN      (BOARD_KEY_RIGHT_PIN)
+#define KART_KEY_MID_PIN        (BOARD_KEY_MID_PIN)
+#define KART_KEY_START_PIN      (BOARD_START_KEY_PIN)   /* SW3 独立轻触键 */
 
 /* 自测主入口:内部死循环,不返回。由 cpu0_main 在 KART_HW_TEST 开时调用。 */
 void kart_hw_test_run(void);

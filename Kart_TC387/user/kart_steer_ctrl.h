@@ -47,6 +47,18 @@
 #define KART_STEER_IMAX_DEFAULT         (2000.0f)
 #define KART_STEER_OUTMAX_DEFAULT       (4000.0f)   /* 2026-07-19:收敛验证通过,恢复 40% 输出 */
 
+/* 内环 PID —— 倒车专用一组(借 TopSpeed Subject_4 的做法)。
+ * 为什么倒车要换增益:轮胎侧偏力在前进时是"把前轮往中位推"(转角环要顶着它),
+ *   倒车时同一个力变成"往打死方向推"(自增强,转角环要拽住它)。
+ *   前进标定的 Kp 到倒车就偏大 → 过冲、来回振、甚至怼软限位。
+ *   对策:比例砍小 + 阻尼拉大(TopSpeed 前进 Kp300/Kd150 → 倒车 Kp100/Kd500)。
+ * 只在【真要打角的倒车】起作用:直行倒车锁中位其实无所谓,
+ *   但"蛇形后退十米"要真打角,不换增益会振。
+ * 【待实车标定】先按前进组的 1/3 比例给,上车看 VOFA 转角波形有无过冲再调。 */
+#define KART_STEER_KP_BACK              (5.0f)      /* 前进 15 的 1/3 */
+#define KART_STEER_KI_BACK              (0.5f)      /* 与前进同:顶静摩擦用,不动 */
+#define KART_STEER_KD_BACK              (2.5f)      /* 前进 0 → 加阻尼压振 */
+
 /* 航向外环 PID 默认(先占位,内环验证通过后再调 hp/hi/hd)。
  * 输出是"目标转角计数",限幅到转角软限位量级。 */
 #define KART_HEAD_KP_DEFAULT            (30.0f)
@@ -83,6 +95,11 @@ void  kart_steer_set_target_yaw(float yaw);     // 设外环目标航向
 
 void  kart_steer_set_angle_pid(float kp, float ki, float kd);   // 在线调内环
 void  kart_steer_set_head_pid(float kp, float ki, float kd);    // 在线调外环
+
+/* 内环增益组切换(倒车前调 back、动作结束调 fwd 恢复)。
+ * 只改三个系数,限幅沿用初始化值;内部会清一次 PID 记忆防跳变。 */
+void  kart_steer_use_back_gains(void);      // 切倒车组(KP_BACK/KI_BACK/KD_BACK)
+void  kart_steer_use_fwd_gains(void);       // 恢复前进组(KP_DEFAULT/...)
 
 /* --- 给 VOFA/调试读的取值接口 --- */
 float kart_steer_get_target_delta(void);

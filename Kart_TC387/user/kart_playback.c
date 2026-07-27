@@ -6,6 +6,7 @@
 #include "kart_steer_ctrl.h"
 #include "kart_remote.h"
 #include "kart_imu.h"
+#include "kart_params.h"
 #include <math.h>
 
 static uint8  playback_running = 0;
@@ -32,6 +33,19 @@ static float playback_cur_y = 0.0f;
 static float playback_aim_x = 0.0f;
 static float playback_aim_y = 0.0f;
 
+/* ===== 速度剖面缓冲 =====
+ * 与 record_buf 同索引、同长度。放 cpu2_dsram 与 record_buf 同域(1500*4=6KB)。
+ * 单位:最终存"脉冲/5ms"(与速度环同量纲),生成过程中间态是 m/s(见 build)。 */
+#if defined(__TASKING__)
+#pragma section all "cpu2_dsram"
+#endif
+static float playback_prof[KART_RECORD_MAX_WAYPOINTS];
+#if defined(__TASKING__)
+#pragma section all restore
+#endif
+
+static uint16 playback_prof_n = 0;      /* 剖面有效点数,0=未生成(退回录制速度) */
+
 static float kart_playback_wrap180(float angle)
 {
     while(angle > 180.0f) angle -= 360.0f;
@@ -41,12 +55,116 @@ static float kart_playback_wrap180(float angle)
 
 static void kart_playback_poll_openloop(void);      /* 科目四开环倒车一拍(下方实现) */
 
+/* 该点录制速度(脉冲/5ms):左右取平均。只用于判前进/倒车段,不决定快慢。 */
+static float kart_playback_rec_v(const kart_waypoint_t *wp, uint16 i)
+{
+    return 0.5f * (wp[i].v_left + wp[i].v_right);
+}
+
+/* 第 i 段弦长(m),i..i+1。不用 kart_record 的 dist_buf:那是 RAM only,
+ * 从 Flash 载入路径时是上一次录制的残留,只有 x/y 是可信的。 */
+static float kart_playback_seg_len(const kart_waypoint_t *wp, uint16 i)
+{
+    float dx = wp[i + 1].x - wp[i].x;
+    float dy = wp[i + 1].y - wp[i].y;
+    return sqrtf(dx * dx + dy * dy);
+}
+
+/* ===== 生成速度剖面(只在 kart_playback_start 调一次)=====
+ * 见 kart_playback.h 顶部"速度剖面"注释。三步:
+ *   ① 曲率限速 v=sqrt(a_lat/|kappa|),kappa=dyaw/ds 由 wp[].yaw 沿弧长中心差分;
+ *   ② 端点锚 0:最后一点必须能停下,否则满速撞终点;
+ *   ③ 反向传播 v[i]=min(v[i], sqrt(v[i+1]²+2*a_brake*ds)) —— 入弯/进终点前提前减速。
+ * 出弯加速不在这里限,交给 kart_control 的目标速度斜坡(时间域)。
+ * 倒车段(录制速度为负)照抄录制速度,且作为传播屏障:前进段的刹车不跨过换向点传。 */
+static void kart_playback_build_profile(const kart_waypoint_t *wp, uint16 n)
+{
+    float scale = kart_params_get(KART_PARAM_PB_SCALE);
+    float vmax  = kart_params_get(KART_PARAM_PB_VMAX)  * KART_PLAYBACK_V_TO_MS;   /* m/s */
+    float vmin  = kart_params_get(KART_PARAM_PB_VMIN)  * KART_PLAYBACK_V_TO_MS;   /* m/s */
+    float alat  = kart_params_get(KART_PARAM_PB_ALAT);                            /* m/s² */
+    uint16 i;
+
+    playback_prof_n = 0;
+    if(n < 2 || n > KART_RECORD_MAX_WAYPOINTS) return;
+    /* 总开关(菜单 PB Prof):关 → 不生成,poll 退回取录制速度的旧行为。 */
+    if(kart_params_get(KART_PARAM_PB_PROF) < 0.5f) return;
+    if(alat < 0.1f) alat = 0.1f;
+
+    /* ---- ① 曲率限速 ---- */
+    for(i = 0; i < n; i++)
+    {
+        float rec = kart_playback_rec_v(wp, i);
+        uint16 lo, hi, k;
+        float arc = 0.0f, dyaw, kappa, v;
+
+        if(rec < -KART_PLAYBACK_REV_SPEED_EPS)
+        {
+            /* 倒车段:提速只会放大开环打角回放的里程漂移,原速照抄。 */
+            playback_prof[i] = rec * KART_PLAYBACK_V_TO_MS;
+            continue;
+        }
+
+        lo = (i > KART_PLAYBACK_KAPPA_WIN) ? (uint16)(i - KART_PLAYBACK_KAPPA_WIN) : 0u;
+        hi = (uint16)(i + KART_PLAYBACK_KAPPA_WIN);
+        if(hi > n - 1) hi = n - 1;
+
+        for(k = lo; k < hi; k++) arc += kart_playback_seg_len(wp, k);
+
+        dyaw = kart_playback_wrap180(wp[hi].yaw - wp[lo].yaw) * 0.01745329252f;
+        if(dyaw < 0.0f) dyaw = -dyaw;
+
+        if(arc < 0.02f)
+        {
+            /* 窗内几乎没走动。两种成因,处理相反,必须分开:
+             *   ① 原地转了角度(起步/换向前后原地摆头):kappa→∞,是真正的最急处,
+             *      不能给 vmax,否则原地打满方向再全油门;
+             *   ② 位置和角度都没变(静止段重复采样):曲率无信息,放满,让斜坡去管起步。 */
+            v = (dyaw > 0.017f) ? vmin : vmax;      /* 0.017rad ≈ 1° */
+        }
+        else
+        {
+            kappa = dyaw / arc;                                  /* 1/m,已取正 */
+            v = (kappa < 1e-3f) ? vmax : sqrtf(alat / kappa);     /* 近直线:不限 */
+        }
+
+        v *= scale;                          /* 整体胆量旋钮:形状对了,只缩放幅值 */
+        if(v > vmax) v = vmax;
+        if(v < vmin) v = vmin;               /* 地板放在传播前,才不会抹掉终点收油 */
+        playback_prof[i] = v;
+    }
+
+    /* ---- ② 端点锚 0 ---- */
+    playback_prof[n - 1] = 0.0f;
+
+    /* ---- ③ 反向传播(提前刹车)---- */
+    for(i = n - 1; i > 0; i--)
+    {
+        float vn = playback_prof[i];
+        float vc = playback_prof[i - 1];
+        float ds, lim;
+
+        /* 换向点两侧不互传:倒车段的负速与前进段的正速不在同一条刹车链上。 */
+        if(vn < 0.0f || vc < 0.0f) continue;
+
+        ds  = kart_playback_seg_len(wp, (uint16)(i - 1));
+        lim = sqrtf(vn * vn + 2.0f * KART_PLAYBACK_ABRAKE * ds);
+        if(vc > lim) playback_prof[i - 1] = lim;
+    }
+
+    /* ---- 换算回速度环量纲 ---- */
+    for(i = 0; i < n; i++) playback_prof[i] *= KART_PLAYBACK_MS_TO_V;
+
+    playback_prof_n = n;
+}
+
 void kart_playback_init(void)
 {
     playback_running = 0;
     playback_openloop_mode = 0;
     playback_index = 0;
     playback_target_yaw = 0.0f;
+    playback_prof_n = 0;
 }
 
 uint8 kart_playback_start(void)
@@ -63,6 +181,11 @@ uint8 kart_playback_start(void)
     /* 正向模式 */
     playback_openloop_mode = 0;
     playback_seg_reverse = 0;           /* 方案B:从前进段起步(第3点通常为正速) */
+
+    /* 速度剖面按几何现场生成(约 n*(2*WIN+3) 次 sqrtf,1500 点量级 ~ 几 ms,
+     * 只在按下启动键那一刻算一次,不在 poll 里算。生成失败(点数异常)则
+     * playback_prof_n=0,poll 自动退回"取录制速度"的旧行为。 */
+    kart_playback_build_profile(kart_record_get_waypoints(), n);
 
     /* 起点位姿一次性取整帧,x/y/yaw 必须同帧,否则复现坐标系原点就是歪的。 */
     kart_odom_get_snapshot(&odom);
@@ -89,6 +212,8 @@ void kart_playback_stop(void)
 {
     playback_running = 0;
     playback_openloop_mode = 0;
+    /* 剖面判废:下次 start 会重算(可能改了 Vmax/Alat),不让旧剖面漏用。 */
+    playback_prof_n = 0;
     kart_control_set_enable(0);
     kart_steer_set_head_enable(0);
     kart_steer_set_angle_enable(0);     /* 开环倒车只开内环,停机一并关掉 */
@@ -147,11 +272,12 @@ static uint16 kart_playback_find_lookahead(uint16 nearest, const kart_waypoint_t
     return n - 1;
 }
 
-/* 按当前目标速度自适应前视距离:LD = clamp(BASE + GAIN*|v|, MIN, MAX)。 */
+/* 按当前目标速度自适应前视距离:LD = clamp(BASE + GAIN*|v|, MIN, MAX)。
+ * GAIN 走 kart_params(菜单可调):提速后如果切内就加大它,画龙就减小。 */
 static float kart_playback_lookahead_dist(float v)
 {
     float av = (v < 0.0f) ? -v : v;
-    float ld = KART_PLAYBACK_LD_BASE + KART_PLAYBACK_LD_GAIN * av;
+    float ld = KART_PLAYBACK_LD_BASE + kart_params_get(KART_PARAM_PB_LDGAIN) * av;
     if(ld < KART_PLAYBACK_LD_MIN) ld = KART_PLAYBACK_LD_MIN;
     if(ld > KART_PLAYBACK_LD_MAX) ld = KART_PLAYBACK_LD_MAX;
     return ld;
@@ -164,7 +290,7 @@ void kart_playback_poll(void)
     uint16 n, nearest, aim_index;
     const kart_waypoint_t *wp;
     float lookahead_yaw;
-    float target_v;
+    float target_v, rec_v;
     float dx, dy;
     float origin_rad, origin_sin, origin_cos;
     kart_odom_snapshot_t odom;
@@ -222,19 +348,24 @@ void kart_playback_poll(void)
         }
     }
 
-    /* 速度取进度点(最近点),而非前视点:速度跟当前所在弧段,弯道不提前拉满。 */
-    target_v = 0.5f * (wp[nearest].v_left + wp[nearest].v_right);
+    /* 速度取进度点(最近点),而非前视点:速度跟当前所在弧段,弯道不提前拉满。
+     * 剖面已生成 → 用剖面速度(几何算出的,与录制快慢无关);
+     * 未生成(点数异常)→ 退回旧行为取录制速度,保证任何情况下都能跑。 */
+    rec_v = 0.5f * (wp[nearest].v_left + wp[nearest].v_right);
+    target_v = (playback_prof_n == n) ? playback_prof[nearest] : rec_v;
     if(target_v > KART_PLAYBACK_SPEED_MAX) target_v = KART_PLAYBACK_SPEED_MAX;
     if(target_v < -KART_PLAYBACK_SPEED_MAX) target_v = -KART_PLAYBACK_SPEED_MAX;
 
-    /* ===== 方案B:按进度点速度符号分段选转向来源(带死区滞回)=====
+    /* ===== 方案B:按进度点【录制】速度符号分段选转向来源(带死区滞回)=====
      * 录制含倒车段时,Pure Pursuit 航向环对车尾正反馈会打圈。故:
      *   前进段(v> +eps):开航向外环,走 Pure Pursuit;
      *   倒车段(v< -eps):关航向外环,只开转角内环,开环回放录制打角;
      *   死区内(|v|<=eps):维持上一拍模式,防边界反复翻转使能位。
+     * 判据必须用 rec_v(录制速度)而非 target_v:剖面里前进段最后几点会被
+     * 反向传播压到接近 0(终点收油),若拿它判段会误判成"死区/倒车"翻掉航向环。
      * steer_buf 与 record_buf 同索引,倒车段可直接取录制打角开环回放。 */
-    if(target_v >  KART_PLAYBACK_REV_SPEED_EPS)      playback_seg_reverse = 0;
-    else if(target_v < -KART_PLAYBACK_REV_SPEED_EPS) playback_seg_reverse = 1;
+    if(rec_v >  KART_PLAYBACK_REV_SPEED_EPS)      playback_seg_reverse = 0;
+    else if(rec_v < -KART_PLAYBACK_REV_SPEED_EPS) playback_seg_reverse = 1;
 
     if(!playback_seg_reverse)
     {
@@ -309,6 +440,14 @@ float kart_playback_get_cur_y(void) { return playback_cur_y; }
 float kart_playback_get_aim_x(void) { return playback_aim_x; }
 float kart_playback_get_aim_y(void) { return playback_aim_y; }
 
+float kart_playback_get_profile_v(uint16 i)
+{
+    if(playback_prof_n == 0 || i >= playback_prof_n) return 0.0f;
+    return playback_prof[i];
+}
+
+uint8 kart_playback_profile_valid(void) { return (playback_prof_n > 0) ? 1u : 0u; }
+
 /* =========================== 科目四开环反向复现 =========================== */
 /* 启动开环倒车:车头不掉转,直接挂倒挡按里程回放录制打角。
  * 前置:车已停在原路终点(停车区),odom 仍在录制世界系(未 reset)。
@@ -330,6 +469,15 @@ uint8 kart_playback_start_openloop_reverse(void)
     playback_ol_dist0 = kart_odom_get_dist();           /* 倒车起点里程基准 */
     playback_ol_index = n - 1;                          /* 从末点(停车点)倒查 */
 
+    /* 航向纠偏要用的参考系原点:录制起点航向(世界系)。
+     * 注意本函数原来不设 play_origin_yaw(开环不需要位姿),但航向 P 纠偏要把
+     * wp[k].yaw(相对录制起点的增量)转回世界系比 IMU,故这里必须补上。
+     * 取 kart_record_get_origin_yaw() 而不是当前 odom.yaw:后者是"倒车起点"的
+     * 航向,不是"录制起点"的航向,两者差多少就等于整段参考航向偏多少。
+     * 前提:本次倒车紧接同一次录制(科目四流程就是如此)。若路径是从 Flash
+     * 载入的,steer/dist 数组和 origin_yaw 都是上一次录制的残留,本来就不能用。 */
+    play_origin_yaw = kart_record_get_origin_yaw();
+
     playback_openloop_mode = 1;
     playback_running = 1;
 
@@ -342,7 +490,7 @@ uint8 kart_playback_start_openloop_reverse(void)
     }
 
     kart_control_set_enable(1);
-    kart_control_set_target(KART_PLAYBACK_OL_SPEED);
+    kart_control_set_target(kart_params_get(KART_PARAM_S4_OL_SPD));
     return 1;
 }
 
@@ -356,6 +504,11 @@ static void kart_playback_poll_openloop(void)
     const float *dist  = kart_record_get_dist();
     float d, s, delta;
     uint16 k;
+#if KART_PLAYBACK_OL_HEAD_EN
+    float ref_yaw  = 0.0f;
+    float head_err = 0.0f;
+    float corr     = 0.0f;
+#endif
 
     /* 倒退里程(odom.dist_sum 为标量,倒车中持续增大)。 */
     d = kart_odom_get_dist() - playback_ol_dist0;
@@ -383,18 +536,59 @@ static void kart_playback_poll_openloop(void)
         return;
     }
 
-    /* 喂录制打角给转角内环,做软限幅防顶机械硬限位。 */
+    /* 打角基准:该弧长处录制时的真实物理打角。 */
     delta = (float)steer[k];
+
+#if KART_PLAYBACK_OL_HEAD_EN
+    /* ===== 航向 P 纠偏 =====
+     * 参考航向 = 录制起点航向 + 该点录制时的相对航向 → 转回世界系,与 IMU 同系。
+     * 误差过死区后才纠:内环本身有约 63 计数死区,小误差纠了也不动,只会让打角抖。
+     * SIGN 取 -1 是倒车阿克曼的负反馈方向(与方案B倒车段一致)。
+     * 同系前提:origin_yaw/wp[].yaw 都来自 odom.yaw = KART_ODOM_YAW_SIGN*imu_yaw,
+     * 当前 SIGN=+1 故可直接与 kart_imu_get_yaw() 相减(与方案B同写法)。
+     * 若哪天把 KART_ODOM_YAW_SIGN 翻成 -1,这里和方案B都要改用 kart_odom_get_yaw()。 */
+    {
+        const kart_waypoint_t *wp = kart_record_get_waypoints();
+        ref_yaw  = kart_playback_wrap180(play_origin_yaw + wp[k].yaw);
+        head_err = kart_playback_wrap180(ref_yaw - kart_imu_get_yaw());
+
+        if(head_err > KART_PLAYBACK_OL_HEAD_DB || head_err < -KART_PLAYBACK_OL_HEAD_DB)
+        {
+            corr = KART_PLAYBACK_OL_HEAD_SIGN * KART_PLAYBACK_OL_HEAD_KP * head_err;
+            if(corr >  KART_PLAYBACK_OL_CORR_MAX) corr =  KART_PLAYBACK_OL_CORR_MAX;
+            if(corr < -KART_PLAYBACK_OL_CORR_MAX) corr = -KART_PLAYBACK_OL_CORR_MAX;
+            delta += corr;
+        }
+        else
+        {
+            corr = 0.0f;
+        }
+
+        /* 参考航向进 CH13,与 CH9(实测 yaw)直接对比。外环没开,这个字段只是显示用。 */
+        playback_target_yaw = ref_yaw;
+        kart_steer_set_target_yaw(ref_yaw);
+    }
+#endif
+
+    /* 软限幅防顶机械硬限位,再喂转角内环。 */
     if(delta > KART_STEER_DELTA_LIMIT_L) delta = KART_STEER_DELTA_LIMIT_L;
     if(delta < KART_STEER_DELTA_LIMIT_R) delta = KART_STEER_DELTA_LIMIT_R;
     kart_steer_set_target_delta(delta);
 
-    /* 固定负速倒车。 */
-    kart_control_set_target(KART_PLAYBACK_OL_SPEED);
+    /* 固定负速倒车(菜单 S4 OLSpd 可调,不改这里的宏)。 */
+    kart_control_set_target(kart_params_get(KART_PARAM_S4_OL_SPD));
 
-    /* 诊断快照:开环无投影坐标,借 cur/aim 通道记 里程/弧长,VOFA 可观测。 */
+    /* 诊断快照:开环无投影坐标,借 cur/aim 四通道。
+     * 关纠偏:CH20=倒退里程 d、CH21=剩余弧长 s、CH22=索引 k、CH23=最终打角;
+     * 开纠偏:CH20 改记航向误差、CH21 改记纠偏量(里程 d 可从 CH19 减起点得到),
+     *         这样一屏就能看清"误差有没有被压住"和"纠偏有没有顶到钳位"。 */
+#if KART_PLAYBACK_OL_HEAD_EN
+    playback_cur_x = head_err;
+    playback_cur_y = corr;
+#else
     playback_cur_x = d;
     playback_cur_y = s;
+#endif
     playback_aim_x = (float)k;
     playback_aim_y = delta;
 }

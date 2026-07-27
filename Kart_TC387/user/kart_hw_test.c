@@ -11,19 +11,21 @@ static int32 knob_count = 0;
 static uint8 knob_a_last = 1;
 static uint8 knob_b_last = 1;
 
-/* 初始化旋钮 + 按键为上拉输入 */
+/* 初始化旋钮 + 按键为输入 */
 static void hw_test_gpio_init(void)
 {
-    gpio_init(KART_KNOB_A_PIN,  GPI, 0, GPI_PULL_UP);
-    gpio_init(KART_KNOB_B_PIN,  GPI, 0, GPI_PULL_UP);
-    gpio_init(KART_KNOB_SW_PIN, GPI, 0, GPI_PULL_UP);         /* 旋钮按键 P20.0 */
+    /* 上拉在主板侧,按键板公共端接 GND(按下读 0),故一律浮空输入,不叠片内上拉。
+     * 与 kart_menu_init 保持同一配置,免得自测通过、正式跑却读不到。 */
+    gpio_init(KART_KNOB_A_PIN,  GPI, 0, GPI_FLOATING_IN);
+    gpio_init(KART_KNOB_B_PIN,  GPI, 0, GPI_FLOATING_IN);
+    gpio_init(KART_KNOB_SW_PIN, GPI, 0, GPI_FLOATING_IN);
 
-    /* 五向键硬件有外部上拉(4.7kΩ到U4.5),用浮空输入避免冲突 */
     gpio_init(KART_KEY_UP_PIN,    GPI, 0, GPI_FLOATING_IN);
-    gpio_init(KART_KEY_DOWN_PIN,  GPI, 0, GPI_FLOATING_IN);   /* DOWN 是 P20.6，有外部上拉 */
+    gpio_init(KART_KEY_DOWN_PIN,  GPI, 0, GPI_FLOATING_IN);
     gpio_init(KART_KEY_LEFT_PIN,  GPI, 0, GPI_FLOATING_IN);
     gpio_init(KART_KEY_RIGHT_PIN, GPI, 0, GPI_FLOATING_IN);
     gpio_init(KART_KEY_MID_PIN,   GPI, 0, GPI_FLOATING_IN);
+    gpio_init(KART_KEY_START_PIN, GPI, 0, GPI_FLOATING_IN);
 
     knob_a_last = gpio_get_level(KART_KNOB_A_PIN);
     knob_b_last = gpio_get_level(KART_KNOB_B_PIN);
@@ -101,6 +103,10 @@ void kart_hw_test_run(void)
         ips200_show_int(80, 112, gpio_get_level(KART_KEY_RIGHT_PIN), 2);
         ips200_show_string(0, 128, "MID :");
         ips200_show_int(80, 128, gpio_get_level(KART_KEY_MID_PIN), 2);
+        ips200_show_string(0, 144, "ESW :");
+        ips200_show_int(80, 144, gpio_get_level(KART_KNOB_SW_PIN), 2);
+        ips200_show_string(0, 160, "STRT:");
+        ips200_show_int(80, 160, gpio_get_level(KART_KEY_START_PIN), 2);
 
         system_delay_ms(2);         /* 2ms 轮询,够软件读旋钮 */
     }
