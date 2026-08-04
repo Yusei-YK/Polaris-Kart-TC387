@@ -54,6 +54,8 @@ void power_force_rear_pwm_zero(void);   /* 硬兜底(只清后轮):直接写两�
 void power_set_motor_duty(int16 duty);
 void power_set_rear_duty(int16 left_duty, int16 right_duty);
 void power_set_steer_duty(int16 duty);
+/* 后轮升幅步长在线调(菜单 Slew Rear)。宏 KART_SLEW_REAR_STEP 只是上电默认。 */
+void power_set_slew_rear_step(int16 step);
 void power_check_poll(void);
 uint8 power_check_is_done(void);
 

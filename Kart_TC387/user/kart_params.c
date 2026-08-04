@@ -4,6 +4,7 @@
 #include "kart_playback.h"
 #include "kart_remote.h"
 #include "kart_mission.h"
+#include "kart_power.h"
 #include "zf_driver_flash.h"
 
 /* 参数表元数据。def 一律引用各模块原有的宏,保证"出厂值"与代码里写的一致,
@@ -11,22 +12,68 @@
 static const kart_param_meta_t param_meta[KART_PARAM_MAX] =
 {
     /* name          min      max      step    def                              dec */
-    { "Ramp Step",   0.0f,   10.0f,   0.1f,  KART_SPEED_RAMP_STEP_DEFAULT,      1 },
-    /* 剖面出厂关:第一次烧进去时科目一/科目二复现行为与改动前逐位一致,
-     * 先只验证斜坡治好了顿挫,再单独打开剖面提速。 */
-    { "PB Prof",     0.0f,    1.0f,   1.0f,  0.0f,                              0 },
-    { "PB Scale",    0.30f,   2.50f,  0.05f, 1.00f,                             2 },
+    { "Ramp Step",   0.0f,   30.0f,   0.1f,  KART_SPEED_RAMP_STEP_DEFAULT,      1 },
+    /* 2026-07-28 赛前改为出厂开(原出厂 0)。理由:剖面关着时复现是"照抄录制速度",
+     * 录得慢就跑得慢,提速这条路直接堵死。开着 + Vmax 仍留 30 是"开了但钳保守":
+     * 剖面被钳在 2.21 m/s,行为与原来慢速录制接近,风险可控;要快现场推 Vmax。
+     * 【已知局限】剖面只算了横向加速度,没算转向速率上限(1800 计数/s = 41°/s)。
+     * 绕桩段(κ≈0.55/m)剖面给 2.70 m/s,而一次打满反向 1646 计数要 0.91s、
+     * 3m 半周期只有 1.11s → 实际上限约 1.7 m/s,剖面乐观约 60%。
+     * 现场兜底手段是压 PB Scale,不是改 Alat(Alat 只影响弯道不影响直道)。 */
+    { "PB Prof",     0.0f,    1.0f,   1.0f,  1.0f,                              0 },
+    { "PB Scale",    0.10f,   6.00f,  0.05f, 1.00f,                             2 },
     /* Vmax 出厂给 30(约 2.2 m/s),不是 SPEED_MAX(60):剖面第一次开起来时
-     * 直道会直接顶到 Vmax,给满量程等于一上来就全油门。要快自己往上调。 */
-    { "PB Vmax",     5.0f,   80.0f,   1.0f,  30.0f,                             0 },
-    { "PB Vmin",     0.0f,   30.0f,   0.5f,  0.0f,                              1 },
-    { "PB Alat",     1.0f,   12.0f,   0.2f,  KART_PLAYBACK_ALAT_DEFAULT,        1 },
-    { "PB LdGain",   0.0f,    0.10f,  0.002f,KART_PLAYBACK_LD_GAIN,             3 },
-    { "RC Vmax",     5.0f,   80.0f,   1.0f,  KART_REMOTE_MAX_SPEED,             0 },
-    { "Head Kp",     1.0f,  120.0f,   1.0f,  KART_HEAD_KP_DEFAULT,              0 },
-    { "S1 RevSpd",  -40.0f,  -5.0f,   1.0f,  KART_S1_REVERSE_SPEED,             0 },
-    { "S1 RevStop",  0.50f,   2.50f,  0.05f, KART_S1_REVERSE_STOP_DIST,         2 },
-    { "S4 OLSpd",   -40.0f,  -5.0f,   1.0f,  KART_PLAYBACK_OL_SPEED,            0 },
+     * 直道会直接顶到 Vmax,给满量程等于一上来就全油门。要快自己往上调。
+     * 上限 95:整车最高时速 25km/h = 94 脉冲/5ms,给到量程顶即可,再大是空的。
+     * 【现场必读】几何最大曲率(满舵 R=1.32m → κ=0.76/m)对应 sqrt(4.0/0.76)=
+     * 2.29 m/s = 31 脉冲。Vmax ≤ 31 时剖面整段被压平成常数,弯道整形完全不起作用,
+     * 只剩终点锚点刹车。想要真正的过弯减速必须把 Vmax 放到 40~50。 */
+    { "PB Vmax",     5.0f,  150.0f,   1.0f,  30.0f,                             0 },
+    { "PB Vmin",     0.0f,   95.0f,   0.5f,  0.0f,                              1 },
+    { "PB Alat",     0.5f,   40.0f,   0.2f,  KART_PLAYBACK_ALAT_DEFAULT,        1 },
+    { "PB LdGain",   0.0f,    0.50f,  0.002f,KART_PLAYBACK_LD_GAIN,             3 },
+    { "PB Clamp",    5.0f,  150.0f,   1.0f,  KART_PLAYBACK_SPEED_MAX,           0 },
+    { "PB ABrake",   0.2f,   20.0f,   0.1f,  KART_PLAYBACK_ABRAKE,              1 },
+    { "PB LdMax",    0.30f,   6.00f,  0.05f, KART_PLAYBACK_LD_MAX,              2 },
+    { "RC Vmax",     5.0f,  150.0f,   1.0f,  KART_REMOTE_MAX_SPEED,             0 },
+    { "Head Kp",     0.0f,  400.0f,   1.0f,  KART_HEAD_KP_DEFAULT,              0 },
+    { "S1 RevSpd",  -95.0f,  -1.0f,   1.0f,  KART_S1_REVERSE_SPEED,             0 },
+    { "S1 RevStop",  0.05f,   5.00f,  0.05f, KART_S1_REVERSE_STOP_DIST,         2 },
+    { "S4 OLSpd",   -95.0f,  -1.0f,   1.0f,  KART_PLAYBACK_OL_SPEED,            0 },
+    /* 倒车方案:出厂 0 = 已实车验证能完赛的里程查表方案。1 = 位置闭环(待验证)。
+     * step=1 → 一下按键就切换,不用连点。 */
+    { "S4 OLMode",   0.0f,    1.0f,   1.0f,  0.0f,                              0 },
+    /* 横向增益(计数/米):满舵约 1100 计数,给 400 意味着偏 1m 就出 36% 舵。
+     * 允许负值:倒车横向反馈符号只有 ±1 两种可能,现场发现越纠越歪就取负,
+     * 不必重新烧写。出厂 0 → 新方案首次打开时只有最近点索引在起作用,
+     * 与老方案只差"索引怎么算"这一个变量,便于单独判断索引改动的效果。 */
+    { "S4 OL Ke", -3000.0f,3000.0f,  20.0f,  0.0f,                              0 },
+    /* 倒车航向增益(计数/度):原 OL_HEAD_KP 宏搬进菜单。日志已验证 20 够用
+     * (误差穿零、修正量没碰 ±400 钳位),故默认保持 20 不变。 */
+    { "S4 OL Kh",    0.0f,  400.0f,   2.0f,  KART_PLAYBACK_OL_HEAD_KP,          0 },
+    /* ---- 2026-07-28 第二批:限制项本身进菜单。默认值一律等于原宏,行为不变 ---- */
+    /* 速度环积分限幅。出厂 3000 = 原 KART_SPEED_IMAX_DEFAULT。
+     * 上限给满量程 10000:提速要吃掉那 27% 拿不到的 duty 就得能放到这么大。
+     * 【现场纪律】3000 → 5000 → 7000 分档试,别一步顶满 —— 2x150W 有刷 + 6S,
+     * duty 真跑到满量程时 H 桥和电机温度要盯着。 */
+    { "Spd Imax",    0.0f,10000.0f, 250.0f,  KART_SPEED_IMAX_DEFAULT,           0 },
+    /* 速度环 Kp。出厂 200 = 原 KART_SPEED_KP_DEFAULT。与 Imax 一起决定稳态误差:
+     * 目标 60 实测 40.9,靠这两项才补得回来。 */
+    { "Spd Kp",      0.0f, 1000.0f,  10.0f,  KART_SPEED_KP_DEFAULT,             0 },
+    /* 转角内环输出限幅。出厂 6000 = 原 KART_STEER_OUTMAX_DEFAULT。 */
+    { "Str OutMax",1000.0f,10000.0f, 250.0f, KART_STEER_OUTMAX_DEFAULT,         0 },
+    /* 倒车段速度倍率。出厂 1.0 = 原样照抄录制速度,行为与改动前逐位相同。
+     * 放大它治"录制→回放每代掉一档";放大过头会放大开环打角回放的里程漂移。 */
+    { "PB RevScl",   0.20f,   5.00f,  0.05f, 1.00f,                             2 },
+    /* 后轮 duty 每拍升幅上限。出厂 400 = 原 KART_SLEW_REAR_STEP。 */
+    { "Slew Rear", 100.0f,10000.0f, 100.0f,  (float)KART_SLEW_REAR_STEP,        0 },
+    /* 倒车段航向纠偏钳位(计数)。出厂 400 = 原 KART_PLAYBACK_REV_CORR_MAX。
+     * 上限 1133 = 转向软限位:纠偏最多允许打到满舵,再大也被软限位截断,给了也没用。
+     * 【生效范围只有一处】前进复现里夹着的倒车段(kart_playback.c:482)。
+     * 科目四那段独立开环倒车【不看它】,两条路径都用死宏 OL_CORR_MAX=400
+     * (kart_playback.c:690/794)—— 科四倒车拐不进去调本项没用,详见 kart_params.h。
+     * 【什么时候加】科一录制里带倒车段、该段拐不到位/半径偏大 → 加;左右摆头 → 减。 */
+    { "PB RevCorr",  0.0f, 1133.0f, 25.0f,  KART_PLAYBACK_REV_CORR_MAX,        0 },
 };
 
 static float param_val[KART_PARAM_MAX];
@@ -57,6 +104,22 @@ static void param_apply(uint8 id)
             kart_steer_set_head_pid(param_val[id],
                                     KART_HEAD_KI_DEFAULT,
                                     KART_HEAD_KD_DEFAULT);
+            break;
+
+        case KART_PARAM_SPD_IMAX:
+            kart_control_set_speed_imax(param_val[id]);
+            break;
+
+        case KART_PARAM_SPD_KP:
+            kart_control_set_speed_kp(param_val[id]);
+            break;
+
+        case KART_PARAM_STR_OUTMAX:
+            kart_steer_set_angle_outmax(param_val[id]);
+            break;
+
+        case KART_PARAM_SLEW_REAR:
+            power_set_slew_rear_step((int16)param_val[id]);
             break;
 
         default:
@@ -122,8 +185,16 @@ void kart_params_set(uint8 id, float v)
 
 void kart_params_step(uint8 id, int8 dir)
 {
+    kart_params_step_mul(id, dir, 1u);
+}
+
+/* 粗调:一次走 mul 个 step。菜单长按/快旋时传 10,把"0.5 调到 2.0"从点 15 下
+ * 变成点 2 下。mul=0 当 1 处理,防调用点算出 0 导致按了没反应。 */
+void kart_params_step_mul(uint8 id, int8 dir, uint8 mul)
+{
     if(id >= KART_PARAM_MAX) return;
-    kart_params_set(id, param_val[id] + param_meta[id].step * (float)dir);
+    if(mul == 0u) mul = 1u;
+    kart_params_set(id, param_val[id] + param_meta[id].step * (float)dir * (float)mul);
 }
 
 const kart_param_meta_t* kart_params_meta(uint8 id)

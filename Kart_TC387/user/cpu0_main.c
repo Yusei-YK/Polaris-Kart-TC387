@@ -180,14 +180,16 @@ static void kart_task_10ms(void)
     kart_task_light_10ms();     /* 灯板动画推进 + 帧下发(仅科目二有灯光命令时生效) */
 
 #if KART_USE_MENU
-    /* 旋钮正交解码只能放这一拍,不能跟 kart_menu_poll 一起放 50ms:
-     * EC11 一格 4 个边沿,手旋时单相最快约 25ms 一变,50ms 采样必漏边沿。
-     * 只读两个 GPIO,不刷屏不写 Flash,进控制窗口无风险。 */
-    kart_menu_enc_poll();
+    /* 菜单输入(旋钮解码 + 按键判定)只能放这一拍,不能跟 kart_menu_poll 一起放 50ms:
+     * EC11 一格 4 个边沿,手旋时单相最快约 25ms 一变,50ms 采样必漏边沿;
+     * 按键长按自动重复也要 10ms 的分辨率才跟手。
+     * 只读几个 GPIO 改菜单状态变量,不刷屏不写 Flash,进控制窗口无风险。 */
+    kart_menu_input_poll();
 #endif
 }
 
-/* 50ms 拍:菜单按键扫描 + IPS200 屏幕刷新(全屏刷新耗时大,严禁进控制窗口)。 */
+/* 50ms 拍:IPS200 屏幕刷新(换页时整屏 clear 耗时大,严禁进控制窗口)。
+ * 按键扫描已搬到 10ms 拍,这里只画。 */
 static void kart_task_50ms(void){
 #if KART_USE_MENU
     kart_menu_poll();
@@ -413,7 +415,14 @@ int core0_main(void)
         kart_debug_uart_poll();
 
 #if KART_USE_MENU
-        kart_menu_enc_poll();       /* 旋钮解码,旧主循环里 5ms 一次,采样更充裕 */
+        /* 旧主循环 5ms 一转,而菜单的长按重复/快旋常数是按 10ms 拍定的,
+         * 故隔一转调一次输入,保持与调度器路径一样的手感。
+         * 画屏这里每转都调,比调度器的 50ms 勤 —— 这条路径本来就只用于排查。 */
+        {
+            static uint8 menu_div = 0;
+            menu_div ^= 1u;
+            if(menu_div) kart_menu_input_poll();
+        }
         kart_menu_poll();
 #endif
 

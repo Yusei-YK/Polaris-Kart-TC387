@@ -16,16 +16,7 @@
  * ------------------------------------------------------------------
  */
 
-/* 速度环默认 PID 参数 —— 2026-07-17 上车调定并冻结。
- * 量纲是"脉冲/5ms"。串口在线调参最终定为 Kp=200 / Ki=0.8 / Kd=0,
- * 实测 I12≈I13 左右脉冲率拉平、稳态误差可接受,底层速度环到此冻结。
- * (左右后轮机械差异由前轮转向的航向角度环处理,不在速度环加电子差速。)
- * i_max/out_max 的 out_max 给 KART_POWER_MAX_DUTY(满量程),让 PID 能用满输出范围。 */
-#define KART_SPEED_KP_DEFAULT          (200.0f)
-#define KART_SPEED_KI_DEFAULT          (0.8f)
-#define KART_SPEED_KD_DEFAULT          (0.0f)
-#define KART_SPEED_IMAX_DEFAULT        (3000.0f)
-#define KART_SPEED_OUTMAX_DEFAULT      ((float)KART_POWER_MAX_DUTY)
+/* 速度环默认 PID 参数已移到 kart_control.h(kart_params 表要引用 KP/IMAX 当出厂值)。 */
 
 kart_speed_ctrl_t kart_speed = {0};
 
@@ -288,6 +279,23 @@ void kart_control_set_ramp_step(float step)
 
 float kart_control_get_ramp_step(void) { return kart_speed.ramp_step; }
 float kart_control_get_target_cmd(void) { return kart_speed.target_cmd; }
+
+/* 速度环积分限幅在线调(菜单 Spd Imax)。
+ * 为什么单独给接口:i_max 是提速的第一道墙 —— 稳态 duty = Kp*e + i_max,
+ * 实测 200*19.4+3000 = 6876,10000 的量程有 27% 永远拿不到。
+ * 【不清 PID 记忆】故意的:行驶中调它必须无级平滑,reset 会让积分掉到 0 → 掉速一拍。 */
+void kart_control_set_speed_imax(float imax)
+{
+    kart_speed.pid.i_max       = imax;
+    kart_speed.pid_right.i_max = imax;
+}
+
+/* 速度环 Kp 在线调(菜单 Spd Kp)。同样不清记忆,理由同上。 */
+void kart_control_set_speed_kp(float kp)
+{
+    kart_speed.pid.Kp       = kp;
+    kart_speed.pid_right.Kp = kp;
+}
 
 void kart_control_set_pid(float kp, float ki, float kd)
 {

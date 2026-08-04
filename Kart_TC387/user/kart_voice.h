@@ -130,7 +130,8 @@ uint32 kart_voice_get_byte_count(void);
  *   鸣笛(0x0C~0x14) → kart_horn_start()   已实现,可测
  *   灯光(0x04~0x0B)  → kart_light_set_command()  已接通,7x15 图案/动画
  *   门洞(0x15~0x19)  → kart_record_load_from_flash + kart_playback_start(槽1~5)
- *                       0x1A~0x1E 返回类未录路径,落 else 丢弃
+ *   返回(0x1A~0x1E)  → kart_mission_subject2_start_return()(2026-07-29 接通,槽6~10)
+ *                       原来落 else 丢弃,现在走 GOTO 摆位 + 按录制原点复现两步
  *   动作(0x1F~0x26)  → kart_motion_start()
  * 每调一次处理一条,长动作(鸣笛)期间忙则本拍不取新命令,让当前动作跑完。
  * 注意:这是临时链路验证用。科目二状态机建好后,分发逻辑应挪进状态机,

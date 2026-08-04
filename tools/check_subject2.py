@@ -227,11 +227,13 @@ ck('kart_motion_stop()' in cb, 'CENTER hands off to the hard stop when done')
 ck(mval('kart_motion.h','KART_MOTION_CENTER_TOL') is not None, 'CENTER_TOL defined')
 ct = mval('kart_motion.h','KART_MOTION_CENTER_TICKS')
 ck(ct is not None and ct >= 100, 'CENTER_TICKS=%s covers 5ms and 10ms beats' % ct)
-# 收车路径分工:五条终态(FWD/BACK/SNAKE_END/CIRCLE/TURN_ROTATE)走 motion_finish(),
-# 看门狗/default 走 kart_motion_stop() 硬停。蛇形两条不算终态,它们先转 SNAKE_END
-ck(mc.count('motion_finish();') == 5, 'five terminal phases go through finish, got %d'
+# 收车路径分工:六条终态走 motion_finish(),看门狗/default 走 kart_motion_stop() 硬停。
+# 蛇形两条不算终态(先转 SNAKE_END);GOTO 前三段也不算(只在段间切换)。
+# 2026-07-29: 5 → 6,新增摆位原语的终态 MOTION_GOTO_AXIS。
+ck(mc.count('motion_finish();') == 6, 'six terminal phases go through finish, got %d'
    % mc.count('motion_finish();'))
-for cs in ['MOTION_FWD', 'MOTION_BACK', 'MOTION_SNAKE_END', 'MOTION_CIRCLE', 'MOTION_TURN_ROTATE']:
+for cs in ['MOTION_FWD', 'MOTION_BACK', 'MOTION_SNAKE_END', 'MOTION_CIRCLE',
+           'MOTION_TURN_ROTATE', 'MOTION_GOTO_AXIS']:
     blk = mc[mc.find('case %s:' % cs):]
     blk = blk[:blk.find('break;')]
     ck('motion_finish();' in blk, '%s completes via finish' % cs)

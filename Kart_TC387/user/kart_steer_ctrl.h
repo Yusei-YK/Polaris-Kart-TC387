@@ -28,14 +28,18 @@
  * ------------------------------------------------------------------
  */
 
-/* 转角内环:目标转角软限幅(留 50 计数余量,别顶到机械硬限位磨电机)。
- * 2026-07-19 齿轮重装后实测:右 477、中 1575、左 2728。 */
-#define KART_STEER_DELTA_LIMIT_L        (+1103)     /* 左软限(2728-50-1575) */
-#define KART_STEER_DELTA_LIMIT_R        (-1048)     /* 右软限(477+50-1575) */
+/* 转角内环:目标转角软限幅(留 20 计数余量,别顶到机械硬限位磨电机)。
+ * 2026-07-30 换齿轮/编码器/转向电机后重标:中 164、左死 +1084、右死 -1084。
+ *   左软限 = +1084-20 = +1064   右软限 = -1084+20 = -1064
+ * 行程恢复到 2128(07-29 坏齿轮时只有 1591),满舵半径 R = 1480/1064 = 1.39m。 */
+#define KART_STEER_DELTA_LIMIT_L        (+1064)     /* 左软限 */
+#define KART_STEER_DELTA_LIMIT_R        (-1064)     /* 右软限 */
 
 /* 转向电机符号:若上车发现"越纠越歪"(正反馈发散),把这个从 +1 改 −1。
  * 悬空验证:手给 a300(目标偏左),电机应把方向盘往 center_delta 增大方向推。 */
-#define KART_STEER_LOOP_SIGN            (-1)         /* 开环实测定论(2026-07-19):so1000→ch3减小(向右),so-1000→ch3增大(向左)。正duty=右=ch3减,故负反馈需LOOP_SIGN=-1。此前'打死'是大初始误差超调,非正反馈。 */
+/* 2026-07-29:曾误改 +1,实车表现为一动就打死不回中(正反馈发散),已回退 -1。
+ * 齿轮重装没有改变啮合极性。摇杆左右反是另一个宏 KART_REMOTE_STEER_SIGN。 */
+#define KART_STEER_LOOP_SIGN            (-1)
 
 /* 内环 PID 默认(悬空验证已冻结)。
  * out_max 先给 4000(不放满 10000),限幅防打飞,上车可再放。
@@ -45,7 +49,14 @@
 #define KART_STEER_KI_DEFAULT           (0.5f)
 #define KART_STEER_KD_DEFAULT           (0.0f)
 #define KART_STEER_IMAX_DEFAULT         (2000.0f)
-#define KART_STEER_OUTMAX_DEFAULT       (4000.0f)   /* 2026-07-19:收敛验证通过,恢复 40% 输出 */
+/* 2026-07-28 赛前:4000 → 6000(40% → 60%),就是上面注释里说的"上车可再放"。
+ * 为什么现在必须放:提速后转向速率成了新瓶颈。实测转向电机约 1800 计数/s,
+ * 中位→满舵 1103 计数需 0.61s;而 60 脉冲(4.4 m/s)下 1.50m 前视只给 0.34s 预判
+ * —— 打角跟不上目标,表现为高速切内/走线滞后。放大输出上限直接提高可用角速度。
+ * 为什么不放满 10000:静摩擦死区实测约 950 duty,Kp=15 意味着 6000 对应
+ * 400 计数(9.1°)的误差就已饱和 —— 正常跟踪误差远小于此,6000 已经够用;
+ * 留 40% 余量是防"坏参考点导致一拍大误差"时把方向盘怼上软限位。 */
+#define KART_STEER_OUTMAX_DEFAULT       (6000.0f)
 
 /* 内环 PID —— 倒车专用一组(借 TopSpeed Subject_4 的做法)。
  * 为什么倒车要换增益:轮胎侧偏力在前进时是"把前轮往中位推"(转角环要顶着它),
@@ -59,13 +70,22 @@
 #define KART_STEER_KI_BACK              (0.5f)      /* 与前进同:顶静摩擦用,不动 */
 #define KART_STEER_KD_BACK              (2.5f)      /* 前进 0 → 加阻尼压振 */
 
-/* 航向外环 PID 默认(先占位,内环验证通过后再调 hp/hi/hd)。
- * 输出是"目标转角计数",限幅到转角软限位量级。 */
+/* 航向外环 PID 默认。输出是"目标转角计数",限幅到转角软限位量级。
+ * 【2026-07-28 赛前复核:30 已验证,不是占位,不动】原注释写"先占位"已作废。
+ * 三条独立证据:① 实车科目一/科目四走线已跑通;② 30 计数/度对应内环死区
+ * 63 计数 → 0.83° 以下的航向误差不动方向盘,与 kart_motion.h 独立推导的
+ * 25/30 量级一致;③ 与轴距 0.62m 算出的 0.86m 航向收敛特征长度自洽。
+ * 曾经的坑:一度以为要乘 57.3(deg/rad),那是错的,已在 CLAUDE.md 记录撤回。 */
 #define KART_HEAD_KP_DEFAULT            (30.0f)
 #define KART_HEAD_KI_DEFAULT            (0.0f)
 #define KART_HEAD_KD_DEFAULT            (0.0f)
 #define KART_HEAD_IMAX_DEFAULT          (500.0f)
-#define KART_HEAD_OUTMAX_DEFAULT        (1000.0f)
+/* 2026-07-28:1000 → 1133(= 左软限)。日志证据:科目一复刻前进段 493 帧里
+ * 304 帧(62%)的 target_delta 恰好等于 ±1000.00,而同一路线录制时人手打到了
+ * +1103/−985 —— 外环上限比软限位小,等于把绕桩需要的最后 100 计数(2.3°)削掉了,
+ * 表现为复刻切内侧锥桶。改成与软限位同值:限角只由软限位一处决定,不再有第二道暗闸。 */
+/* 2026-07-30:795 → 1064(跟着软限位走)。外环上限必须 ≤ 软限位。 */
+#define KART_HEAD_OUTMAX_DEFAULT        (1064.0f)
 
 typedef struct
 {
@@ -94,6 +114,7 @@ void  kart_steer_set_target_delta(float delta); // 直给内环目标转角(外�
 void  kart_steer_set_target_yaw(float yaw);     // 设外环目标航向
 
 void  kart_steer_set_angle_pid(float kp, float ki, float kd);   // 在线调内环
+void  kart_steer_set_angle_outmax(float outmax);                // 在线调内环输出限幅
 void  kart_steer_set_head_pid(float kp, float ki, float kd);    // 在线调外环
 
 /* 内环增益组切换(倒车前调 back、动作结束调 fwd 恢复)。

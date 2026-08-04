@@ -4,7 +4,7 @@
 #include "kart_motion.h"
 #include "kart_record.h"
 #include "kart_playback.h"
-#include "kart_odom.h"
+#include "kart_mission.h"
 
 /*
  * 科目二离线语音识别 —— 接收解析层实现
@@ -260,9 +260,13 @@ void kart_voice_dispatch(void)
 {
     kart_voice_cmd_t cmd;
 
-    /* 鸣笛/运动都是长动作:任一忙时本拍不取新命令,让当前动作跑完再处理下一条,
-     * 保证串行执行不打架(队列缓冲已在解析层入队)。 */
-    if(kart_horn_is_busy() || kart_motion_is_busy())
+    /* 鸣笛/运动/门洞复现都是长动作:任一忙时本拍不取新命令,让当前动作跑完再处理
+     * 下一条,保证串行执行不打架(队列缓冲已在解析层入队)。
+     * 【2026-07-29 补 playback】原来漏判 kart_playback_is_running():门洞复现
+     * 途中来一条语音命令会立刻被派发,motion 和 playback 同时写 target_delta /
+     * target 速度,两个都在 5ms/10ms 拍上互相覆盖 → 车在门洞里乱打方向。
+     * playback 自己不看队列,所以只能在这里拦。 */
+    if(kart_horn_is_busy() || kart_motion_is_busy() || kart_playback_is_running())
     {
         return;
     }
@@ -293,17 +297,44 @@ void kart_voice_dispatch(void)
         /* 门洞前进 5 条 → gate playback 槽位:与 Gate Playback 菜单同一映射。
          *   0x15 门洞一左侧→slot1  0x16 门洞一→slot2  0x17 门洞二→slot3
          *   0x18 门洞三→slot4      0x19 门洞三右侧→slot5
-         * 复用已验证的 playback 链路:清 odom(当前位姿=复现原点)→加载→启动。
-         * 前提同手动选槽:说命令时车须已停在该门洞入口且车头摆正。
-         * 返回类 0x1A~0x1E 暂不实现(反向路径未录),落到下方 else 丢弃。
-         * 依赖:Voice Control 已切 MISSION_SUBJECT_2,playback_poll 与
-         *      subject2_loop(deadman/推进)才会运行。 */
+         * 复用已验证的 playback 链路:加载→启动(相对当前位姿复现)。
+         * 前提同手动选槽:说命令时车须已停在发车区标记点且车头摆正。
+         *
+         * 【2026-07-29 删掉了这里的 kart_odom_reset()】
+         * 为什么删:它把发车区原点擦了,之后车永远不知道"发车区在哪",
+         *   语音返回(0x1A~0x1E)就无从实现 —— 这是返回功能的头号阻塞项。
+         * 为什么删了行为不变(可证明,不是赌):kart_playback_start() 自己把
+         *   当前位姿快照存进 play_origin_x/y/yaw(kart_playback.c:204-207),
+         *   poll 里只用 odom - play_origin 的【差值】(345-346)。
+         *   reset 只改绝对值不改差值 → 本条复现的每一拍输出完全一致。
+         * 发车区原点改为整个科目二只清一次,在 mission_enter(MISSION_SUBJECT_2)。 */
         uint8 slot = (uint8)(cmd.cmd - 0x15 + 1);
-        kart_odom_reset();
         if(kart_record_load_from_flash(slot) >= 2)
         {
             kart_playback_start();      /* 内部再判点数<2 不启动 */
         }
+    }
+    else if(cmd.cmd >= 0x1A && cmd.cmd <= 0x1E)
+    {
+        /* 返回类 5 条 → 返回槽 6~10(2026-07-29 接通)。
+         *   0x1A 门洞一右侧返回→slot6  0x1B 门洞一返回→slot7  0x1C 门洞二返回→slot8
+         *   0x1D 门洞三返回→slot9      0x1E 门洞三左侧返回→slot10
+         * 【与去程的对应】去程 0x15+j 与返回 0x1A+j 是同一物理通道的两个方向
+         *   (去程"门洞一左侧" ↔ 返回"门洞一右侧":同一个洞,车头反过来了,
+         *    左右自然互换),所以槽号偏移一致,j = cmd - 0x1A。
+         * 【两步】车此刻停在任务区,位姿任意 → 不能直接复现:
+         *   ① GOTO 把车摆到返回路径录制起点(集结点 S_j)附近,±0.5m/±10°;
+         *   ② 加载槽 6+j,按【录制原点】而不是当前位姿启动复现 ——
+         *      这样 Pure Pursuit 才看得见真实横向偏差,靠门洞前 ≥3m 直线引入段
+         *      把它压掉(Ld=1.5m,3m 把 0.5m 压到 0.07m,门洞每侧余量 0.40m)。
+         *      若按当前位姿启动,整条路径连门洞入口一起跟着车平移,前视再长也没用。
+         * 两步的交接由 kart_mission 的科目二时序做(它每拍都跑,能看到 GOTO 何时
+         * 结束);本模块只管"受理这条口令",不碰执行机构,与本文件的定位一致。 */
+        /* Voice B:跳过 GOTO,按当前位姿复现(人已遥控摆好位)。 */
+        if(kart_mission_subject2_get_manual_return())
+            kart_mission_subject2_start_return_here((uint8)(cmd.cmd - 0x1A));
+        else
+            kart_mission_subject2_start_return((uint8)(cmd.cmd - 0x1A));
     }
     else if(cmd.cmd >= 0x1F && cmd.cmd <= 0x26)
     {

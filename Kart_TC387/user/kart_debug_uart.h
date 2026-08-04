@@ -6,7 +6,10 @@
 
 /*
  * 科目一串口日志。
- * UART_10/P13.0 TX，460800 baud，VOFA JustFloat(33通道float32+帧尾,共136字节)。
+ * 串口由 BOARD_AUX_UART_*(board_pins.h 的 KART_LOG_ON_UART0)选:
+ *   =0 → UART_10/P13.0 TX(无线模块排针)  ← 当前
+ *   =1 → UART_0 /P14.0 TX(USB-TTL 直插)
+ * 460800 baud，VOFA JustFloat(34通道float32+帧尾,共140字节)。
  * 5 ms中断只维护tick，组帧和发送全部放在CPU0主循环。
  */
 #define KART_LOG_PERIOD_TICKS           (4U)   /* 4 * 5 ms = 20 ms，50 Hz */

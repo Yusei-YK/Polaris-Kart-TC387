@@ -16,7 +16,7 @@
  *
  * 设计边界：
  * - 5 ms中断只增加tick，不在中断内读传感器或发串口；
- * - 主循环每4 tick(50Hz)发送一帧：33个小端float32 + 帧尾00 00 80 7F；
+ * - 主循环每4 tick(50Hz)发送一帧：34个小端float32 + 帧尾00 00 80 7F（共140字节）；
  * - VOFA选JustFloat即可实时显示并导出CSV；不用printf、动态内存、DMA；
  * - 继续沿用原调试串口文件名，避免扩大工程改动。
  */
@@ -37,7 +37,7 @@ static uint16 kart_log_skipped_frames = 0U;
 
 /* ===== VOFA 发送环形缓冲(非阻塞后台发送)=====
  * 底层 uart_write_buffer→IfxAsclin_write8 是全阻塞:每字节写完 spin 等 TX FIFO 排空。
- * 一帧 33ch=136 字节 @460800 直发≈2.95ms,放 5ms 调度里会把控制拍打爆。
+ * 一帧 34ch=140 字节 @460800 直发≈3.04ms,放 5ms 调度里会把控制拍打爆。
  * 方案:poll 只把整帧塞进环形缓冲;background 每次主循环 spin 排 ≤16 字节
  * (=TX FIFO 深度,单次阻塞≤347us),loop 空转多拍即可发完整帧,永不长阻塞控制窗口。
  * head/tail 均只在主循环访问(poll 与 background 同在主循环,无 ISR 并发)。 */
@@ -251,13 +251,26 @@ void kart_debug_uart_poll(void)
         ch[14] = (float)kart_steer_abs_get_raw();          /* 14 转向raw */
         ch[15] = kart_steer_get_target_delta();            /* 15 目标转角 */
         ch[16] = (float)kart_steer_get_output();           /* 16 转向输出 */
-        ch[17] = kart_odom_get_x();                        /* 17 odom x */
-        ch[18] = kart_odom_get_y();                        /* 18 odom y */
-        ch[19] = kart_odom_get_dist();                     /* 19 odom 里程 */
-        ch[20] = kart_playback_get_cur_x();                /* 20 诊断:投影当前x */
-        ch[21] = kart_playback_get_cur_y();                /* 21 诊断:投影当前y */
-        ch[22] = kart_playback_get_aim_x();                /* 22 诊断:瞄准点x */
-        ch[23] = kart_playback_get_aim_y();                /* 23 诊断:瞄准点y */
+        /* CH17/18/19 + CH9 就是【全局位姿】,科目二返回全靠它们,不用新增通道。
+         * 2026-07-29 起门洞命令不再 kart_odom_reset(),故科目二全程 CH17/18 是
+         * 【发车区坐标系】里的绝对位置:回到发车区时应回到 (0,0) 附近。
+         * 【场地要量的两个数(阶段0)】
+         *   ① 转 2 圈后 CH10(展开yaw)与 720° 之差 → 陀螺标度误差;
+         *   ② 跑完一套随机动作后 CH17/18 与卷尺真值之差 → 位置误差总预算。
+         *     <0.25m 稳;0.25~0.6m 靠加长门洞前直线引入段救;>1m 现有传感器救不回来
+         *     (全车只有 IMU+编码器,没有任何能看见门洞的传感器)。 */
+        ch[17] = kart_odom_get_x();                        /* 17 odom x(发车区系,米) */
+        ch[18] = kart_odom_get_y();                        /* 18 odom y(发车区系,米) */
+        ch[19] = kart_odom_get_dist();                     /* 19 odom 里程(标量,倒车也增) */
+        /* CH20~23 是复用通道,含义随当前跑的分支变(省 4 个通道,不新增协议字段):
+         *   方案B正向复现     : 20/21=投影当前x/y      22/23=瞄准点x/y
+         *   科目四倒车 OLMode=0: 20=航向误差(度) 21=纠偏量(计数) 22=索引k 23=最终打角
+         *   科目四倒车 OLMode=1: 20=航向误差(度) 21=【横向偏差e_lat(米)】22=索引k 23=最终打角
+         * 调方案1的 Ke 就看 CH21:应被压向 0;若发散或换向震荡,先把 Ke 减半或取负。 */
+        ch[20] = kart_playback_get_cur_x();                /* 20 诊断:投影当前x / 航向误差 */
+        ch[21] = kart_playback_get_cur_y();                /* 21 诊断:投影当前y / 纠偏量 / e_lat */
+        ch[22] = kart_playback_get_aim_x();                /* 22 诊断:瞄准点x / 索引k */
+        ch[23] = kart_playback_get_aim_y();                /* 23 诊断:瞄准点y / 最终打角 */
         ch[24] = kart_imu_get_dt_us();                     /* 24 IMU积分步长(us):稳定应≈5000 */
         ch[25] = (float)g_sched_last_exec_us;              /* 25 调度上拍分发耗时(us) */
         ch[26] = (float)g_sched_max_exec_us;               /* 26 调度历史最大耗时(us):应<5000 */

@@ -29,6 +29,17 @@ static void kart_set_dir_pwm(gpio_pin_enum dir_pin, pwm_channel_enum pwm_pin, in
     }
 }
 
+/* 后轮升幅步长:宏(400)只作上电默认,运行时由菜单 Slew Rear 改。
+ * 为什么要可调:400 duty/拍 = 0→满约 125ms,起步和出弯加速被它限速;
+ * 提速阶段要能放开,又不能删掉限速器(反向穿零保护和防满载冲击还得留着)。 */
+static int16 kart_slew_rear_step = KART_SLEW_REAR_STEP;
+
+void power_set_slew_rear_step(int16 step)
+{
+    if(step < 1) step = 1;              /* 0 会让 duty 永远爬不动,钳成 1 */
+    kart_slew_rear_step = step;
+}
+
 /* 变化率限制器:把 applied 朝 target 每拍最多挪 step,并禁止穿零跳变。
  * 返回本拍实际应输出的 duty。dwell 指针记录零点驻留剩余拍数(反向前强制停顿)。
  * 规则见 kart_power.h 顶部注释:降幅/停车瞬时(安全),升幅限速,反向先归零+驻留。*/
@@ -133,8 +144,8 @@ void power_sync(void)
 
     /* 每路先过变化率限制器,再写 PWM。target 来自速度环/仲裁,applied 是上拍实际输出。 */
     steer_applied = kart_slew_step(t_servo, steer_applied, &steer_dwell, KART_SLEW_STEER_STEP);
-    left_applied  = kart_slew_step(t_left,  left_applied,  &left_dwell,  KART_SLEW_REAR_STEP);
-    right_applied = kart_slew_step(t_right, right_applied, &right_dwell, KART_SLEW_REAR_STEP);
+    left_applied  = kart_slew_step(t_left,  left_applied,  &left_dwell,  kart_slew_rear_step);
+    right_applied = kart_slew_step(t_right, right_applied, &right_dwell, kart_slew_rear_step);
 
     kart_set_dir_pwm(KART_STEER_DIR_PIN, KART_STEER_PWM_PIN, steer_applied, KART_STEER_MOTOR_SIGN);
     kart_set_dir_pwm(KART_LEFT_REAR_DIR_PIN, KART_LEFT_REAR_PWM_PIN, left_applied, KART_LEFT_MOTOR_SIGN);

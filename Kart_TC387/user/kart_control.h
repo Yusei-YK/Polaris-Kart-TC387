@@ -3,6 +3,7 @@
 
 #include "zf_common_headfile.h"
 #include "kart_pid.h"
+#include "kart_power.h"    /* KART_POWER_MAX_DUTY:下方 KART_SPEED_OUTMAX_DEFAULT 要用 */
 
 /*
  * 卡丁车控制环(速度环先行)
@@ -38,16 +39,45 @@
  *   target 朝 target_cmd 挪最多 RAMP_STEP。误差恒小 → PID 输出变化率远低于
  *   slew step → 不饱和 → 不攒积分 → 不超调 → 不触发穿零驻留。整条链一次解开。
  * 【只限加速,不限减速/停车/反向】:减速与急停必须瞬时,与 slew 同样的安全取向。
- * 单位:脉冲/5ms 每拍。60(满速)/1.5 ≈ 0→满速约 40 拍 = 200ms。
- * 运行时可由 kart_params 覆盖(菜单在线调),此宏仅作上电默认值。 */
-#define KART_SPEED_RAMP_STEP_DEFAULT    (1.5f)
+ * 单位:脉冲/5ms 每拍。运行时可由 kart_params 覆盖(菜单在线调),此宏仅作上电默认值。
+ *
+ * 【2026-07-28 赛前修正:1.5 → 0.4】原值按"0→满速 200ms 听着够缓"选的,
+ * 换成物理量就露馅了:
+ *   1.5 脉冲/5ms 每拍 ÷ 0.005s = 300 (脉冲/5ms)/s × 0.0736 = 22 m/s²。
+ * 而整车实际能给的:2×150W 驱动 ÷ 22kg,在 4 m/s 处 P/(m·v) ≈ 3.4 m/s²;
+ * EVA 硬轮抓地上限 0.5~0.7g ≈ 5~7 m/s²。1.5 的斜坡比车跑得出来的快 5~9 倍 ——
+ * 目标速度一瞬间就跑到实际速度前面去,误差照样一次性张开,上面那条病因链
+ * (①~④)一条都没被治住,只是被"看起来有斜坡"掩盖了。这才是起步窜车的真因,
+ * 不是编码器标定。
+ * 0.4 → 0.4/0.005 × 0.0736 = 5.9 m/s²,略高于抓地上限:既不人为拖慢加速
+ * (先打滑的是轮胎,斜坡不是瓶颈),又能真正把 PID 误差压在小量。
+ * 0→60 脉冲 = 150 拍 = 750ms,与"22kg / 300W 加到 4.4 m/s"的物理时间同量级。 */
+/* 速度环默认 PID 参数 —— 2026-07-17 上车调定并冻结。
+ * 量纲是"脉冲/5ms"。串口在线调参最终定为 Kp=200 / Ki=0.8 / Kd=0,
+ * 实测 I12≈I13 左右脉冲率拉平、稳态误差可接受,底层速度环到此冻结。
+ * (左右后轮机械差异由前轮转向的航向角度环处理,不在速度环加电子差速。)
+ * i_max/out_max 的 out_max 给 KART_POWER_MAX_DUTY(满量程),让 PID 能用满输出范围。
+ * 2026-07-28 从 kart_control.c 搬到本头文件:Kp/Imax 已进 kart_params 表当出厂默认值,
+ * 表里要引用这两个宏 —— 位置变了,值一个没动,"宏=出厂默认"的约定不变。 */
+#define KART_SPEED_KP_DEFAULT          (200.0f)
+#define KART_SPEED_KI_DEFAULT          (0.8f)
+#define KART_SPEED_KD_DEFAULT          (0.0f)
+#define KART_SPEED_IMAX_DEFAULT        (3000.0f)
+#define KART_SPEED_OUTMAX_DEFAULT      ((float)KART_POWER_MAX_DUTY)
+
+#define KART_SPEED_RAMP_STEP_DEFAULT    (0.4f)
 
 #define KART_REAR_GEAR_RATIO           (2.0f)      // 后轮减速比 40:20,标定真实车速时用
 
 /* 电子差速(前轮转向车,左右后轮转弯半径不同→内轮慢外轮快)。
  * 航向环只管前轮转角,消不掉后轮轮速差;同目标喂两独立 PID 会拖滑互顶。
  * 用实测转角(非目标)分配左右目标:内轮乘(1-r),外轮乘(1+r)。
- * 初版保守:GAIN 小、比例上限 12%;倒车关闭(符号未验证)。 */
+ * 初版保守:GAIN 小、比例上限 12%;倒车关闭(符号未验证)。
+ * 【2026-07-28 赛前复核:保持关闭】不是"来不及验",是量程本身就配不上:
+ * 满舵 R=1.32m、轮距 0.60m → 内外轮半径 1.02m / 1.62m,轮速偏差 ±23%,
+ * 而 MAX_RATIO 只有 ±12% —— 恰恰在最需要差速的满舵处只能补一半,
+ * 补一半的效果是"两个 PID 仍在互顶,只是顶得轻些",引入的不确定性大于收益。
+ * 要开必须先把 MAX_RATIO 提到 0.25 并实车验符号,赛前不动这条路径。 */
 #define KART_EDIFF_ENABLE              (0)
 #define KART_EDIFF_GAIN                (0.08f)     // steer_norm→差速比例增益
 #define KART_EDIFF_MAX_RATIO           (0.12f)     // 差速比例上限(±12%)
@@ -101,6 +131,10 @@ void  kart_control_speed_update(void);          // 速度环一拍:读编码器�
 void  kart_control_set_enable(uint8 en);        // 使能/关闭速度环输出
 void  kart_control_set_target(float target);    // 设目标速度(脉冲/5ms)
 void  kart_control_set_pid(float kp, float ki, float kd);   // 在线改 PID 参数
+/* 速度环限幅/增益在线调(菜单 Spd Imax / Spd Kp)。都不清 PID 记忆:
+ * 行驶中调参必须无级平滑,reset 会让积分掉 0 → 掉速一拍。 */
+void  kart_control_set_speed_imax(float imax);
+void  kart_control_set_speed_kp(float kp);
 
 /* 设加速斜坡步长(脉冲/5ms 每拍)。0 = 关闭斜坡(恢复旧的阶跃行为,A/B 对照用)。
  * 只影响"目标幅值增大"方向;减速/停车/反向恒为瞬时,不受此值影响。 */

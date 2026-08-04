@@ -25,6 +25,10 @@ typedef enum
     MOTION_CIRCLE,          /* 转圈(固定打角,累计 yaw 到 360) */
     MOTION_TURN_APPROACH,   /* 左右转:先直行 approach */
     MOTION_TURN_ROTATE,     /* 左右转:原地转向到目标角 */
+    MOTION_GOTO_REV,        /* 摆位①:目标在车后方,先倒一段把车头拧过来 */
+    MOTION_GOTO_TURN,       /* 摆位②:前进打死,把前置点转到车前方 */
+    MOTION_GOTO_DRIVE,      /* 摆位③:追前置点 */
+    MOTION_GOTO_AXIS,       /* 摆位④:沿目标轴线纯跟踪,横向+航向同时收敛 */
     MOTION_CENTER,          /* 收车:后轮已停,原地把方向盘拉回中位再关内环 */
 } motion_phase_t;
 
@@ -45,6 +49,20 @@ static float motion_snake_sign    = 1.0f;/* 蛇形当前摆向:+1=打左、-1=�
 static float motion_snake_half_d0 = 0.0f;/* 本摆起始路程(米),保底翻转用 */
 
 static uint16 motion_center_ticks = 0;   /* 回正段已等拍数(超时兜底) */
+
+/* -------------------- GOTO 摆位状态 --------------------
+ * 目标位姿 + 前置点(目标沿 tyaw 反方向退 LEAD 米)在 start 时算一次就固定,
+ * 不每拍重算 —— 它们是场地上的固定几何,重算只会把 odom 抖动引进来。 */
+static float motion_goto_tx   = 0.0f;   /* 目标位置 x(米,odom 世界系) */
+static float motion_goto_ty   = 0.0f;
+static float motion_goto_tyaw = 0.0f;   /* 目标航向(度,IMU 绝对值) */
+static float motion_goto_lx   = 0.0f;   /* 前置点 x */
+static float motion_goto_ly   = 0.0f;
+static float motion_goto_lead_s = 0.0f; /* 前置点沿目标轴线的纵坐标(= -lead) */
+static uint8 motion_goto_behind = 0;    /* 已经"退到前置点后方"过(见 DRIVE 段) */
+static float motion_goto_rev_d0 = 0.0f; /* 倒车预摆段起始路程(米) */
+static uint16 motion_goto_ticks = 0;    /* 摆位已跑拍数(超时兜底) */
+static kart_motion_goto_state_t motion_goto_state = KART_MOTION_GOTO_NONE;
 
 /* -------------------- 转角下发:唯一出口 --------------------
  * 全模块所有打角都必须走这里,统一叠转向中位偏置。
@@ -155,10 +173,104 @@ static void motion_accum_yaw(void)
     motion_yaw_prev = now;
 }
 
+/* -------------------- GOTO 摆位:几何小工具 --------------------
+ * 方位角误差:从【车头】到指定点还要转多少度(+ = 点在车头左边、需左转)。
+ * get_angle(now,aim) 用的就是 odom 的坐标约定(x东y北、y轴当0度基准、
+ * 顺时针为负),与 kart_imu_get_yaw() 同一套,所以两者可以直接相减。
+ * get_relative_angle(now,aim)=aim-now 已规整 ±180 => 参数顺序 (yaw, bearing)。
+ * 【位姿必须由调用方传进来】同一拍里要算方位角、距离、轴线投影三样,
+ *   各自再取一次快照就会拿到被 5ms 中断改过的不同帧,判据之间自相矛盾。 */
+static float motion_goto_bearing_err(const kart_odom_snapshot_t *odom, float px, float py)
+{
+    Point_2D cur, aim;
+
+    cur.x = odom->x;
+    cur.y = odom->y;
+    aim.x = px;
+    aim.y = py;
+
+    /* 点几乎就在脚下时方位角无意义(atan2(0,0)),返回 0 让调用方靠距离判据退出。 */
+    if(get_distance(cur, aim) < 0.02f)
+    {
+        return 0.0f;
+    }
+
+    return get_relative_angle(odom->yaw, get_angle(cur, aim));
+}
+
+/* 车到指定点的距离(米)。 */
+static float motion_goto_dist_to(const kart_odom_snapshot_t *odom, float px, float py)
+{
+    Point_2D cur, aim;
+
+    cur.x = odom->x;
+    cur.y = odom->y;
+    aim.x = px;
+    aim.y = py;
+    return get_distance(cur, aim);
+}
+
+/* 方位角 → 打角。前进段:点在左(err>0)要打左(delta>0),故 delta=+KP*err。
+ * 倒车段整体反号(与 motion_yaw_corr_delta 同一套推导)。
+ * 限幅用 GOTO_STEER_MAX(950,允许打死)而不是走直线用的 YAW_LIMIT(300)。 */
+static float motion_goto_steer(float bearing_err, uint8 reverse)
+{
+    float delta = KART_MOTION_GOTO_KP * bearing_err;
+
+    if(reverse)
+    {
+        delta *= KART_MOTION_REV_YAW_SIGN;
+    }
+
+    if(delta >  KART_MOTION_GOTO_STEER_MAX) delta =  KART_MOTION_GOTO_STEER_MAX;
+    if(delta < -KART_MOTION_GOTO_STEER_MAX) delta = -KART_MOTION_GOTO_STEER_MAX;
+    return delta;
+}
+
+/* 当前位置沿【目标轴线】的纵坐标 s:以目标点为原点、tyaw 方向为正。
+ *   车还没走到目标 → s<0;越过目标 → s>0 => 到位判据就是 s >= -AXIS_STOP。
+ * 轴线单位向量按 odom 约定(dx=-sin*ds, dy=+cos*ds)由 tyaw 给出:fwd=(-sin,+cos)。
+ * 【不需要横向偏差 lat】AXIS 段瞄的是轴线上的前视点,方位角误差里已经同时
+ *   包含了横向偏差和航向偏差,再单独算一个 lat 是死代码。 */
+static float motion_goto_axis_s(const kart_odom_snapshot_t *odom)
+{
+    float rad = degree_to_rad(motion_goto_tyaw);
+    float dx  = odom->x - motion_goto_tx;
+    float dy  = odom->y - motion_goto_ty;
+
+    return -sinf(rad) * dx + cosf(rad) * dy;
+}
+
+/* 轴线上的前视点:从车在轴线上的投影脚点再往前 LD 米,取轴线上那个点。
+ * 【为什么瞄轴线上的点而不是直接瞄目标点】瞄目标点是"追点",到点时航向由
+ *   来路决定、和 tyaw 没关系;瞄轴线前视点就是标准 Pure Pursuit,横向偏差
+ *   和航向偏差【同时】按 e^(-s/Ld) 收敛,到点时车已经躺在轴线上朝着 tyaw。
+ * s 是当前投影(目标点为 0、车在其后为负),所以前视点纵坐标 = s + LD。 */
+static void motion_goto_axis_aim(float s, float *ax, float *ay)
+{
+    float rad = degree_to_rad(motion_goto_tyaw);
+    float sn  = sinf(rad);
+    float cs  = cosf(rad);
+    float sa  = s + KART_MOTION_GOTO_LD;
+
+    /* 【2026-07-29 删掉了这里的 if(sa > 0.0f) sa = 0.0f;】
+     * 那句话把前视点夹在目标点上,后果是【前视距离随 s→0 一起塌到 0】:
+     * 车快到位时前视点就压在车轮底下,motion_goto_bearing_err() 的 <0.02m 保护
+     * 直接返回方位角 0,打角冻结在最后一次的值 —— 恰恰在"对齐"最要紧的最后
+     * 1.2m 失去控制。离线仿真(304 个起始位姿,判据 pos<=0.5m 且 yaw<=10deg)
+     * 只改这一处:76/304 → 186/304,再配 LEAD=6.0 到 261/304。
+     * 不夹会怎样:越过目标(s>0)后前视点落在目标【前方】,车继续往前追。这没问题,
+     * 因为出口判据 s >= -AXIS_STOP 在同一拍就成立、AXIS 段立刻结束,那个前视点
+     * 最多被用一拍。夹住反而是在换取一个不存在的好处。 */
+    *ax = motion_goto_tx + (-sn) * sa;
+    *ay = motion_goto_ty + ( cs) * sa;
+}
+
 /* -------------------- 对外接口 -------------------- */
 void kart_motion_init(void)
 {
     motion_phase = MOTION_IDLE;
+    motion_goto_state = KART_MOTION_GOTO_NONE;
 }
 
 uint8 kart_motion_is_busy(void)
@@ -184,8 +296,126 @@ void kart_motion_stop(void)
     /* 这里【故意不走 motion_set_delta】:停机是把转向交还给其他模块(科目一/四/遥控),
      * 要留干净的 0,不能把科目二的中位偏置漏出去。此时 angle_enable 已为 0,不下发。 */
     kart_steer_set_target_delta(0.0f);
+
+    /* 摆位【还在跑】就被硬停(deadman/切模式/急停)=> 判 FAULT,绝不能让
+     * kart_mission 事后读到 DONE 去启动复现 —— 那会在错误的位姿上放出一整条
+     * 返程路径。已经 DONE/NONE 的状态不动:DONE 要留给下一拍的交接读走。 */
+    if(motion_goto_state == KART_MOTION_GOTO_RUNNING)
+    {
+        motion_goto_state = KART_MOTION_GOTO_FAULT;
+    }
+
     motion_reverse = 0;
     motion_phase = MOTION_IDLE;
+}
+
+kart_motion_goto_state_t kart_motion_get_goto_state(void)
+{
+    return motion_goto_state;
+}
+
+uint8 kart_motion_start_goto(float tx, float ty, float tyaw)
+{
+    kart_odom_snapshot_t odom;
+    float rad, bear;
+
+    if(kart_motion_is_busy())
+    {
+        return 0;                       /* 忙不打断(与 kart_motion_start 同约定) */
+    }
+
+    kart_odom_get_snapshot(&odom);
+
+    motion_goto_tx   = tx;
+    motion_goto_ty   = ty;
+    motion_goto_tyaw = tyaw;
+
+    /* 前置点 = 目标位姿沿 tyaw 【反】方向退 lead 米。odom 约定下车头方向
+     * 单位向量是 (-sin, +cos),所以往后退是 (+sin, -cos)*lead。
+     *
+     * 【lead 不是常数,要保证前置点落在车的"轴线后方"】
+     *   记 s0 = 车此刻沿目标轴线的纵坐标(目标点为 0,车在其后为负)。
+     *   若直接取 lead=LEAD 而车已经站在 s0 > -LEAD(挤在引入段里、甚至已越过
+     *   目标),前置点就在车【前方】,DRIVE 段一进去距离判据可能已经满足,
+     *   AXIS 段拿不到引入段直接判到位 => 交出去的是一个横向偏差没收敛的位姿。
+     *   那比 FAULT 更糟:kart_mission 会照着这个歪位姿放出一整条返程路径。
+     *   所以 s0 > -LEAD 时把前置点再往后推 (s0 + LEAD) 米,让车永远"从后方
+     *   沿轴线进场",引入段长度也永远 >= LEAD。代价是要绕回去(s0=0 绕 5m,
+     *   s0=+3 绕 11m),这正是阿克曼车该走的小回环,MAX_DIST=25m 包得住。 */
+    rad = degree_to_rad(tyaw);
+    {
+        float s0   = motion_goto_axis_s(&odom);
+        float lead = KART_MOTION_GOTO_LEAD;
+
+        /* 【2026-07-29 把 > 改成 >=,并给推后量加 1 个 AXIS_STOP 的余量】
+         * 原来 s0 == -LEAD 这个【边界】上条件不成立、一点不推 => 引入段长度
+         * 恰好 0…LEAD 之间都可能出现,极端情况引入段是零长的:车站在前置点上,
+         * DRIVE 段的距离判据当拍就满足,AXIS 段没有任何收敛距离就判到位。
+         * 交出去的是横向偏差原样保留的位姿,而 kart_mission 会照着它放出一整条
+         * 返程路径。所以边界必须算作"要推",且推完再多留一点,别卡在等号上。 */
+        if(s0 >= -KART_MOTION_GOTO_LEAD)
+        {
+            lead += (s0 + KART_MOTION_GOTO_LEAD) + KART_MOTION_GOTO_AXIS_STOP;
+        }
+        motion_goto_lx   = tx + sinf(rad) * lead;
+        motion_goto_ly   = ty - cosf(rad) * lead;
+        motion_goto_lead_s = -lead;     /* 前置点在轴线上的纵坐标 */
+        motion_goto_behind = 0;
+    }
+
+    /* 路程基准:超距兜底(MAX_DIST)用。
+     * 【GOTO 不用 yaw0/yaw_accum】那两个是"保持起始航向 / 累计转了多少度"的判据,
+     * 摆位的判据全是【相对目标位姿的几何量】(方位角、轴线投影),与起始航向无关。
+     * 仍然刷一遍是为了别把上一条动作的残值留给下一条动作复用。 */
+    motion_dist0     = kart_odom_get_dist();
+    motion_yaw0      = kart_imu_get_yaw();
+    motion_yaw_prev  = motion_yaw0;
+    motion_yaw_accum = 0.0f;
+    motion_goto_ticks = 0;
+    motion_goto_state = KART_MOTION_GOTO_RUNNING;
+
+    /* 已经站在目标位姿上(位置进 ARRIVE、航向进 TURN_TOL)→ 直接判 DONE,车不动。
+     * 【为什么要这条】不加的话会先跑去 2.5m 外的前置点再开回来,白走 5m;
+     * 更糟的是那 5m 本身要消耗 odom 精度预算,等于为"已经对好了"付出误差。
+     * 台架上原地测这条命令时也是这个分支(车不该乱动)。 */
+    if(motion_goto_dist_to(&odom, tx, ty) <= KART_MOTION_GOTO_ARRIVE &&
+       fabsf(get_relative_angle(odom.yaw, tyaw)) <= KART_MOTION_GOTO_TURN_TOL)
+    {
+        motion_goto_state = KART_MOTION_GOTO_DONE;
+        motion_phase = MOTION_IDLE;     /* 没启动电机,不必走 CENTER 回正 */
+        return 1;
+    }
+
+    bear = motion_goto_bearing_err(&odom, motion_goto_lx, motion_goto_ly);
+
+    /* 前置点在车【后方】很多 → 先倒车预摆(三点掉头前半程),比在前方画一个
+     * 直径 3.1m 的圆更省场地。EN=0 时直接跳过,退化成纯前进掉头。 */
+#if KART_MOTION_GOTO_REV_EN
+    if(fabsf(bear) >= KART_MOTION_GOTO_REV_BEAR)
+    {
+        kart_steer_use_back_gains();    /* 真要打角的倒车必须换增益组,否则转角环振 */
+        kart_steer_set_head_enable(0);
+        kart_steer_set_angle_enable(1);
+        motion_reverse = 1;
+        motion_goto_rev_d0 = motion_dist0;
+        motion_set_delta(motion_goto_steer(bear, 1));
+        motion_set_rear(KART_MOTION_DUTY_GOTO_REV, -KART_MOTION_SPEED);
+        motion_phase = MOTION_GOTO_REV;
+        return 1;
+    }
+#endif
+
+    kart_steer_use_fwd_gains();
+    kart_steer_set_head_enable(0);
+    kart_steer_set_angle_enable(1);
+    motion_reverse = 0;
+    motion_set_delta(motion_goto_steer(bear, 0));
+    motion_set_rear(KART_MOTION_DUTY_GOTO, +KART_MOTION_SPEED);
+
+    /* 方位角已经进容差就不用先转了,直接进 DRIVE(省掉一次无意义的打死)。 */
+    motion_phase = (fabsf(bear) <= KART_MOTION_GOTO_TURN_TOL) ? MOTION_GOTO_DRIVE
+                                                             : MOTION_GOTO_TURN;
+    return 1;
 }
 
 /* 动作正常做完:先停后轮,再【原地】把方向盘拉回中位,到位后才真正 stop()。
@@ -214,6 +444,112 @@ static void motion_finish(void)
     motion_phase = MOTION_CENTER;
 }
 
+/* GOTO 摆位一拍(四段共用一个入口:三段之间的切换只是几何条件,分散到
+ * kart_motion_update 的 switch 里会把同一套投影算三遍)。
+ * dist = 本次摆位已走的总路程(米),由调用方算好传进来。 */
+static void motion_goto_update(float dist)
+{
+    kart_odom_snapshot_t odom;
+    float bear, s, ax, ay;
+
+    /* 兜底:超距/超时 → FAULT 停机。GOTO 的出口全是几何条件,若 odom 漂到
+     * 离谱或 tyaw 给反了,几何条件可能【永远】不满足 => 车在场地里一直绕。
+     * 宁可停机让人接管,也不能变成一条没有终点的动作。 */
+    motion_goto_ticks++;
+    if(dist >= KART_MOTION_GOTO_MAX_DIST || motion_goto_ticks >= KART_MOTION_GOTO_TICKS)
+    {
+        motion_goto_state = KART_MOTION_GOTO_FAULT;
+        kart_motion_stop();             /* 已是 FAULT,stop 里的 RUNNING 分支不会再覆盖 */
+        return;
+    }
+
+    /* 整拍一致位姿:方位角、距离、轴线投影三个判据必须同源,否则互相矛盾。 */
+    kart_odom_get_snapshot(&odom);
+
+    switch(motion_phase)
+    {
+        case MOTION_GOTO_REV:
+            /* ① 倒车预摆:目标在车后方,先倒着把车头拧过来(三点掉头前半程)。
+             * 倒车时打角对【车头】的作用整体反号,motion_goto_steer(.,1) 已处理。
+             * 两个出口:方位角拧进 REV_EXIT(正常),或倒够 REV_DIST(保底,
+             * 防符号不对时越倒越偏 —— 那时把 GOTO_REV_EN 改 0 即可绕开本段)。 */
+            bear = motion_goto_bearing_err(&odom, motion_goto_lx, motion_goto_ly);
+            motion_set_delta(motion_goto_steer(bear, 1));
+            if(fabsf(bear) <= KART_MOTION_GOTO_REV_EXIT ||
+               (odom.dist_sum - motion_goto_rev_d0) >= KART_MOTION_GOTO_REV_DIST)
+            {
+                /* 转前进:增益换回前进组,后轮换向。 */
+                kart_steer_use_fwd_gains();
+                motion_reverse = 0;
+                motion_set_delta(motion_goto_steer(bear, 0));
+                motion_set_rear(KART_MOTION_DUTY_GOTO, +KART_MOTION_SPEED);
+                motion_phase = MOTION_GOTO_TURN;
+            }
+            break;
+
+        case MOTION_GOTO_TURN:
+            /* ② 前进打死转,把前置点转到车前方。大角度旋转【集中在这一段】,
+             * 之后就不再需要转大角度 —— 这是"到点再转头会毁位置"的规避方式。 */
+            bear = motion_goto_bearing_err(&odom, motion_goto_lx, motion_goto_ly);
+            motion_set_delta(motion_goto_steer(bear, 0));
+            if(fabsf(bear) <= KART_MOTION_GOTO_TURN_TOL)
+            {
+                motion_phase = MOTION_GOTO_DRIVE;
+            }
+            break;
+
+        case MOTION_GOTO_DRIVE:
+            /* ③ 追前置点。这段只管把车开到目标轴线的【后段延长线】上,不管航向
+             * —— 航向交给 ④。到 ARRIVE 半径内就切轴线跟踪。
+             *
+             * 【出口为什么不能只判距离】车若绕着前置点画圈(打死半径 1.56m,
+             *   而 ARRIVE 只有 0.5m,几何上完全可能永远进不去这个圈),
+             *   就会一直转到 MAX_DIST 判 FAULT。所以补一条"已经越过前置点
+             *   (s >= lead_s)"的兜底。
+             * 【为什么要 behind 这个闩】start 那一拍车可能就在前置点前方
+             *   (s > lead_s),此时若直接用 s >= lead_s 判,第一拍就跳 AXIS,
+             *   引入段长度为 0 => 横向偏差压根没收敛就交出去,比 FAULT 更糟。
+             *   所以先要求车真的退到过前置点后方一次,这条兜底才生效。
+             *   起点就在后方(正常情况)时 behind 第一拍即置 1,行为不变。 */
+            bear = motion_goto_bearing_err(&odom, motion_goto_lx, motion_goto_ly);
+            motion_set_delta(motion_goto_steer(bear, 0));
+            s = motion_goto_axis_s(&odom);
+            if(s <= motion_goto_lead_s)
+            {
+                motion_goto_behind = 1;
+            }
+            if(motion_goto_dist_to(&odom, motion_goto_lx, motion_goto_ly) <= KART_MOTION_GOTO_ARRIVE ||
+               (motion_goto_behind && s >= motion_goto_lead_s))
+            {
+                motion_phase = MOTION_GOTO_AXIS;
+            }
+            break;
+
+        case MOTION_GOTO_AXIS:
+            /* ④ 沿目标轴线纯跟踪:瞄"轴线上前视 LD 米"的点,横向偏差与航向偏差
+             * 【同时】按 e^(-s/Ld) 收敛。走到 s >= -AXIS_STOP(沿轴线到达目标)
+             * 就 motion_finish():停车 + 原地回正方向盘,再由 kart_mission 交接。
+             * 【DONE 在这里置,不在 CENTER 段末】CENTER 是回轮,车已经停了,
+             * 摆位精度此刻就已定死;等到 CENTER 结束再置只会让交接晚 0.x 秒。
+             * 但 is_busy 要到 CENTER 走完才落 => kart_mission 必须【同时】
+             * 判 DONE 和 !is_busy 才启动复现(否则会踩着歪轮子起步)。 */
+            s = motion_goto_axis_s(&odom);
+            motion_goto_axis_aim(s, &ax, &ay);
+            bear = motion_goto_bearing_err(&odom, ax, ay);
+            motion_set_delta(motion_goto_steer(bear, 0));
+            if(s >= -KART_MOTION_GOTO_AXIS_STOP)
+            {
+                motion_goto_state = KART_MOTION_GOTO_DONE;
+                motion_finish();
+            }
+            break;
+
+        default:
+            kart_motion_stop();
+            break;
+    }
+}
+
 uint8 kart_motion_start(uint8 voice_cmd)
 {
     if(kart_motion_is_busy())
@@ -226,6 +562,10 @@ uint8 kart_motion_start(uint8 voice_cmd)
     motion_yaw0      = kart_imu_get_yaw();
     motion_yaw_prev  = motion_yaw0;
     motion_yaw_accum = 0.0f;
+
+    /* 上一次摆位的结果作废:又做了一条固定动作,车已经离开摆好的位姿,
+     * 残留的 DONE 绝不能被后来的交接逻辑读到当成"还站在目标位姿上"。 */
+    motion_goto_state = KART_MOTION_GOTO_NONE;
 
     switch(voice_cmd)
     {
@@ -443,6 +783,14 @@ void kart_motion_update(void)
             {
                 motion_finish();
             }
+            break;
+
+        /* ===== GOTO 摆位四段(几何推导见 kart_motion.h) ===== */
+        case MOTION_GOTO_REV:
+        case MOTION_GOTO_TURN:
+        case MOTION_GOTO_DRIVE:
+        case MOTION_GOTO_AXIS:
+            motion_goto_update(dist);
             break;
 
         case MOTION_CENTER:

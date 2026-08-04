@@ -128,6 +128,14 @@ void kart_steer_set_target_yaw(float yaw)
     kart_steer.target_yaw = yaw;
 }
 
+/* 转角内环输出限幅在线调(菜单 Str OutMax)。
+ * 提速后转向速率(实测约 1800 计数/s)是走线的硬瓶颈,放大输出上限直接提高可用角速度。
+ * 不清 PID 记忆:行驶中调它不该让方向盘抖一拍。 */
+void kart_steer_set_angle_outmax(float outmax)
+{
+    kart_steer.angle_pid.out_max = outmax;
+}
+
 void kart_steer_set_angle_pid(float kp, float ki, float kd)
 {
     kart_steer.angle_pid.Kp = kp;

@@ -48,9 +48,14 @@
 #define KART_STEER_ABS_SPI_HW_CS_PIN    (SPI_CS_NULL)
 #define KART_STEER_ABS_CS_GPIO_PIN      (P23_1)
 #define KART_STEER_ABS_RAW_SHIFT        (4)
-#define KART_STEER_ABS_CENTER_RAW       (1575)  /* 2026-07-19 齿轮重装后实测 */
-#define KART_STEER_ABS_LEFT_LIMIT_RAW   (2728)  /* 最左硬限位 raw */
-#define KART_STEER_ABS_RIGHT_LIMIT_RAW  (477)   /* 最右硬限位 raw */
+/* 2026-07-30 换齿轮+编码器+转向电机后重标(CH14 平台值,已解 4096 环绕):
+ * 左死 1248、右死 3176(相对中值 -1084)、中值取几何中点 164(手停读数 192/177 吻合)。
+ * 行程 +1078/-1084 基本对称,总行程 2162(旧 2251),满舵半径回到 ~1.4m。
+ * 【注意】中值贴着 raw 0,CH14 在中值附近会在 0/4095 之间跳,这是正常的;
+ * delta 由 wrap_delta() 做 mod-4096 修正,除显示外无代码直接比较 raw。 */
+#define KART_STEER_ABS_CENTER_RAW       (164)   /* 2026-07-30 实测(几何中点) */
+#define KART_STEER_ABS_LEFT_LIMIT_RAW   (1248)  /* 最左硬限位 raw */
+#define KART_STEER_ABS_RIGHT_LIMIT_RAW  (3176)  /* 最右硬限位 raw(过 0 环绕) */
 
 /* ---------------- IMU660RA(六轴,SPI_0)----------------
  * 最新网表与 zf_device_imu660ra.h 默认引脚一致。
@@ -76,10 +81,12 @@
 /* VOFA 日志串口。
  * 2026-07-24 由 UART2(P14.2/P14.3)改到 UART10(P13.0/P13.1)对接无线模块。
  *
- * 2026-07-27 增加 UART0(P14.0/P14.1)选项:现场没带无线模块,只能用 USB-TTL 直插
+ * 2026-07-27 增加 UART0(P14.0/P14.1)选项:那天没带无线模块,只能用 USB-TTL 直插
  * 抓 VOFA。P13.0/P13.1 是无线模块排针位,不方便接 TTL 线,故改用空闲的 ASCLIN0。
- *   KART_LOG_ON_UART0 = 1 → UART_0 / P14.0(TX) / P14.1(RX)  ← 当前
- *   KART_LOG_ON_UART0 = 0 → UART_10 / P13.0 / P13.1(无线模块,赛前改回)
+ *
+ * 2026-07-28 改回 0:带了无线模块,插 P13.0/P13.1 排针无线抓 VOFA,不用拖线。
+ *   KART_LOG_ON_UART0 = 1 → UART_0 / P14.0(TX) / P14.1(RX)  (USB-TTL 直插备用)
+ *   KART_LOG_ON_UART0 = 0 → UART_10 / P13.0 / P13.1(无线模块)  ← 当前
  *
  * 前提与已知风险:
  *   ① P14.0/P14.1 不在《尽量不要使用的引脚.txt》禁用表内(表里是 P14.2~P14.6);
@@ -90,7 +97,7 @@
  *
  * 切到 UART0 后日志与语音不再共用外设 → BOARD_VOICE_SHARES_AUX_UART 自动变 0,
  * 进出科目二不再切波特率/停日志(语音仍独占 UART_10)。 */
-#define KART_LOG_ON_UART0               (1)
+#define KART_LOG_ON_UART0               (0)
 
 #if KART_LOG_ON_UART0
 #define BOARD_AUX_UART_INDEX            (UART_0)
