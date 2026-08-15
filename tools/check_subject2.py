@@ -12,14 +12,27 @@
 import io, os, re, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-U = os.path.join(ROOT, 'Kart_TC387', 'user')
+
+# 2026-08 分层重构:源码从 user/ 平铺挪到 code/Kart_* 分层目录,
+# user/ 只留 cpu*_main / isr / kart_multicore。所以按目录清单查找,
+# 不再硬编码单一目录 —— 以后再挪目录只改这个列表。
+SEARCH_DIRS = [os.path.join(ROOT, 'Kart_TC387', 'user')] + [
+    os.path.join(ROOT, 'Kart_TC387', 'code', d)
+    for d in ('Kart_Config', 'Kart_Driver', 'Kart_Algo', 'Kart_App',
+              'Kart_Decision', 'Kart_Debug', 'Kart_TPL')
+]
 
 def rd(n):
-    return io.open(os.path.join(U, n), encoding='utf-8', errors='surrogateescape').read()
+    for d in SEARCH_DIRS:
+        p = os.path.join(d, n)
+        if os.path.exists(p):
+            return io.open(p, encoding='utf-8', errors='surrogateescape').read()
+    raise IOError('找不到 %s,在:%s' % (n, SEARCH_DIRS))
 
 F = {}
 for n in ['kart_motion.h','kart_motion.c','kart_control.h','kart_control.c',
-          'kart_steer_ctrl.h','kart_steer_ctrl.c','kart_odom.c','isr.c','cpu0_main.c']:
+          'kart_steer_ctrl.h','kart_steer_ctrl.c','kart_odom.c','isr.c','cpu0_main.c',
+          'kart_calib.h']:
     F[n] = rd(n)
 
 fail = []
@@ -32,9 +45,24 @@ def strip_c(s):
     s = re.sub(r'/\*.*?\*/', '', s, flags=re.S)
     return re.sub(r'//[^\n]*', '', s)
 
-def mval(f, n):
+def mval(f, n, _depth=0):
+    """取宏的数值。支持一层层跟别名 —— 2026-08 起部分宏改成引用
+    kart_calib.h 的集中标定量(例如 REV_YAW_SIGN -> KART_REV_HEAD_SIGN),
+    直接按字面数字匹配会取不到值。"""
+    if _depth > 4:
+        return None
     m = re.search(r'#define\s+' + n + r'\s+\(([-+\d.]+)[fuFU]?\)', F[f])
-    return float(m.group(1).lstrip('+')) if m else None
+    if m:
+        return float(m.group(1).lstrip('+'))
+    # 别名:#define A (B) —— 在所有已载入文件里找 B 的定义
+    m = re.search(r'#define\s+' + n + r'\s+\((\w+)\)', F[f])
+    if m:
+        tgt = m.group(1)
+        for g in F:
+            v = mval(g, tgt, _depth + 1)
+            if v is not None:
+                return v
+    return None
 
 mc  = strip_c(F['kart_motion.c'])
 cc  = F['kart_control.c']
@@ -113,8 +141,22 @@ ck(kpb < kpf, 'Kp_back %s < Kp_fwd %s' % (kpb, kpf))
 ck(kdb > kdf, 'Kd_back %s > Kd_fwd %s' % (kdb, kdf))
 
 print('[13] steer targets inside soft limits')
-lim_l = int(re.search(r'KART_STEER_DELTA_LIMIT_L\s+\(\+?(\d+)\)', F['kart_steer_ctrl.h']).group(1))
-lim_r = abs(int(re.search(r'KART_STEER_DELTA_LIMIT_R\s+\((-?\d+)\)', F['kart_steer_ctrl.h']).group(1)))
+# 软限位现在由 kart_calib.h 的三个硬限位 raw 派生,按脚本自己算一遍 ——
+# 顺带校验派生式:算出来的值必须和"当前 ±1064"对得上。
+_cal = F['kart_calib.h']
+def _iv(n):
+    return int(re.search(r'#define\s+' + n + r'\s+\((\d+)\)', _cal).group(1))
+_full   = _iv('KART_STEER_ABS_RAW_FULL')
+_center = _iv('KART_STEER_ABS_CENTER_RAW')
+_margin = _iv('KART_STEER_LIMIT_MARGIN')
+lim_l = (_iv('KART_STEER_ABS_LEFT_LIMIT_RAW')  - _center) - _margin
+lim_r = abs((_iv('KART_STEER_ABS_RIGHT_LIMIT_RAW') - _center - _full) + _margin)
+ck(lim_l > 0 and lim_r > 0, 'derived soft limits sane (L=%d R=%d)' % (lim_l, lim_r))
+ck(abs(lim_l - lim_r) <= 50, 'left/right travel roughly symmetric (%d vs %d)' % (lim_l, lim_r))
+# 航向外环上限必须跟着软限位走,不能再有第二道暗闸(2026-07-28 复刻切内锥桶的根因)
+ck(re.search(r'KART_HEAD_OUTMAX_DEFAULT\s+\(\(float\)KART_STEER_DELTA_LIMIT_L\)',
+             F['kart_steer_ctrl.h']) is not None,
+   'head outer-loop cap follows the soft limit')
 for n in ['KART_MOTION_CIRCLE_DELTA','KART_MOTION_TURN_DELTA','KART_MOTION_SNAKE_DELTA']:
     v = mval('kart_motion.h', n)
     ck(v <= lim_l and v <= lim_r, '%s=%s <= min(L=%d,R=%d)' % (n, v, lim_l, lim_r))

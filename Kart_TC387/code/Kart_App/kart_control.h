@@ -2,6 +2,7 @@
 #define KART_CONTROL_H_
 
 #include "zf_common_headfile.h"
+#include "kart_calib.h"    /* KART_REAR_GEAR_RATIO、脉冲↔m/s 换算 */
 #include "kart_pid.h"
 #include "kart_power.h"    /* KART_POWER_MAX_DUTY:下方 KART_SPEED_OUTMAX_DEFAULT 要用 */
 
@@ -67,7 +68,7 @@
 
 #define KART_SPEED_RAMP_STEP_DEFAULT    (0.4f)
 
-#define KART_REAR_GEAR_RATIO           (2.0f)      // 后轮减速比 40:20,标定真实车速时用
+/* 后轮减速比 KART_REAR_GEAR_RATIO → kart_calib.h 第三节 */
 
 /* 电子差速(前轮转向车,左右后轮转弯半径不同→内轮慢外轮快)。
  * 航向环只管前轮转角,消不掉后轮轮速差;同目标喂两独立 PID 会拖滑互顶。

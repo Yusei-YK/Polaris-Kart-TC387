@@ -17,10 +17,16 @@
 #include "kart_hw_test.h"
 #include "kart_menu.h"
 #include "zf_device_dot_matrix_screen.h"
+#include "kart_camera.h"
 #include "kart_light.h"
 #include "kart_multicore.h"
 #include "kart_params.h"
 #include "isr.h"                 /* g_kart_tick_5ms + 调度器监测 g_sched_* */
+#include "kart_vtrack.h"
+#include "kart_bench.h"
+#include "kart_wifi.h"
+#include "kart_assist_img.h"
+#include "kart_preprocess.h"
 
 /* 硬件自测开关:=1 时开机进 kart_hw_test_run() 死循环(验证并口屏/旋钮/按键),
  * 不跑正式主循环。硬件确认完必须改回 0。 */
@@ -46,7 +52,7 @@
  * 期望:屏 7×15 全亮 + ch1=0 + ch0 数千。判读表见函数注释。测完必须改回 0。 */
 #define KART_DOT_ALLON_TEST (0)
 
-/* 菜单系统开关:=1 时启用 IPS200 菜单(取代 VOFA m 命令切科目) */
+/* 菜单系统开关。当前 IPS200 走软件 SPI(P02.8/P20.3)，与无线 SPI2 不冲突。 */
 #define KART_USE_MENU   (1)
 
 /* 协作式调度器开关(A/B 对照):
@@ -68,14 +74,14 @@ volatile uint32 g_sched_max_exec_us   = 0;
 volatile uint32 g_sched_overrun_count = 0;
 
 #if KART_USE_SCHEDULER
-/* 点阵屏显当前模式号:000=待机 111=科目一 222=科目二 444=科目三 555=科目四 333=遥控 FFF=故障 */
+/* 点阵屏显当前模式号:000=待机 111=科目一 222=科目二 444=科目三 333=遥控 FFF=故障 */
 static void kart_dot_show_mode(void)
 {
     switch(kart_mission_get_mode())
     {
         case MISSION_SUBJECT_1: kart_multicore_dot_show_string("111"); break;
         case MISSION_SUBJECT_2: kart_multicore_dot_show_string("222"); break;
-        case MISSION_SUBJECT_4: kart_multicore_dot_show_string("555"); break;
+        case MISSION_SUBJECT_3: kart_multicore_dot_show_string("444"); break;
         case MISSION_REMOTE:    kart_multicore_dot_show_string("333"); break;
         case MISSION_FAULT:     kart_multicore_dot_show_string("FFF"); break;
         case MISSION_IDLE:
@@ -168,7 +174,7 @@ static void kart_task_light_10ms(void)
 }
 
 /* 10ms 拍:遥控失联计时 + 科目状态机 + 录制采样 + 日志采样组帧。
- * 均为事件/阈值驱动或有内部节拍,20ms 精度足够,让出控制窗口。
+ * 均为事件/阈值驱动或有内部节拍，10ms 精度足够，让出控制窗口。
  * 日志实际串口发送不在此,靠主循环每 spin 的 background_poll 非阻塞排空。 */
 static void kart_task_10ms(void)
 {
@@ -176,6 +182,11 @@ static void kart_task_10ms(void)
     kart_mission_poll();
     kart_multicore_record_poll();
     kart_debug_uart_poll();     /* 只采样组帧入环形缓冲(内部再 4tick=20ms 门控) */
+
+    /* 摄像头只做帧率统计和"无信号"判定,不碰图像、不阻塞。
+     * KART_CAMERA_ENABLE=0 时是空函数。 */
+    kart_camera_poll();
+    kart_person_link_poll(10);      /* 人体视觉链路：失联计时 + 合成 vtrack，不收字节 */
 
     kart_task_light_10ms();     /* 灯板动画推进 + 帧下发(仅科目二有灯光命令时生效) */
 
@@ -191,8 +202,49 @@ static void kart_task_10ms(void)
 /* 50ms 拍:IPS200 屏幕刷新(换页时整屏 clear 耗时大,严禁进控制窗口)。
  * 按键扫描已搬到 10ms 拍,这里只画。 */
 static void kart_task_50ms(void){
+#if KART_AIMG_ENABLE
+    /* 下载器有线图传：先抢一份新帧，再让菜单刷新；否则相机调试页可能
+     * 已经消费并释放这一帧。发送忙时 request 立即返回，不会排队。 */
+    static uint16 aimg_elapsed_ms = 0u;
+
+    if(MISSION_IDLE == kart_mission_get_mode())
+    {
+        aimg_elapsed_ms = (uint16)(aimg_elapsed_ms + 50u);
+        if(aimg_elapsed_ms >= KART_AIMG_PERIOD_MS)
+        {
+            aimg_elapsed_ms = 0u;
+            (void)kart_assist_img_request();
+        }
+    }
+    else
+    {
+        aimg_elapsed_ms = 0u;
+    }
+#endif
+
 #if KART_USE_MENU
     kart_menu_poll();
+#endif
+
+#if KART_WIFI_ENABLE
+    /* 只在停车 IDLE 时按配置帧率请求图像。真正的 SPI 分块发送仍在主循环
+     * background_poll，绝不把阻塞发送塞进 50ms 任务。过去这里漏了请求入口，
+     * 即使链路连通也只会发示波器、不会出现实时图像。 */
+    static uint16 wifi_img_elapsed_ms = 0u;
+
+    if(MISSION_IDLE == kart_mission_get_mode())
+    {
+        wifi_img_elapsed_ms = (uint16)(wifi_img_elapsed_ms + 50u);
+        if(wifi_img_elapsed_ms >= KART_WIFI_IMG_PERIOD_MS)
+        {
+            wifi_img_elapsed_ms = 0u;
+            (void)kart_wifi_request_image();
+        }
+    }
+    else
+    {
+        wifi_img_elapsed_ms = 0u;
+    }
 #endif
 }
 
@@ -209,6 +261,8 @@ static void kart_task_100ms(void)
 
 int core0_main(void)
 {
+    uint8 imu_init_ok;
+
     clock_init();
     debug_init();
     kart_multicore_init();
@@ -224,8 +278,28 @@ int core0_main(void)
     kart_control_init();        // 速度环:填默认 PID、清滤波、默认不使能(等 VOFA 发 e1 才输出)
     kart_steer_ctrl_init();     // 转向串级:填内/外环默认 PID,默认全不使能(等 VOFA 发 se1 才驱动转向电机)
 
-    /* 点阵屏提前初始化(原在标定后):标定阻塞约 6s,期间点阵全亮作"标定中"指示,
-     * 别再黑屏。system_delay 走 STM 忙等,不依赖 pit,提前 init 安全。 */
+    /* SCC8660 彩色摄像头(凌瞳)。默认 KART_CAMERA_ENABLE=0,此调用编译期就是空壳,
+     * 已验证的低速基线一个字节都不受影响。
+     *
+     * 位置有两个硬约束,别挪:
+     *   1) 必须在 dot_matrix_screen_init() 之前 —— 摄像头配置可能要用 UART1@9600
+     *      (P02.2/P02.3),而灯板 TLD7002 用 UART1@2Mbps;先配摄像头,再让灯板把 UART1
+     *      按 2Mbps 重配走,此后 UART1 静态归灯板,互不干扰。反了则摄像头配置必然超时。
+     *   2) 必须在 pit_ms_init(CCU60_CH0, ...) 之前 —— 内部阻塞 0.5~1.5s
+     *      (scc8660 单次 set_config 超时 240ms,还带重试),开了 5ms 环再阻塞就是漏拍。
+     *
+     * 返回非 0 只代表没摄像头/配置串口不通,不当致命错误处理:车照常能跑科目一/二。
+     * 诊断看 g_kart_cam_init_ret / _try / _us。 */
+    (void)kart_camera_init();
+
+    /* 下载器虚拟串口图传。本函数把 UART_0 最终配置为
+     * 460800 8N1，P14.0=TX、P14.1=RX，并清发送状态。 */
+    kart_assist_img_init();
+
+    /* 点阵屏初始化。必须在 kart_camera_init() 之后 —— 摄像头配置期可能借走 UART1,
+     * 此处 dot_matrix_screen_init() 内部的 tld7002_init() 会按 2Mbps 重配 UART1,
+     * 把它还给灯板。标定阻塞约 6s,期间点阵全亮作"标定中"指示,别再黑屏。
+     * system_delay 走 STM 忙等,不依赖 pit,提前 init 安全。 */
     dot_matrix_screen_init();
     dot_matrix_screen_set_brightness(10000);
 
@@ -263,12 +337,54 @@ int core0_main(void)
     /* IMU660RA 初始化 + 上电静止标定零偏。
      * 注意:kart_imu_init() 先静置 1s,再采 1000 次(约 5s),
      *       必须在"开 5ms 中断之前"跑完 —— 此时车必须放稳别动。 */
-    kart_imu_init();
+    imu_init_ok = kart_imu_init();
 
     dot_matrix_screen_set_all_on(0);                    /* 熄灭全亮,恢复字库显示 */
 
     /* 航位推算基准初始化：必须在 IMU/编码器就绪后、开 5ms 中断前。 */
     kart_odom_init();
+
+    /* 视觉跟踪初始化。必须在 kart_camera_init() 之后、开 5ms 中断前。
+     * 内部分配金字塔内存 24KB @ cpu0_dsram，清空点集。
+     * KART_VTRACK_ENABLE=0 时编译期空壳。 */
+    kart_vtrack_init();
+
+    /* 图像预处理初始化。必须在 kart_camera_init() 之后、视觉处理前。
+     * 内部分配预处理缓冲 38KB @ cpu0_dsram，清统计量。
+     * KART_PREPROCESS_ENABLE=0 时编译期空壳。 */
+    kart_preprocess_init();
+
+    /* 性能基准测试初始化。必须在 kart_vtrack_init() 之后（B9 会调 vtrack）。
+     * 内部分配假图 38KB @ cpu0_dsram，清零统计量。
+     * KART_BENCH_ENABLE=0 时编译期空壳。 */
+    kart_bench_init();
+
+#if KART_WIFI_ENABLE
+    /* 【必须先关掉 P15.8 的 EXTI —— 2026-08-11 实测定位的 bug】
+     * 现象：插上无线模块就收不到 VOFA 日志，拔了就正常。
+     *
+     * 原因：上面的 dot_matrix_screen_init() 末尾有
+     *     exti_init(DOT_MATRIX_SCREEN_SYNC_PIN = ERU_CH5_REQ1_P15_8, EXTI_TRIGGER_FALLING)
+     * 把 P15.8 配成了下降沿中断。而无线模块把同一根 P15.8 当 INT 用，
+     * 传输期间频繁翻转 → 每个下降沿都进 exti_ch1_ch5_isr。
+     * 模块拔掉时该脚被下拉恒低、一个沿也不会产生 ——
+     * 这正是“拔了才有日志”的直接解释。
+     *
+     * 【board_pins.h 里的旧注释是错的】它写着“SYNC 已于 2026-07-26 降级为
+     * 诊断计数，zf_device_dot_matrix_screen.c:553 已经 exti_disable 掉了”——
+     * 但那个 exti_disable 在 dot_matrix_screen_test_rows_static() 里面，
+     * 那是个被 KART_DOT_ROWS_TEST(=0) 卡死的诊断函数，正常开机流程根本不调。
+     * 也就是说“让出来无代价”这个结论成立的前提一直没被执行过。
+     *
+     * 放在这里（dot init 之后、wifi init 之前）而不是改 dot init：
+     * KART_WIFI_ENABLE=0 时仍保留点阵 SYNC 诊断能力不动。 */
+    exti_disable(DOT_MATRIX_SCREEN_SYNC_PIN);
+#endif
+
+    /* WiFi 图传初始化。必须在 kart_camera_init() 之后（图像地址指向 scc8660_image）
+     * 且在 pit_ms_init() 之前（内部可能阻塞数秒）。
+     * KART_WIFI_ENABLE=0 时编译期空壳。返回非 0 表示没连上，不影响跑车。 */
+    (void)kart_wifi_init();
 
     /* 开 5ms 周期中断,进 cc60_pit_ch0_isr 调 kart_imu_update()。
      * 放在标定之后:保证进中断时零偏已就绪,解算从第一帧就是准的。 */
@@ -314,6 +430,12 @@ int core0_main(void)
 
     /* 科目状态机:置 IDLE 并执行统一停机,保证上电无残留输出。 */
     kart_mission_init();
+    if(!imu_init_ok)
+    {
+        /* IMU 通信初始化连续失败：保持全车无动力，状态屏显 FFF。
+         * 遥控模式仍可用；自动任务由 mission 入口的 IMU ready 闸拒绝。 */
+        kart_mission_set_mode(MISSION_FAULT);
+    }
 
     /* SBUS 枪式遥控接收(UART3,P15.7 RX)。第一版只解析+失联计数,只上 VOFA 观测,
      * 不接管电机/转向(见 kart_remote.h 安全红线)。 */
@@ -324,6 +446,16 @@ int core0_main(void)
      * 启用后取代 VOFA m 命令,通过屏幕菜单 + 五向按键操作。 */
     kart_menu_init();
 #endif
+
+    /* TC4D7 人体视觉链路最后再开。4D7 上电后会持续发 25B 跟踪帧，
+     * 若过早开启 UART RX 中断，会在 IMU 标定和软件 SPI 开机动画期间频繁
+     * 抢占 CPU，表现为动画十几秒后才出现且播放巨卡。
+     *
+     * 此处已经满足端口所有权顺序：摄像头配置早已结束；点阵灯板在 PLINK
+     * 选 LIGHT 口时由 KART_DOT_MATRIX_MUTED 静默；菜单动画也已播放完成。
+     * 5ms PIT 虽已启动，但 kart_person_link_poll() 只在下方正式主循环开始后
+     * 才会执行，因此现在初始化 UART 不存在“先 poll 后 init”的窗口。 */
+    kart_person_link_init();
 
     cpu_wait_event_ready();
     kart_multicore_enable_runtime();
@@ -345,6 +477,8 @@ int core0_main(void)
 
             /* 每 spin 非阻塞排空日志:有货发一块(≤16B),空转即返回。 */
             kart_debug_uart_background_poll();
+            kart_wifi_background_poll();     /* WiFi图传后台推进(分块发送、重连) */
+            kart_assist_img_background_poll(); /* IDLE 下用官方协议连续发送一帧 */
 
             now_tick = g_kart_tick_5ms;
             if(now_tick == last_tick)
@@ -361,7 +495,9 @@ int core0_main(void)
             }
 
             {
-                uint32 t0 = system_getval_us();
+                /* 原始计数差分再换 us，避开 system_getval_us() “先除再差”在回绕处出错。
+                 * 与 kart_camera.c / kart_wifi.c / kart_assist_img.c 同一套写法。 */
+                uint32 t0_raw = system_getval();
                 uint32 exec_us;
 
                 /* 5ms 拍:每 tick 必跑(控制链) */
@@ -373,9 +509,14 @@ int core0_main(void)
                 if((sched_count % 10U) == 0U)  kart_task_50ms();   /* 50ms */
                 if((sched_count % 20U) == 0U)  kart_task_100ms();  /* 100ms */
 
-                exec_us = system_getval_us() - t0;   /* uint32 差分处理回绕 */
+                exec_us = (system_getval() - t0_raw) / 100u;
                 g_sched_last_exec_us = exec_us;
-                if(exec_us > g_sched_max_exec_us)
+                /* 合理性门只防回绕毛刺(实测曾恒在 4.2528e9),不该把真实的
+                 * 长停顿也滤掉。【2026-08-15 从 100ms 放到 800ms】
+                 * 原来 100ms 的门把视觉那 360ms 全丢了 —— CH26 峰值 21ms 是
+                 * 门内的残渣,不是真的最坏值,害我把根因判成图传。
+                 * 800ms 之下能看见的都要看见,只挡明显的回绕(秒级以上)。 */
+                if((exec_us < 800000u) && (exec_us > g_sched_max_exec_us))
                 {
                     g_sched_max_exec_us = exec_us;
                 }
@@ -391,7 +532,7 @@ int core0_main(void)
         {
             case MISSION_SUBJECT_1: kart_multicore_dot_show_string("111"); break;
             case MISSION_SUBJECT_2: kart_multicore_dot_show_string("222"); break;
-            case MISSION_SUBJECT_4: kart_multicore_dot_show_string("555"); break;
+            case MISSION_SUBJECT_3: kart_multicore_dot_show_string("444"); break;
             case MISSION_REMOTE:    kart_multicore_dot_show_string("333"); break;
             case MISSION_FAULT:     kart_multicore_dot_show_string("FFF"); break;
             case MISSION_IDLE:

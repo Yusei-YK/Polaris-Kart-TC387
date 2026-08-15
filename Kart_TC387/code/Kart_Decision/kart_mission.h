@@ -2,6 +2,7 @@
 #define KART_MISSION_H_
 
 #include "zf_common_headfile.h"
+#include "board_pins.h"   /* KART_PERSON_LINK_ENABLE：下面 KART_S3_FOLLOW_SRC 的默认值要用 */
 
 /*
  * 科目状态机(最小骨架)
@@ -15,7 +16,7 @@
  *   SUBJECT_2  科目二人车交互(语音识别 + 鸣笛在此轮询)
  *   FAULT      故障锁止
  *
- * 开发阶段用 VOFA 命令 m0/m1/m2 切模式(见 kart_debug_uart)。
+ * 运行模式由菜单或对外接口切换。
  * 最终交互(IPS200 菜单 / 实体按键)待定,不使用语音选科目。
  *
  * 任意模式切换统一经 kart_mission_set_mode(): 先 exit 旧模式(统一停机),
@@ -33,7 +34,7 @@ typedef enum
     MISSION_IDLE = 0,
     MISSION_SUBJECT_1,
     MISSION_SUBJECT_2,
-    MISSION_SUBJECT_4,          /* 科目四迷宫录制+反向复现(车头不掉转,回放录制打角) */
+    MISSION_SUBJECT_3,          /* 科目三如影随形:跟随录轨 + 反向复现(车头不掉转,回放录制打角) */
     MISSION_REMOTE,             /* SBUS 遥控接管(调试/手动,VOFA m3 进入) */
     MISSION_FAULT,
 } kart_mission_mode_t;
@@ -43,10 +44,8 @@ typedef enum
 {
     S1_WAIT_START = 0,      /* 等待发车(START 键下降沿触发) */
     S1_CONE_ROUTE,          /* 前向复现绕桩路线(kart_playback) */
-    S1_GARAGE_APPROACH,     /* 绕桩终点(A 点)停稳,记倒车基准航向 */
-    S1_REVERSE_IN,          /* 方向回中 + 负速直线倒车入库,里程判据停车 */
     S1_FINISHED,            /* 停车结束 */
-    S1_FAULT,               /* 超时/传感器异常/急停 */
+    S1_FAULT,               /* 当前仅用于复现启动失败；急停会直接回 IDLE */
 } kart_subject1_stage_t;
 
 /* 科目二阶段(2026-07-29 加,只为语音返回的两步时序)。
@@ -62,53 +61,67 @@ typedef enum
     S2_RETURN_FAULT,        /* 返回失败(槽位空/GOTO 超时),已停机 */
 } kart_subject2_stage_t;
 
-/* 科目四阶段(反向复现:车头不掉转,直接倒车原路返回)。 */
+/* -------------------------- 科目三阶段 --------------------------
+ * 【2026-08 改名说明】本模式原名 MISSION_SUBJECT_4 / S4_*,是省赛时期的叫法。
+ * 按最新国赛规则,代码里这套"跟着人走一段 + 原路自动返回"就是竞赛的【科目三】,
+ * 故整体改名 S3_*。改名是纯标识符替换,没动任何控制逻辑/参数值/Flash 布局
+ * (kart_params 按下标存,标签串改了但索引没动,老参数照样读得回来)。
+ *
+ * 阶段1 有两个可选的控制源,由 KART_S3_FOLLOW_SRC 编译期选:
+ *   0 = 遥控(REMOTE):省赛已实车验证的老路子。人用遥控开一段,同时录轨。
+ *   1 = 视觉跟随(VISION):摄像头认黄色引导板,kart_follow 出速度+打角,同时录轨。
+ * 阶段2 两者完全相同 —— 都是 kart_playback 的开环反向复现,车头不掉转直接倒回。
+ * 这样"如影随形"只替换了阶段1的输入源,把已经跑到 2.64m/s 的返程段整段复用,
+ * 而且视觉一旦不灵,把 SRC 改回 0 重烧就退回能完赛的状态。 */
 typedef enum
 {
-    S4_PHASE1_RECORD = 0,   /* 第一阶段:遥控走迷宫+录制(开到停车区停住即自动停录) */
-    S4_PHASE2_REVERSE,      /* 第二阶段:倒车原路返回(判停自动触发,不用按键) */
-    S4_FINISHED,            /* 返回完成 */
-    S4_FAULT,
-} kart_subject4_stage_t;
+    S3_PHASE1_FOLLOW = 0,   /* 第一阶段:跟随(遥控或视觉)+录轨，等 START 键收尾 */
+    S3_PHASE2_REVERSE,      /* 第二阶段:按 START 后倒车原路返回 */
+    S3_SIGNAL,              /* 第三阶段:已回发车区,等语音口令做灯光/鸣笛 */
+    S3_FINISHED,            /* 全流程结束 */
+    S3_FAULT,
+} kart_subject3_stage_t;
 
-/* -------------------- 科目四自动停录→倒车参数 --------------------
- * 不用按 START:人把车开到停车区松杆停住,车自己判"停住"就停录并立即开倒车。
- * 判据 = 已走够 ARM_DIST(防发车前静止就误触发)+ 左右轮测速幅值连续低于 EPS
- * 达 HOLD 拍(10ms/拍 → 15 拍 = 150ms)。
- *
- * 不再判打角:遥控阶段人本来就会"把车开直回正再停车",故录制末点打角≈0,
- * 倒车起步不带角度,不需要额外的 SETTLE 摆角等待(那一段最多要 3s,比手按还慢)。
- * 前提:回正必须在车还在动的时候做完 —— 录制是按里程采样的,停住之后再回正
- * 不会被记进 steer_buf,末点打角仍是回正前的角度,倒车会照着它往回打。
- *
- * 注意:若人一直压着油门但车被卡住(轮子空转除外),也会判成停住 → 自动倒车。
- * START 键仍保留为手动提前触发,不想等这 150ms 时可以按。 */
-#define KART_S4_AUTOSTOP_ARM_DIST   (1.0f)      /* 解锁自动判停的最小行驶里程(m) */
-/* 2026-07-30:EPS 2.0→4.0、HOLD 50→15,削真空期(原来滑停+确认要 1~2s)。
- * 倒车目标本身会主动刹住前进惯量,不用干等滑停到 2.0。
- * 副作用:过了 ARM_DIST 后中途停顿 >150ms 会提前触发倒车。 */
-#define KART_S4_AUTOSTOP_SPEED_EPS  (4.0f)      /* 停住判据(脉冲/5ms) */
-#define KART_S4_AUTOSTOP_HOLD_TICKS (15U)       /* 连续停住拍数(10ms/拍 → 150ms) */
+/* 阶段1 控制源。0=遥控(已验证) 1=视觉跟随(新增,待实车)。
+ * 现场出问题改这里重烧即可整段退回省赛行为,不用动状态机。 */
+#define KART_S3_FOLLOW_SRC_REMOTE   (0)
+#define KART_S3_FOLLOW_SRC_VISION   (1)
+/* 2 = TC4D7 人体视觉链路（PLINK）。387 不做检测，只收 4D7 送来的 25 字节帧。
+ * 与 VISION 的区别只在“目标从哪来”：VISION 是本地摄像头认黄色引导板，
+ * PLINK 是 4D7 认人。后面的 kart_follow、录轨、倒车返程三段完全复用。
+ * 为何新增一个枚举而不直接把 VISION 分支改成读 4D7：
+ * 摄像头那条路是现成的退路，改掉就没了；三个值并存，
+ * 现场哪条不灵改一个宏重烧就能切。 */
+#define KART_S3_FOLLOW_SRC_PLINK    (2)
+/* 用 #ifndef 包起来是为了能从编译选项 -D 覆盖(离线验证三条分支都要能编)。
+ * 2026-08-12：默认跟着 KART_PERSON_LINK_ENABLE 走。
+ * 为何要联动而不写死：两个宏各自手改就有四种组合，其中两种是陷阱 ——
+ *   链路开了但 SRC 还是 VISION：车拿没启用的摄像头结果跟随，永远丢目标；
+ *   SRC 选了 PLINK 但链路没开：vtrack 永远 valid=0，车原地不动。
+ * 两种都能编过、都不报错，只表现为“车不跟人”，现场很难往宏上想。
+ * 要手动覆盖仍然可以：在本文件前面或 -D 定义 KART_S3_FOLLOW_SRC 即可。 */
+#ifndef KART_S3_FOLLOW_SRC
+#if KART_PERSON_LINK_ENABLE
+#define KART_S3_FOLLOW_SRC          (KART_S3_FOLLOW_SRC_PLINK)
+#else
+#define KART_S3_FOLLOW_SRC          (KART_S3_FOLLOW_SRC_VISION)
+#endif
+#endif
 
-/* -------------------- 倒库参数(第一版,实车再修)-------------------- */
-/* 倒车速度(脉冲/5ms,负值=倒退)。前向 playback 用 +50,倒车取半速求稳。 */
-/* 科目一自动倒库总开关(2026-07-28 关)。
- * 0 = 倒车入库整段由手动录制的轨迹回放覆盖,playback 跑完即结束;
- * 1 = 旧行为:绕桩复现结束后走 S1_GARAGE_APPROACH + S1_REVERSE_IN 写死直线倒车。
- * 关掉的理由:写死的 1.4m 直线倒车不是轨迹复现,且 playback 结束时转向断电、
- * 前轮停在绕桩末角度,下一拍就给倒车速度 → 起步带角度。整段录制没有这个交界。
- * 老路径代码一行不删,现场要退回旧行为把这里改 1 重烧即可。 */
-#define KART_S1_AUTO_REVERSE        (0)
+/* “阶段1 是自动跟随”的统一判据。VISION 与 PLINK 只差在目标从哪来，
+ * 后续那一堆共有逻辑（deadman 急停、进倒车前清打角、进模式时 follow_reset）
+ * 对两者完全一样。没有它就要把每个 #if 写成两个比较的或，
+ * 漏一处就是少一道急停 —— 那是会出事的那种漏。 */
+#define KART_S3_FOLLOW_IS_AUTO      ((KART_S3_FOLLOW_SRC == KART_S3_FOLLOW_SRC_VISION) || (KART_S3_FOLLOW_SRC == KART_S3_FOLLOW_SRC_PLINK))
 
-#define KART_S1_REVERSE_SPEED       (-25.0f)
-/* 减速点(倒车里程增量,米):过此点降到慢速轻靠。GPT 建议 1.05m。 */
-#define KART_S1_REVERSE_SLOW_DIST   (1.05f)
-/* 慢速段速度(脉冲/5ms,负值)。 */
-#define KART_S1_REVERSE_SLOW_SPEED  (-12.0f)
-/* 停车点(倒车里程增量,米):到此点刹车收车。GPT 建议 1.40m(库深2m,车长约1.3m)。 */
-#define KART_S1_REVERSE_STOP_DIST   (1.40f)
-/* A 点停稳判据:车体测速幅值低于此值算停稳(脉冲/5ms)。 */
-#define KART_S1_STOP_SPEED_EPS      (2.0f)
+/* 语音信号阶段超时(10ms/拍 → 6000 拍 = 60s)。
+ * 超时不算故障:直接进 S3_FINISHED 收车,不让车/灯无限等下去。 */
+#define KART_S3_SIGNAL_TIMEOUT_TICKS (6000U)
+
+/* 视觉结果最大可复用拍数(10ms/拍)。相机 30FPS 约 3.3 拍一帧,连续 10 拍
+ * (100ms)没有新帧说明采集链已经掉了,再用旧快照就是拿过期方位角打方向。
+ * 旧代码只看相机状态兜底,而 RUNNING 判据来自 VSYNC,DMA 停了它仍是 RUNNING。 */
+#define KART_S3_VISION_MAX_AGE_TICKS (10U)
 
 /* 语音返回 GOTO 段的【第二道】超时闸(10ms/拍 → 3500 拍 = 35s)。
  * GOTO 自己已经有超距(25m)+ 超时(3000 拍)兜底,这里再加一层是因为:
@@ -133,8 +146,12 @@ kart_mission_mode_t kart_mission_get_mode(void);
 /* 读科目一当前阶段(调试用)。 */
 kart_subject1_stage_t kart_mission_get_subject1_stage(void);
 
-/* 读科目四当前阶段(调试用)。 */
-kart_subject4_stage_t kart_mission_get_subject4_stage(void);
+/* 读科目三当前阶段(调试用)。 */
+kart_subject3_stage_t kart_mission_get_subject3_stage(void);
+
+/* 科目三视觉快照年龄(拍)与累计帧序号。日志用,判视觉链路是否还在更新。 */
+uint16 kart_mission_get_s3_vision_age(void);
+uint32 kart_mission_get_s3_vision_seq(void);
 
 /* 读科目二当前阶段(调试/菜单显示返回进度用)。 */
 kart_subject2_stage_t kart_mission_get_subject2_stage(void);

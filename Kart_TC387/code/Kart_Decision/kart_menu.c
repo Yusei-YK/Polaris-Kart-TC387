@@ -11,6 +11,12 @@
 #include "kart_voice.h"
 #include "kart_horn.h"
 #include "kart_params.h"
+#include "kart_camera.h"       /* 摄像头调试页:取帧/还帧/链路诊断 */
+#include "kart_vision.h"       /* 摄像头调试页:黄色引导板检测结果 */
+#include "kart_follow.h"       /* 科目三实时页:跟随下发的打角/速度(判符号用) */
+#include "kart_person_link.h"  /* 科目三 PLINK 页:链路状态 + 原始帧（无图像）*/
+#include "kart_traj_view.h"    /* 录制路径采样点可视化 */
+#include "kart_boot_anim.h"    /* 白底开机帧动画 */
 
 typedef enum
 {
@@ -20,6 +26,7 @@ typedef enum
     MENU_LEVEL_S1_SLOT_SAVE,
     MENU_LEVEL_S1_SLOT_LOAD,
     MENU_LEVEL_S1_READY,
+    MENU_LEVEL_S1_TRAJ,
     MENU_LEVEL_S2_VOICE,
     MENU_LEVEL_S2_GATE,
     MENU_LEVEL_S2_GATE_SLOT_SAVE,
@@ -27,7 +34,8 @@ typedef enum
     MENU_LEVEL_S2_RET,
     MENU_LEVEL_S2_RET_SLOT_SAVE,
     MENU_LEVEL_S2_RET_SLOT_LOAD,
-    MENU_LEVEL_S4_RUN,
+    MENU_LEVEL_S3_RUN,
+    MENU_LEVEL_CAMERA,
     MENU_LEVEL_SETTINGS,
 } menu_level_t;
 
@@ -35,7 +43,8 @@ typedef enum
 {
     MENU_MAIN_SUBJECT1 = 0,
     MENU_MAIN_SUBJECT2,
-    MENU_MAIN_SUBJECT4,
+    MENU_MAIN_SUBJECT3,
+    MENU_MAIN_CAMERA,
     MENU_MAIN_SETTINGS,
     MENU_MAIN_MAX
 } menu_main_item_t;
@@ -80,19 +89,17 @@ static const menu_set_row_t set_rows[] =
     { KART_PARAM_SLEW_REAR,     NULL              },
     { KART_PARAM_RAMP,          NULL              },
 
-    { SET_ROW_HEAD,             "-- S4 REVERSE --"},
-    { KART_PARAM_S4_OL_SPD,     NULL              },
-    { KART_PARAM_S4_OL_MODE,    NULL              },
-    { KART_PARAM_S4_OL_KH,      NULL              },
-    { KART_PARAM_S4_OL_KE,      NULL              },
+    { SET_ROW_HEAD,             "-- S3 REVERSE --"},
+    { KART_PARAM_S3_OL_SPD,     NULL              },
+    { KART_PARAM_S3_OL_MODE,    NULL              },
+    { KART_PARAM_S3_OL_KH,      NULL              },
+    { KART_PARAM_S3_OL_KE,      NULL              },
     { KART_PARAM_PB_REVSCL,     NULL              },
     { KART_PARAM_PB_REVCORR,    NULL              },
 
     { SET_ROW_HEAD,             "-- MISC --"      },
     { KART_PARAM_RC_VMAX,       NULL              },
     { KART_PARAM_HEAD_KP,       NULL              },
-    { KART_PARAM_S1_REV_SPD,    NULL              },
-    { KART_PARAM_S1_REV_STOP,   NULL              },
 
     { SET_ROW_HEAD,             "-- ACTIONS --"   },
     { SET_ROW_SAVE,             "Save to Flash"   },
@@ -127,6 +134,7 @@ typedef enum
 {
     MENU_S1_RECORD = 0,
     MENU_S1_PLAYBACK,
+    MENU_S1_VIEW_PATH,
     MENU_S1_ENTER_REMOTE,
     MENU_S1_EXIT_REMOTE,
     MENU_S1_MAX
@@ -181,6 +189,14 @@ static recording_state_t rec_state = REC_STATE_IDLE;
 static uint8 rec_target = 0;
 static uint8 cursor_s2_ret = 0;
 
+/* 科目一路径板上修正。每次按方向键移动中心 2cm，前后各 10 点平滑衰减。 */
+#define TRAJ_EDIT_RADIUS       (10U)
+#define TRAJ_EDIT_STEP_M       (0.02f)
+#define TRAJ_SELECT_STEP       (5U)
+static uint16 traj_cursor = 0;
+static uint8  traj_edit = 0;
+static uint8  traj_dirty = 0;
+
 static uint8 key_mid_last = 1;
 static uint8 enc_sw_last = 1;       /* 旋钮按下键上一拍电平(与 MID 等价) */
 static uint8 enc_a_last = 1;        /* 旋钮 A/B 相上一拍电平 */
@@ -188,10 +204,13 @@ static uint8 enc_b_last = 1;
 static int8  enc_accum = 0;         /* 未攒满一格的边沿余数 */
 static int8  enc_detent = 0;        /* 解码产出、按键扫描取走的待处理格数 */
 static uint8 key_left_last = 1;
+static uint8 key_start_last = 1;
 
 /* UP/DOWN 按住时长(10ms 拍)。0=没按住。长按自动重复+粗调靠它。 */
 static uint16 key_up_hold = 0;
 static uint16 key_down_hold = 0;
+/* RIGHT 也走长按重复:它在摄像头页管准星的列,120 列靠单点太慢。 */
+static uint16 key_right_hold = 0;
 /* 旋钮上一格距今的拍数,用来判快旋(见 MENU_ENC_FAST_GAP)。 */
 static uint16 enc_gap = 0xFFFFu;
 static uint8  enc_fast = 0;         /* 1=本批格数按粗调倍率处理 */
@@ -213,11 +232,16 @@ static uint8 need_repaint = 1;
 static uint8 repaint_row_only = 0;
 static menu_level_t     last_drawn_level = MENU_LEVEL_MAIN;
 static recording_state_t last_drawn_rec = REC_STATE_IDLE;
+/* 科目三上一次画出的阶段。阶段跳变整体【不】触发重绘(见 kart_menu_poll 注释:
+ * 会在控制窗口里插整屏 SPI 写),唯一例外是跳到 S3_SIGNAL/S3_FINISHED ——
+ * 那两个阶段车已经彻底停机,没有控制窗口要保护,而 S3_SIGNAL 需要提示现场
+ * "可以喊灯光/鸣笛口令了",不刷屏的话它会一直停在 "Reversing..." 那页。 */
+static kart_subject3_stage_t last_drawn_s3 = S3_PHASE1_FOLLOW;
 
 static void menu_draw_settings(void);
 static void menu_draw_settings_row(uint8 row, uint16 y);
 
-/* ==================== VSCode Dark+ 配色 ====================
+/* ==================== 日光可读白蓝配色 ====================
  * 【为什么换配色不花时间】ips200_show_char 画每个字时,笔画像素写 pencolor、
  * 其余像素写 bgcolor —— 一个字格 8x16=128 个像素本来就都要写一遍。所以
  * "换颜色"和"给整行铺高亮底"都是改写入的数值,SPI 字节数一个不多。
@@ -227,18 +251,18 @@ static void menu_draw_settings_row(uint8 row, uint16 y);
  * 【硬约束:定宽】不清屏重绘,靠的是新文本把旧文本每个字格盖掉。所以所有
  * 行输出都走 ui_bar/ui_item 补空格到 UI_COLS,不要直接 ips200_show_string
  * 写不定长串,否则会看到上一帧的尾巴。 */
-#define UI_BG        (0x18E3)   /* #1E1E1E 编辑器背景 */
-#define UI_FG        (0xD6BA)   /* #D4D4D4 正文 */
-#define UI_SEL_BG    (0x226F)   /* #264F78 选中行底 */
-#define UI_SEL_FG    (0xFFFF)   /* #FFFFFF 选中行字 */
+#define UI_BG        (0xFFFF)   /* #FFFFFF 日光下高反差白底 */
+#define UI_FG        (0x194D)   /* 深海军蓝正文 */
+#define UI_SEL_BG    (0xCE7F)   /* 浅蓝选中行底 */
+#define UI_SEL_FG    (0x012E)   /* 深蓝选中行字 */
 #define UI_BAR_BG    (0x03D9)   /* #007ACC 标题栏蓝 */
 #define UI_BAR_FG    (0xFFFF)
-#define UI_KEY       (0x54FA)   /* #569CD6 关键字蓝 */
-#define UI_NUM       (0xCC8F)   /* #CE9178 数值橙 */
-#define UI_OK        (0x6CCA)   /* #6A9955 正常绿 */
-#define UI_WARN      (0xDEF5)   /* #DCDCAA 提示黄 */
-#define UI_ERR       (0xF228)   /* #F44747 故障红 */
-#define UI_DIM       (0x8430)   /* #858585 次要灰 */
+#define UI_KEY       (0x045F)   /* 亮蓝关键字段 */
+#define UI_NUM       (0x0471)   /* 蓝绿色数值 */
+#define UI_OK        (0x2589)   /* 深绿正常态 */
+#define UI_WARN      (0xC3E0)   /* 深琥珀提示 */
+#define UI_ERR       (0xD9E7)   /* 深红故障 */
+#define UI_DIM       (0x7BEF)   /* 中灰次要信息 */
 
 /* 8x16 字体 + 240px 宽 = 一行正好 30 字。行距 20px 留 4px 行间。 */
 #define UI_COLS      (30)
@@ -350,9 +374,11 @@ static void menu_draw_main(void)
             (uint8)(cursor_main == MENU_MAIN_SUBJECT1));
     ui_item(UI_Y_ROW0 + 1 * UI_ROW_H, "Subject 2   Voice",
             (uint8)(cursor_main == MENU_MAIN_SUBJECT2));
-    ui_item(UI_Y_ROW0 + 2 * UI_ROW_H, "Subject 4   Maze",
-            (uint8)(cursor_main == MENU_MAIN_SUBJECT4));
-    ui_item(UI_Y_ROW0 + 3 * UI_ROW_H, "Settings",
+    ui_item(UI_Y_ROW0 + 2 * UI_ROW_H, "Subject 3   Follow",
+            (uint8)(cursor_main == MENU_MAIN_SUBJECT3));
+    ui_item(UI_Y_ROW0 + 3 * UI_ROW_H, "Camera      Debug",
+            (uint8)(cursor_main == MENU_MAIN_CAMERA));
+    ui_item(UI_Y_ROW0 + 4 * UI_ROW_H, "Settings",
             (uint8)(cursor_main == MENU_MAIN_SETTINGS));
 
     ui_hint(" knob/UP/DN move  MID enter");
@@ -370,14 +396,10 @@ static void menu_draw_main(void)
  * 起因:菜单里有一批"看着能调、实际不进任何计算"的项,现场照着调会白费一趟。
  * 逐条都是查过代码的,改代码时记得同步这里:
  *
- *  S1 RevSpd / S1 RevStop —— kart_mission.h 的 KART_S1_AUTO_REVERSE=0。
- *      读它们的 S1_GARAGE_APPROACH/S1_REVERSE_IN 分支还在、也照样编译,但唯一
- *      切进去的那行在 #if 里(kart_mission.c:200),没路径走得到 → 恒灰。
- *      倒库现在是录在轨迹里跟着 playback 一起复现的。
  *  PB Scale/Vmax/Vmin/Alat/ABrake/RevScl —— 只在 kart_playback_build_profile() 里读,
  *      而该函数在 PB Prof<0.5 时开头就 return(kart_playback.c:97)→ 剖面关着时全灰。
  *      注意 Vmax 也在里面(kart_playback.c:89):剖面关着时限速只剩 PB Clamp 一道。
- *  S4 OL Ke —— 只在 poll_closedloop() 里读,出厂 S4 OLMode=0 走 openloop → 灰。
+ *  S3 OL Ke —— 只在 poll_closedloop() 里读,出厂 S3 OLMode=0 走 openloop → 灰。
  *  PB Clamp —— 它是下发前最后一道闸,PB Vmax 是剖面内的天花板。
  *      Clamp ≥ Vmax 时永远轮不到它裁到东西(录制速度回放仍走它,故只在
  *      剖面开着时才判灰)。
@@ -387,10 +409,6 @@ static uint8 menu_param_is_active(uint8 id)
 {
     switch(id)
     {
-        case KART_PARAM_S1_REV_SPD:
-        case KART_PARAM_S1_REV_STOP:
-            return 0;                       /* KART_S1_AUTO_REVERSE=0,那两个阶段进不去 */
-
         case KART_PARAM_PB_SCALE:
         case KART_PARAM_PB_VMAX:
         case KART_PARAM_PB_VMIN:
@@ -399,8 +417,8 @@ static uint8 menu_param_is_active(uint8 id)
         case KART_PARAM_PB_REVSCL:
             return (uint8)(kart_params_get(KART_PARAM_PB_PROF) > 0.5f);
 
-        case KART_PARAM_S4_OL_KE:
-            return (uint8)(kart_params_get(KART_PARAM_S4_OL_MODE) > 0.5f);
+        case KART_PARAM_S3_OL_KE:
+            return (uint8)(kart_params_get(KART_PARAM_S3_OL_MODE) > 0.5f);
 
         case KART_PARAM_PB_CLAMP:
             /* 剖面关着时录制速度回放照样过这道闸 → 有效。开着时才比大小。 */
@@ -430,7 +448,7 @@ static uint8 menu_param_gates_others(uint8 id)
     switch(id)
     {
         case KART_PARAM_PB_PROF:        /* 管 Scale/Vmax/Vmin/Alat/ABrake/RevScl/Clamp */
-        case KART_PARAM_S4_OL_MODE:     /* 管 S4 OL Ke */
+        case KART_PARAM_S3_OL_MODE:     /* 管 S3 OL Ke */
         case KART_PARAM_PB_VMAX:        /* 参与 PB Clamp 的判据 */
         case KART_PARAM_PB_CLAMP:       /* 参与 PB LdMax 的判据 */
         case KART_PARAM_PB_LDGAIN:      /* 参与 PB LdMax 的判据 */
@@ -586,45 +604,480 @@ static uint8 menu_settings_param_id(void)
     return (id < KART_PARAM_MAX) ? id : KART_PARAM_MAX;
 }
 
-/* 科目四运行界面:菜单不吃 MID(防运行中刷屏),只留 LEFT 退出。
+/* ======================== 摄像头调试页 ========================
+ * 目的:上车调黄色引导板时,把"相机有没有出图"和"出的图认不认得出板子"
+ * 这两件事在屏上一次看全,不用连 VOFA、不用把车推到电脑边。
+ *
+ * 【为什么不直接用 kart_camera_preview()】
+ * 那个函数自己 frame_ready → 显示 → frame_release,帧在它手里进出。
+ * 本页必须对【同一帧】既显示又跑 vision,否则框会画在另一帧的位置上 ——
+ * 人举着板子走的时候两帧能差出十几个像素,看着就像识别永远偏一点。
+ * 所以这里自己取帧:frame_ready → vision_process → 画图 → 画框 → frame_release。
+ *
+ * 【时序安全】本函数只在 50ms 拍(kart_menu_poll)里跑,那一拍本来就允许
+ * 整屏 ui_clear()(软件 SPI,十几 ms),再加 160x120 出图约 4ms + vision 约 3ms
+ * 仍在同一量级,不进 5ms 控制窗口。且本页强制 MISSION_IDLE(见 MID 处),
+ * 车不可能在动,慢一点也不会有后果。
+ *
+ * 【与真实检测器的一致性】判别式不在这里重写,一律走 kart_vision_probe_pixel()
+ * 和 kart_vision_process()。调试页显示的通过/不通过就是跑车时的判定。 */
+
+/* ---- 屏幕分区(240x320,8x16 字体) ----
+ *   0..15    标题栏
+ *   22..37   状态行(menu_draw_status_bar 每拍刷,所有页公用)
+ *   46..61   相机链路状态 + 帧率
+ *   66..185  图像 160x120,靠左
+ *   x>=168   图像右侧空出 80px = 9 字,竖排放检测结果各字段
+ *   190..285 底部 5 行满宽文字(取样点判别中间量 + 诊断计数)
+ *   296      按键提示
+ * 排布是按"不重叠"倒推的:图像 120 行高且必须整幅显示(缩放会让像素级
+ * 取样失去意义),240 宽的屏放 160 宽的图必然剩一条 80px 的窄栏,那条栏
+ * 只能放短字段,所以宽字段(判别式两边的整数)才放到图下面。 */
+#define CAMDBG_IMG_X        (0)
+#define CAMDBG_IMG_Y        (66)
+#define CAMDBG_COL_X        (168)      /* 图右侧窄栏起始 x,= 第 21 字 */
+#define CAMDBG_COL_W        (9)        /* 窄栏宽度(字),30-21=9 */
+#define CAMDBG_TXT_Y0       (190)      /* 图像下沿(66+120=186)之后 */
+
+/* 取样准星:默认画面正中。UP/DOWN 调行,RIGHT 调列(单向回卷);
+ * 旋钮也能调列,但它实测不好用,别指望它(见按键处理)。
+ * 这三个不放进 #if:按键处理函数里的 MENU_LEVEL_CAMERA 分支是无条件编译的
+ * (那边只动数,不碰相机 API),关掉相机时那一页只显示"开关没打开",
+ * 数怎么动都无所谓,但变量得在。 */
+static int16 camdbg_probe_x = SCC8660_W / 2;
+static int16 camdbg_probe_y = SCC8660_H / 2;
+static uint8 camdbg_show_overlay = 1;   /* MID 切换:叠加框/准星 开关 */
+
+/* 以下到 menu_draw_camera 结束都只在开了相机时才编译:
+ * 关掉时这些函数/变量一个都用不上,留着就是一堆 defined but not used 警告。 */
+#if (KART_CAMERA_ENABLE)
+
+/* 上一次成功出图的帧计数,用来判断"这一拍到底有没有新图"。 */
+static uint32 camdbg_last_frame_cnt = 0;
+
+/* 准星处的原始像素。做成静态是因为它必须在【还帧之前】取走(见取帧处注释),
+ * 而显示它的那几行画在"有帧/无帧"分支之外 —— 没新帧时就显示上一帧取到的值,
+ * 与旁边同样保留上一帧结论的 bear/cx 一致,不会出现半新半旧。 */
+static uint16 camdbg_probe_pix = 0;
+
+/* 画外接框(空心矩形)。坐标是图像像素,需加图像区偏移。
+ * 越界钳制:vision 给的框一定在图内,但准星是人调的,统一钳一次更省心。 */
+static void camdbg_draw_box(int16 x0, int16 y0, int16 w, int16 h, uint16 color)
+{
+    int16 x1;
+    int16 y1;
+
+    if(w <= 0 || h <= 0) { return; }
+
+    if(x0 < 0) { x0 = 0; }
+    if(y0 < 0) { y0 = 0; }
+    x1 = (int16)(x0 + w - 1);
+    y1 = (int16)(y0 + h - 1);
+    if(x1 > (int16)(SCC8660_W - 1)) { x1 = (int16)(SCC8660_W - 1); }
+    if(y1 > (int16)(SCC8660_H - 1)) { y1 = (int16)(SCC8660_H - 1); }
+
+    ips200_draw_line((uint16)(CAMDBG_IMG_X + x0), (uint16)(CAMDBG_IMG_Y + y0),
+                     (uint16)(CAMDBG_IMG_X + x1), (uint16)(CAMDBG_IMG_Y + y0), color);
+    ips200_draw_line((uint16)(CAMDBG_IMG_X + x0), (uint16)(CAMDBG_IMG_Y + y1),
+                     (uint16)(CAMDBG_IMG_X + x1), (uint16)(CAMDBG_IMG_Y + y1), color);
+    ips200_draw_line((uint16)(CAMDBG_IMG_X + x0), (uint16)(CAMDBG_IMG_Y + y0),
+                     (uint16)(CAMDBG_IMG_X + x0), (uint16)(CAMDBG_IMG_Y + y1), color);
+    ips200_draw_line((uint16)(CAMDBG_IMG_X + x1), (uint16)(CAMDBG_IMG_Y + y0),
+                     (uint16)(CAMDBG_IMG_X + x1), (uint16)(CAMDBG_IMG_Y + y1), color);
+}
+
+/* 画取样准星(十字),中心留空一格,免得把被取样的那个像素自己盖掉。 */
+static void camdbg_draw_cross(int16 cx, int16 cy, uint16 color)
+{
+    const int16 arm = 5;
+    int16 a = (int16)(cx - arm);
+    int16 b = (int16)(cx + arm);
+    int16 c = (int16)(cy - arm);
+    int16 d = (int16)(cy + arm);
+
+    if(a < 0) { a = 0; }
+    if(c < 0) { c = 0; }
+    if(b > (int16)(SCC8660_W - 1)) { b = (int16)(SCC8660_W - 1); }
+    if(d > (int16)(SCC8660_H - 1)) { d = (int16)(SCC8660_H - 1); }
+
+    ips200_draw_line((uint16)(CAMDBG_IMG_X + a),        (uint16)(CAMDBG_IMG_Y + cy),
+                     (uint16)(CAMDBG_IMG_X + cx - 1),   (uint16)(CAMDBG_IMG_Y + cy), color);
+    ips200_draw_line((uint16)(CAMDBG_IMG_X + cx + 1),   (uint16)(CAMDBG_IMG_Y + cy),
+                     (uint16)(CAMDBG_IMG_X + b),        (uint16)(CAMDBG_IMG_Y + cy), color);
+    ips200_draw_line((uint16)(CAMDBG_IMG_X + cx),       (uint16)(CAMDBG_IMG_Y + c),
+                     (uint16)(CAMDBG_IMG_X + cx),       (uint16)(CAMDBG_IMG_Y + cy - 1), color);
+    ips200_draw_line((uint16)(CAMDBG_IMG_X + cx),       (uint16)(CAMDBG_IMG_Y + cy + 1),
+                     (uint16)(CAMDBG_IMG_X + cx),       (uint16)(CAMDBG_IMG_Y + d), color);
+}
+
+/* 图右侧窄栏一行:定宽补到 9 字。
+ * 必须补空格,理由和 ui_bar 一样 —— 这一页不清屏(清了图会闪),
+ * 新字不铺满就会看到上一帧的数字尾巴,比如 "d 1.50m" 盖 "d 12.40m" 会读成 "d 1.50m0"。 */
+static void camdbg_col(uint16 y, const char *s, uint16 fg)
+{
+    char line[CAMDBG_COL_W + 1];
+    uint8 i = 0;
+
+    while(i < CAMDBG_COL_W && s[i] != '\0') { line[i] = s[i]; i++; }
+    while(i < CAMDBG_COL_W)                 { line[i] = ' ';  i++; }
+    line[CAMDBG_COL_W] = '\0';
+
+    ips200_set_color(fg, UI_BG);
+    ips200_show_string(CAMDBG_COL_X, y, line);
+}
+
+/* 相机链路状态 → 屏上文字 + 颜色。四个状态各自对应完全不同的排查方向,
+ * 所以不合并成"OK/FAIL":INIT_FAIL 查配置串口(UART1 借还/波特率),
+ * NO_SIGNAL 查 DVP 排线和 PCLK,OFF 是编译开关没打开。 */
+static const char *camdbg_state_str(kart_cam_state_enum st, uint16 *color)
+{
+    switch(st)
+    {
+        case KART_CAM_STATE_RUNNING:   *color = UI_OK;   return "RUNNING";
+        case KART_CAM_STATE_NO_SIGNAL: *color = UI_ERR;  return "NO SIGNAL";
+        case KART_CAM_STATE_INIT_FAIL: *color = UI_ERR;  return "INIT FAIL";
+        case KART_CAM_STATE_OFF:
+        default:                       *color = UI_DIM;  return "OFF";
+    }
+}
+
+static const char *camdbg_reject_str(uint8 rej)
+{
+    switch(rej)
+    {
+        case KART_VISION_REJ_OK:     return "OK    ";
+        case KART_VISION_REJ_AREA:   return "AREA  ";     /* 太远/不在视野/曝光过暗 */
+        case KART_VISION_REJ_WIDTH:  return "WIDTH ";     /* 框太窄,测距没意义 */
+        case KART_VISION_REJ_ASPECT: return "ASPECT";     /* 细长条,多半是反光/衣服边 */
+        case KART_VISION_REJ_FILL:   return "FILL  ";     /* 填充率低,常见于两块黄色被并框 */
+        default:                     return "?     ";
+    }
+}
+
+static void menu_draw_camera(void)
+{
+    char  buf[40];
+    uint16 st_color;
+    kart_cam_state_enum st = kart_camera_state();
+    const char *st_str = camdbg_state_str(st, &st_color);
+
+    ui_title("Camera Debug", (KART_VISION_BYTE_SWAP) ? "SWAP" : NULL);
+
+    /* 第一行永远是链路状态 + 帧率 + 丢帧/错位。
+     * 这三个数一起看才有意义:fps 正常但 misalign 在涨 = DMA 段数不对;
+     * fps 正常但 drop 在涨 = 上层取帧太慢(本页 50ms 一取,相机 30fps,必然有 drop,
+     * 那是正常的,只有跑车时 drop 猛涨才说明问题)。 */
+    sprintf(buf, " %-9s fps%3u", st_str, (unsigned int)g_kart_cam_fps);
+    ui_bar(UI_Y_HEAD, buf, st_color, UI_BG);
+
+    /* 出图 + 同帧跑视觉。frame_ready 为 0 就保持上一屏,不清图区 ——
+     * 清了会闪,而且没有新信息可显示。 */
+    if(kart_camera_frame_ready())
+    {
+        const kart_vision_result_t *v;
+
+        /* 【顺序】先跑视觉再出图:vision 扫的是 scc8660_image,
+         * 出图函数也读同一块。两者都在还帧之前完成,DMA 不会中途改写。 */
+        v = kart_vision_process((const uint16 *)scc8660_image[0],
+                                (int16)SCC8660_W, (int16)SCC8660_H);
+
+        /* 准星像素在【还帧之前】取走。放到还帧之后读就可能读到 DMA 正在写的
+         * 下一帧,取样值与屏上这一帧对不上 —— 而这个数是用来判"这个颜色到底
+         * 过不过判别式"的,对不上就等于在看另一张图的结论。 */
+        camdbg_probe_pix = scc8660_image[camdbg_probe_y][camdbg_probe_x];
+
+        ips200_show_rgb565_image(CAMDBG_IMG_X, CAMDBG_IMG_Y,
+                                 (const uint16 *)scc8660_image[0],
+                                 SCC8660_W, SCC8660_H, SCC8660_W, SCC8660_H, 1);
+
+        if(camdbg_show_overlay)
+        {
+            /* 认到了画绿框,没认到画黄框(还是要画:黄框告诉你"黄色找到了但被门限拒了",
+             * 配合下面的 REJ 字段就知道差在哪一项。完全没有黄色时 width=0,不画)。 */
+            camdbg_draw_box(v->box_x0, v->box_y0, v->width_px, v->height_px,
+                            v->valid ? UI_OK : UI_WARN);
+            camdbg_draw_cross(camdbg_probe_x, camdbg_probe_y, UI_ERR);
+        }
+
+        camdbg_last_frame_cnt = g_kart_cam_frame_count;
+        kart_camera_frame_release();     /* 处理完立刻还帧 */
+
+        /* ---- 图右侧窄栏:检测结果 ---- */
+        sprintf(buf, "V%d", v->valid ? 1 : 0);
+        camdbg_col(CAMDBG_IMG_Y + 0 * UI_ROW_H, buf, v->valid ? UI_OK : UI_ERR);
+
+        camdbg_col(CAMDBG_IMG_Y + 1 * UI_ROW_H, camdbg_reject_str(v->reject),
+                   (v->reject == KART_VISION_REJ_OK) ? UI_OK : UI_WARN);
+
+        sprintf(buf, "A%5u", (unsigned int)v->area_px);
+        camdbg_col(CAMDBG_IMG_Y + 2 * UI_ROW_H, buf, UI_NUM);
+
+        /* W 是标定 f_px 的唯一依据:卷尺量准 d,读 W,
+         * f_px = W * d / 0.31,回填 KART_VISION_FPX。 */
+        sprintf(buf, "W%3d", v->width_px);
+        camdbg_col(CAMDBG_IMG_Y + 3 * UI_ROW_H, buf, UI_NUM);
+
+        sprintf(buf, "H%3d", v->height_px);
+        camdbg_col(CAMDBG_IMG_Y + 4 * UI_ROW_H, buf, UI_NUM);
+
+        sprintf(buf, "d%5.2f", (double)v->dist_m);
+        camdbg_col(CAMDBG_IMG_Y + 5 * UI_ROW_H, buf, UI_NUM);
+    }
+    else
+    {
+        /* 没有新帧。区分"相机在跑只是本拍没赶上"和"根本不出图":
+         * 前者 frame_count 在涨,后者不动。这一句省掉现场"是不是卡死了"的猜。
+         * 写在窄栏而不是盖住图区:上一帧的图留着,断线瞬间的画面还能看。 */
+        sprintf(buf, "no frame");
+        camdbg_col(CAMDBG_IMG_Y + 0 * UI_ROW_H, buf,
+                   (g_kart_cam_frame_count != camdbg_last_frame_cnt) ? UI_WARN : UI_ERR);
+        sprintf(buf, "c%lu", (unsigned long)(g_kart_cam_frame_count % 100000u));
+        camdbg_col(CAMDBG_IMG_Y + 1 * UI_ROW_H, buf, UI_DIM);
+    }
+
+    /* ---- 图下方满宽文字:方位角 + 准星处的判别中间量 ----
+     * 这几行每拍都画,不放进 frame_ready 分支里:没新帧时它们显示的是上一帧的
+     * 结论(kart_vision_get 返回的是上次保存的结果),照样是有效信息;
+     * 而且行不重画就会被"有帧/无帧"来回切时的残留搞乱。 */
+    {
+        const kart_vision_result_t *vr = kart_vision_get();
+        int16 r5 = 0, g5 = 0, b5 = 0, sum = 0;
+        int32 lhs = 0, rhs = 0;
+        uint8 hit;
+
+        /* 方位角:>0 = 目标在右。上车验打角符号就看它和 CH15(target_delta) 是否反号。 */
+        sprintf(buf, " bear%+6.1fdeg  cx%3d", (double)(vr->bearing_rad * 57.29578f),
+                vr->cx_px);
+        ui_bar(CAMDBG_TXT_Y0, buf, UI_NUM, UI_BG);
+
+        /* 用还帧前抓下的那一个像素,保证与屏上这一帧、与上面 vision 的结论同源。 */
+        hit = kart_vision_probe_pixel(camdbg_probe_pix,
+                                      &r5, &g5, &b5, &lhs, &rhs, &sum);
+
+        sprintf(buf, " P(%3d,%3d) %s", camdbg_probe_x, camdbg_probe_y,
+                hit ? "YELLOW " : "no     ");
+        ui_bar(CAMDBG_TXT_Y0 + UI_ROW_H, buf, hit ? UI_OK : UI_DIM, UI_BG);
+
+        sprintf(buf, " R%2d G%2d B%2d S%3d", r5, g5, b5, sum);
+        ui_bar(CAMDBG_TXT_Y0 + 2 * UI_ROW_H, buf, UI_FG, UI_BG);
+
+        /* 判别式两边都给:lhs>rhs 才算黄色。差得远就是颜色不对,
+         * 差一点点就是曝光/白平衡问题,值得先固定曝光再动阈值。
+         * sum < MIN_SUM 时直接被判暗部弃掉,单独标出来防误判成"颜色不对"。 */
+        sprintf(buf, " M%6ld >%6ld %s", (long)lhs, (long)rhs,
+                (sum < KART_VISION_MIN_SUM) ? "DARK" : "    ");
+        ui_bar(CAMDBG_TXT_Y0 + 3 * UI_ROW_H, buf,
+               (sum < KART_VISION_MIN_SUM) ? UI_ERR : UI_FG, UI_BG);
+    }
+
+    /* 底部诊断行。misalign 非 0 = DMA 链表段数与实际不符;
+     * init_ret 非 0 = scc8660_init 没过,图像肯定是黑的,先查 UART1 配置链路;
+     * drp 本页必然一直涨(50ms 取一帧,相机 30fps),只有跑车时猛涨才是问题。 */
+    sprintf(buf, " mis%lu drp%lu ini%d seg%u",
+            (unsigned long)g_kart_cam_misalign_count,
+            (unsigned long)g_kart_cam_drop_count,
+            g_kart_cam_init_ret,
+            (unsigned int)g_kart_cam_link_list_num);
+    ui_bar(CAMDBG_TXT_Y0 + 4 * UI_ROW_H, buf,
+           (g_kart_cam_init_ret != 0) ? UI_ERR : UI_DIM, UI_BG);
+
+    ui_hint(" knob X  UP/DN Y  MID box  LEFT");
+}
+
+#else   /* !KART_CAMERA_ENABLE */
+
+/* 编译开关没开:明确告诉现场要改哪个宏,别让人以为是硬件坏了。
+ * 这一页照样进得去(菜单项不隐藏)—— 隐藏了就会有人以为版本不带这功能。 */
+static void menu_draw_camera(void)
+{
+    ui_title("Camera Debug", "OFF");
+    ui_bar(UI_Y_HEAD,            " KART_CAMERA_ENABLE = 0", UI_ERR, UI_BG);
+    ui_bar(UI_Y_ROW0,            " set it to 1 in",         UI_FG,  UI_BG);
+    ui_bar(UI_Y_ROW0 + UI_ROW_H, " kart_camera.h, rebuild", UI_FG,  UI_BG);
+    ui_hint(" LEFT exit");
+}
+
+#endif  /* KART_CAMERA_ENABLE */
+
+/* ================== 科目三跟随实时画面(临时,测完删) ==================
+ * 只干一件事:把跟随当前用的那一帧和它认出的框显示出来,看识别对不对。
+ *
+ * 【不走 frame_ready / frame_release】跟随那一拍已经在消费帧了,菜单再取一次
+ * 就是跟控制环抢帧 —— 菜单取走并 release 的帧跟随就看不到,本来在查识别率低,
+ * 加个观察窗口反而让它更低。所以直接读 scc8660_image,不碰帧协议。
+ * 代价是偶尔一条撕裂缝(读到 DMA 正在写的半帧),不影响看框。
+ * 框和数字取 kart_vision_get(),就是跟随真正用的结论,不另算一遍。
+ *
+ * 删除方法:删掉本函数 + menu_draw_s3_run 里那个 #if 分支,两处。 */
+#if (KART_S3_FOLLOW_SRC == KART_S3_FOLLOW_SRC_VISION) && (KART_CAMERA_ENABLE)
+static void menu_draw_s3_live(void)
+{
+    const kart_vision_result_t *v = kart_vision_get();
+    char buf[40];
+
+    ips200_show_rgb565_image(CAMDBG_IMG_X, CAMDBG_IMG_Y,
+                             (const uint16 *)scc8660_image[0],
+                             SCC8660_W, SCC8660_H, SCC8660_W, SCC8660_H, 1);
+
+    /* 认到绿框,没认到黄框(黄 = 找到黄色但被门限拒了,看下面 REJ 是哪一项)。 */
+    camdbg_draw_box(v->box_x0, v->box_y0, v->width_px, v->height_px,
+                    v->valid ? UI_OK : UI_WARN);
+
+    /* 图右侧窄栏:认没认到 + 被哪个门限拒的 + 宽度/距离。 */
+    camdbg_col(CAMDBG_IMG_Y + 0 * UI_ROW_H, v->valid ? "OK" : "NO",
+               v->valid ? UI_OK : UI_ERR);
+    camdbg_col(CAMDBG_IMG_Y + 1 * UI_ROW_H, camdbg_reject_str(v->reject),
+               (v->reject == KART_VISION_REJ_OK) ? UI_OK : UI_WARN);
+    sprintf(buf, "W%3d", v->width_px);
+    camdbg_col(CAMDBG_IMG_Y + 2 * UI_ROW_H, buf, UI_NUM);
+    sprintf(buf, "d%5.2f", (double)v->dist_m);
+    camdbg_col(CAMDBG_IMG_Y + 3 * UI_ROW_H, buf, UI_NUM);
+    sprintf(buf, "A%5u", (unsigned int)v->area_px);
+    camdbg_col(CAMDBG_IMG_Y + 4 * UI_ROW_H, buf, UI_NUM);
+
+    /* 方位角和跟随下发的打角必须【反号】。同号就是 kart_follow.c:127
+     * 那个负号错了(一打就反向),立刻拨 SW3 到低挡停车。 */
+    sprintf(buf, " bear%+6.1f del%+6.0f",
+            (double)(v->bearing_rad * 57.29578f),
+            (double)kart_follow_get()->target_delta);
+    ui_bar(CAMDBG_TXT_Y0, buf, UI_NUM, UI_BG);
+
+    /* 提示文字必须 <=30 字(UI_COLS),超了 ui_bar 会直接截断成半个词。 */
+    ui_hint(" hide board=back  LEFT exit");
+}
+#endif
+
+#if (KART_S3_FOLLOW_SRC == KART_S3_FOLLOW_SRC_PLINK)
+/* ================== 科目三 PLINK 链路状态页 ==================
+ * 与上面 menu_draw_s3_live() 的关系：两者互斥，同一个位置的两个分支。
+ * 【为何不出图】PLINK 下图像在 TC4D7 侧，387 根本拿不到像素；scc8660_image 里
+ * 要么是陈帧要么是黑的（KART_CAMERA_ENABLE 可能还是 1，但摄头与本链路无关）。
+ * 画一幅无关的图比不画更坏，所以这一页只出数字。
+ *
+ * 【开销】四行定宽文本，约 1~2ms/拍（跟其他菜单页同量级），不清屏。
+ * 不像 menu_draw_s3_live() 那样要 4ms 出图，所以这一页不是“测完删”的临时物。
+ *
+ * link 一列的含义与 VOFA CH39 完全一致（kart_debug_uart.c）：
+ *   0=一个字节没收到（线/波特率/4D7 没在发） 1=有字节但从未成帧（帧头或 CRC）
+ *   2=曾通现失联（>200ms 无 VALID 帧）          3=在线
+ * 现场先看这一位；0/1 是链路问题，2/3 才轮得到看跟随。 */
+static void menu_draw_s3_plink(void)
+{
+    const kart_vtrack_result_t *vt = kart_person_link_vtrack();
+    const kart_follow_out_t    *fo = kart_follow_get();
+    kart_person_link_stat_t     st;
+    kart_person_frame_t         pf;
+    uint8  got;
+    uint8  link;
+    char   buf[40];
+
+    kart_person_link_get_stat(&st);
+    got = kart_person_link_get_frame(&pf);
+
+    if(0U == st.byte_count)                     { link = 0U; }
+    else if(0U == st.frame_ok)                  { link = 1U; }
+    else if(0U == kart_person_link_is_online()) { link = 2U; }
+    else                                        { link = 3U; }
+
+    /* 不再调 ui_title：外层 menu_draw_s3_run 已经画过 ("Subject 3","REC")，
+     * menu_draw_s3_live 也没再画一次。重复写标题栏白多一次 SPI。
+     * REC 这个字在 PLINK 下也是对的：阶段1 确实在录轨。
+     *
+     * 第一行就是“能不能跑”。颜色分三档，不是两档：
+     *   3 在线 → 绿；2 曾通现失联 → 黄（链路本身通了，人不在画面里也会是 2，
+     *     但 4D7 重启/线松也是 2，所以不能当正常）；0/1 链路没通 → 红。
+     * 先前写成 link>=2 就绿是错的：失联不能看着像正常。 */
+    sprintf(buf, " link%1u  ok%5u  bad%5u", (unsigned int)link,
+            (unsigned int)st.frame_ok,
+            (unsigned int)(st.crc_err + st.hdr_err + st.seq_stale + st.resync));
+    ui_bar(UI_Y_HEAD, buf,
+           (3U == link) ? UI_OK : ((2U == link) ? UI_WARN : UI_ERR), UI_BG);
+
+    /* 方位角与跟随下发的打角必须【反号】——同号就是旋转方向接反了
+     * （人往右车往左），立即拨 SW3 到低档停车。判据与视觉页一致。 */
+    sprintf(buf, " bear%+6.1f del%+6.0f",
+            (double)(vt->bearing_rad * 57.29578f),
+            (double)fo->target_delta);
+    ui_bar(UI_Y_ROW0, buf, UI_NUM, UI_BG);
+
+    /* h = 归一化高度×1000（标 NEAR_HEIGHT_STOP 用它）；sc = 合成的 scale_r；
+     * st = kart_follow 状态 0IDLE 1TRACK 2HOLD 3LOST；ns = 近距联锁已触发。 */
+    sprintf(buf, " h%4u sc%5.2f s%1u n%1u",
+            (unsigned int)(got ? pf.height : 0U),
+            (double)fo->scale_r,
+            (unsigned int)fo->state,
+            (unsigned int)fo->near_stop);
+    ui_bar(UI_Y_ROW0 + UI_ROW_H, buf,
+           vt->valid ? UI_FG : UI_WARN, UI_BG);
+
+    /* 提示文字必须 <=30 字(UI_COLS)，超了 ui_bar 会直接截断成半个词。 */
+    ui_hint(" hide 2s=back  LEFT exit");
+}
+#endif
+
+/* 科目三运行界面:菜单不吃 MID(防运行中刷屏),只留 LEFT 退出。
  * 到停车区【把车停住即自动】停录并开环倒车原路返回,车头不掉转、不搬车。
  * 按 mission 当前阶段显示,阶段跳变时由 kart_menu_poll 触发重绘。 */
-static void menu_draw_s4_run(void)
+static void menu_draw_s3_run(void)
 {
     /* 这一页的 START 是独立的物理发车键(BOARD_START_KEY_PIN / P20.7),
      * 由 kart_mission.c 检下降沿 —— 不是菜单 MID,文字别改。 */
-    switch(kart_mission_get_subject4_stage())
+    switch(kart_mission_get_subject3_stage())
     {
-        case S4_PHASE1_RECORD:
-            /* 文案以自动判停为主:kart_mission.c subject4_loop 里,走够 1m 之后
+        case S3_PHASE1_FOLLOW:
+            /* 文案以自动判停为主:kart_mission.c subject3_loop 里,走够 1m 之后
              * 车速连续 150ms ≈0 就自己停录+开倒车,START 只是"不想等那 150ms"的
-             * 手动提前触发。原来写成 "START to go back",现场会以为必须按键。 */
-            ui_title("Subject 4", "REC");
+             * 手动提前触发。原来写成 "START to go back",现场会以为必须按键。
+             * 两种控制源文案不同(KART_S3_FOLLOW_SRC),别让现场看着遥控提示去举板子。 */
+            ui_title("Subject 3", "REC");
+/* 这里的条件必须跟 menu_draw_s3_live 的定义条件【逐字一致】,少一个
+ * KART_CAMERA_ENABLE 就会在关摄像头的版本里调到一个没定义的函数。 */
+#if (KART_S3_FOLLOW_SRC == KART_S3_FOLLOW_SRC_VISION) && (KART_CAMERA_ENABLE)
+            /* 视觉源:整页让给实时画面(见 menu_draw_s3_live),看识别对不对。 */
+            menu_draw_s3_live();
+#elif (KART_S3_FOLLOW_SRC == KART_S3_FOLLOW_SRC_PLINK)
+            /* PLINK 源：没图可出（图像在 4D7 侧），改出链路与跟随数字。
+             * 【条件为何不带 KART_CAMERA_ENABLE】它必须跟 menu_draw_s3_plink 的定义
+             * 条件逐字一致，而那边没有——PLINK 不碰摄头，多卡一个条件反而会在
+             * 关摄头的版本里把这一页静静落回下面那三行遥控文案，
+             * 让现场以为要拿遥控开车。 */
+            menu_draw_s3_plink();
+#else
             ui_bar(UI_Y_HEAD,        " Recording",         UI_ERR,  UI_BG);
             ui_bar(UI_Y_ROW0,        " RC drive the maze", UI_FG,   UI_BG);
             ui_bar(UI_Y_ROW0 + UI_ROW_H, " Stop car: auto reverse",  UI_WARN, UI_BG);
             ui_hint(" auto  START now  LEFT exit");
+#endif
             break;
-        case S4_PHASE2_REVERSE:
+        case S3_PHASE2_REVERSE:
             /* 原文 "Openloop, no turn" 已过期:倒车段会跟着录制打角走,
-             * 且带航向 P 纠偏(KART_PLAYBACK_OL_HEAD_EN=1),S4 OLMode=1 时
+             * 且带航向 P 纠偏(KART_PLAYBACK_OL_HEAD_EN=1),S3 OLMode=1 时
              * 再加横向位置 P。"不转向"是最早那版纯开环留下的说法。 */
-            ui_title("Subject 4", "BACK");
+            ui_title("Subject 3", "BACK");
             ui_bar(UI_Y_HEAD,        " Reversing...",      UI_WARN, UI_BG);
             ui_bar(UI_Y_ROW0,        " Retrace + heading corr", UI_FG, UI_BG);
             ui_bar(UI_Y_ROW0 + UI_ROW_H, "",                   UI_FG,   UI_BG);
             ui_hint("");
             break;
-        case S4_FINISHED:
-            ui_title("Subject 4", "DONE");
+        case S3_SIGNAL:
+            /* 已回发车区,等语音口令做灯光/鸣笛。这一阶段【没有 VOFA 日志】
+             * (语音与日志共用 UART10,已切 115200),屏幕是唯一的现场反馈。 */
+            ui_title("Subject 3", "VOICE");
+            ui_bar(UI_Y_HEAD,        " Back at start",     UI_OK,   UI_BG);
+            ui_bar(UI_Y_ROW0,        " Say light / horn",  UI_FG,   UI_BG);
+            ui_bar(UI_Y_ROW0 + UI_ROW_H, " log off (voice uart)", UI_WARN, UI_BG);
+            ui_hint(" LEFT exit");
+            break;
+        case S3_FINISHED:
+            ui_title("Subject 3", "DONE");
             ui_bar(UI_Y_HEAD,        " Finished",          UI_OK,   UI_BG);
             ui_bar(UI_Y_ROW0,        " Back at start",     UI_FG,   UI_BG);
             ui_bar(UI_Y_ROW0 + UI_ROW_H, "",                   UI_FG,   UI_BG);
             ui_hint(" LEFT exit");
             break;
-        case S4_FAULT:
+        case S3_FAULT:
         default:
-            ui_title("Subject 4", "FAULT");
+            ui_title("Subject 3", "FAULT");
             ui_bar(UI_Y_HEAD,        " FAULT",             UI_ERR,  UI_BG);
             ui_bar(UI_Y_ROW0,        " Path invalid",      UI_FG,   UI_BG);
             ui_bar(UI_Y_ROW0 + UI_ROW_H, "",                   UI_FG,   UI_BG);
@@ -642,9 +1095,11 @@ static void menu_draw_subject1(void)
             (uint8)(cursor_s1 == MENU_S1_RECORD));
     ui_item(UI_Y_ROW0 + 1 * UI_ROW_H, "Playback Path",
             (uint8)(cursor_s1 == MENU_S1_PLAYBACK));
-    ui_item(UI_Y_ROW0 + 2 * UI_ROW_H, "Enter Remote",
+    ui_item(UI_Y_ROW0 + 2 * UI_ROW_H, "View Sampled Path",
+            (uint8)(cursor_s1 == MENU_S1_VIEW_PATH));
+    ui_item(UI_Y_ROW0 + 3 * UI_ROW_H, "Enter Remote",
             (uint8)(cursor_s1 == MENU_S1_ENTER_REMOTE));
-    ui_item(UI_Y_ROW0 + 3 * UI_ROW_H, "Exit Remote",
+    ui_item(UI_Y_ROW0 + 4 * UI_ROW_H, "Exit Remote",
             (uint8)(cursor_s1 == MENU_S1_EXIT_REMOTE));
 
     ui_hint(" MID enter  LEFT back");
@@ -973,13 +1428,25 @@ static void menu_handle_key_mid_press(void)
                 menu_settings_cursor_first();
                 set_edit = 0;
             }
-            else if(cursor_main == MENU_MAIN_SUBJECT4)
+            else if(cursor_main == MENU_MAIN_CAMERA)
             {
-                /* 进科目四即发车:同科目三录制入口(enter 清 odom+开录制+遥控接管)。
+                /* 摄像头调试页。【强制 IDLE】:这一页每 50ms 要出一整幅
+                 * 160x120 图 + 跑一遍视觉,比普通页面重得多;万一是从别的模式
+                 * 误点进来的,车还带着输出就危险了。进来先把车完整停机。
+                 * 这也让"这一页可以慢"这个前提成立(见 menu_draw_camera 头注释)。 */
+                if(kart_mission_get_mode() != MISSION_IDLE)
+                {
+                    kart_mission_set_mode(MISSION_IDLE);
+                }
+                current_level = MENU_LEVEL_CAMERA;
+            }
+            else if(cursor_main == MENU_MAIN_SUBJECT3)
+            {
+                /* 进科目三即发车:同科目三录制入口(enter 清 odom+开录制+遥控接管)。
                  * 遥控开车走迷宫,到停车区按一次物理 START 键 → 停录并直接开环倒车返回,
-                 * 车头不掉转。停 S4_RUN 屏:菜单不吃 MID(防运行中刷屏),发车用独立 START 键。 */
-                kart_mission_set_mode(MISSION_SUBJECT_4);
-                current_level = MENU_LEVEL_S4_RUN;
+                 * 车头不掉转。停 S3_RUN 屏:菜单不吃 MID(防运行中刷屏),发车用独立 START 键。 */
+                kart_mission_set_mode(MISSION_SUBJECT_3);
+                current_level = MENU_LEVEL_S3_RUN;
             }
             break;
 
@@ -994,6 +1461,22 @@ static void menu_handle_key_mid_press(void)
             {
                 current_level = MENU_LEVEL_S1_SLOT_LOAD;
                 cursor_slot = 0;
+            }
+            else if(cursor_s1 == MENU_S1_VIEW_PATH)
+            {
+                /* 可视化的权威数据源是科目一 Flash 槽 0。
+                 * kart_traj_view_draw() 画的是 record RAM 缓冲，所以进页前先把
+                 * Flash 路径读回 RAM；否则冷启动后未走 Playback 载入时，页面
+                 * 会误报 "No path in RAM"，即使槽 0 已经有存档。
+                 * 进页前强制停车，避免 Flash 读取和整页画线挤进控制拍。 */
+                if(kart_mission_get_mode() != MISSION_IDLE)
+                    kart_mission_set_mode(MISSION_IDLE);
+                (void)kart_record_load_from_flash(0);
+                traj_cursor = 0;
+                traj_edit = 0;
+                traj_dirty = 0;
+                kart_traj_view_set_cursor(traj_cursor, traj_edit, traj_dirty);
+                current_level = MENU_LEVEL_S1_TRAJ;
             }
             else if(cursor_s1 == MENU_S1_ENTER_REMOTE)
             {
@@ -1067,6 +1550,21 @@ static void menu_handle_key_mid_press(void)
             }
             break;
         }
+
+        case MENU_LEVEL_CAMERA:
+            /* MID 切换叠加层。关掉是为了看清原图 —— 框和准星画在黄色上面,
+             * 判断"这块颜色够不够黄色"时那几条线本身就是干扰。 */
+            camdbg_show_overlay = camdbg_show_overlay ? 0 : 1;
+            break;
+
+        case MENU_LEVEL_S1_TRAJ:
+            if(kart_record_get_count() >= 2U)
+            {
+                traj_edit = traj_edit ? 0U : 1U;
+                kart_traj_view_set_cursor(traj_cursor, traj_edit, traj_dirty);
+                need_clear = 1;
+            }
+            break;
 
         case MENU_LEVEL_S2_GATE:
             if(cursor_s2_gate == MENU_S2_GATE_RECORD)
@@ -1266,10 +1764,37 @@ static void menu_handle_key_left_press(void)
             current_level = MENU_LEVEL_SUBJECT1;
             break;
 
-        case MENU_LEVEL_S4_RUN:
-            /* 科目四运行界面 LEFT 退出:完整停机退回 IDLE,防遥控/录制/复现残留。 */
+        case MENU_LEVEL_S1_TRAJ:
+            if(traj_edit)
+            {
+                if(kart_record_adjust_segment(traj_cursor, TRAJ_EDIT_RADIUS,
+                                              -TRAJ_EDIT_STEP_M, 0.0f))
+                    traj_dirty = 1;
+                kart_traj_view_set_cursor(traj_cursor, traj_edit, traj_dirty);
+                need_clear = 1;
+            }
+            else
+            {
+                current_level = MENU_LEVEL_SUBJECT1;
+            }
+            break;
+
+        case MENU_LEVEL_S3_RUN:
+            /* 科目三运行界面 LEFT 退出:完整停机退回 IDLE,防遥控/录制/复现残留。 */
             if(kart_mission_get_mode() != MISSION_IDLE)
                 kart_mission_set_mode(MISSION_IDLE);
+            current_level = MENU_LEVEL_MAIN;
+            break;
+
+        case MENU_LEVEL_CAMERA:
+            /* 退出调试页。这里【必须还帧】:本页是"ready 就取、画完就还",
+             * 正常路径每次都配平了;但按键是 10ms 拍处理的,和 50ms 的画屏
+             * 不同拍 —— 万一在取到帧、还没画完的当口退出,那一帧就一直被
+             * hold 住,相机再也取不到新帧,回到跟随时表现为"视觉全程丢目标"。
+             * 没持帧时调它并非完全空操作:它会把 finish_flag 一并清掉,
+             * 可能丢掉刚到的一帧 —— 退页面时丢一帧无所谓,而漏还帧会卡死整条链路,
+             * 所以宁可无条件还一次。 */
+            kart_camera_frame_release();
             current_level = MENU_LEVEL_MAIN;
             break;
 
@@ -1316,6 +1841,28 @@ static void menu_handle_key_up_press(uint8 mul)
     {
         case MENU_LEVEL_MAIN:
             if(cursor_main > 0) cursor_main--;
+            break;
+
+        case MENU_LEVEL_CAMERA:
+            /* 准星上移。mul 是长按加速倍率,直接用上:120 行靠单步挪太慢。 */
+            camdbg_probe_y = (int16)(camdbg_probe_y - (int16)mul);
+            if(camdbg_probe_y < 0) { camdbg_probe_y = 0; }
+            break;
+
+        case MENU_LEVEL_S1_TRAJ:
+            if(traj_edit)
+            {
+                if(kart_record_adjust_segment(traj_cursor, TRAJ_EDIT_RADIUS,
+                                              0.0f, TRAJ_EDIT_STEP_M * (float)mul))
+                    traj_dirty = 1;
+            }
+            else
+            {
+                uint16 step = (uint16)(TRAJ_SELECT_STEP * mul);
+                traj_cursor = (traj_cursor > step) ? (uint16)(traj_cursor - step) : 0U;
+            }
+            kart_traj_view_set_cursor(traj_cursor, traj_edit, traj_dirty);
+            need_clear = 1;
             break;
 
         case MENU_LEVEL_SUBJECT1:
@@ -1375,7 +1922,7 @@ static void menu_handle_key_up_press(uint8 mul)
          * 场地上试速度不用退菜单:UP 加胆量、DOWN 减胆量,再按 START 跑一趟。
          * 只改 RAM 值,满意了再进 Settings 存 Flash。剖面在 playback_start 时重算,
          * 故改完必须重跑才生效(跑动中不会中途变速)。
-         * 科目四界面不挂这个:它走开环倒车固定速,不用剖面,且流程已自动推进,
+         * 科目三界面不挂这个:它走开环倒车固定速,不用剖面,且流程已自动推进,
          * 不在这里插任何按键行为。 */
         case MENU_LEVEL_S1_READY:
             kart_params_step_mul(KART_PARAM_PB_SCALE, +1, mul);
@@ -1398,6 +1945,33 @@ static void menu_handle_key_down_press(uint8 mul)
         case MENU_LEVEL_MAIN:
             if(cursor_main < MENU_MAIN_MAX - 1) cursor_main++;
             break;
+
+        case MENU_LEVEL_CAMERA:
+            camdbg_probe_y = (int16)(camdbg_probe_y + (int16)mul);
+            if(camdbg_probe_y > (int16)(SCC8660_H - 1))
+            {
+                camdbg_probe_y = (int16)(SCC8660_H - 1);
+            }
+            break;
+
+        case MENU_LEVEL_S1_TRAJ:
+        {
+            uint16 n = kart_record_get_count();
+            if(traj_edit)
+            {
+                if(kart_record_adjust_segment(traj_cursor, TRAJ_EDIT_RADIUS,
+                                              0.0f, -TRAJ_EDIT_STEP_M * (float)mul))
+                    traj_dirty = 1;
+            }
+            else if(n > 0U)
+            {
+                uint32 next = (uint32)traj_cursor + (uint32)TRAJ_SELECT_STEP * mul;
+                traj_cursor = (next < n) ? (uint16)next : (uint16)(n - 1U);
+            }
+            kart_traj_view_set_cursor(traj_cursor, traj_edit, traj_dirty);
+            need_clear = 1;
+            break;
+        }
 
         case MENU_LEVEL_SUBJECT1:
             if(cursor_s1 < MENU_S1_MAX - 1) cursor_s1++;
@@ -1554,9 +2128,11 @@ static void menu_scan_keys(void)
     uint8 key_up = gpio_get_level(KART_MENU_KEY_UP);
     uint8 key_down = gpio_get_level(KART_MENU_KEY_DOWN);
     uint8 key_left = gpio_get_level(KART_MENU_KEY_LEFT);
+    uint8 key_right = gpio_get_level(KART_MENU_KEY_RIGHT);
+    uint8 key_start = gpio_get_level(BOARD_START_KEY_PIN);
     uint8 key_esw = gpio_get_level(KART_MENU_ENC_SW);
     uint8 mid_edge;
-    uint8 up_mul, down_mul;
+    uint8 up_mul, down_mul, right_mul;
     /* 取走本拍解码出的格数。解码和这里都在主循环上下文(同一个 10ms 拍里顺序调),
      * 不是中断,不存在读改写竞争,不需要临界区。 */
     int8  enc = enc_detent;
@@ -1582,7 +2158,7 @@ static void menu_scan_keys(void)
         if(mid_edge)
             menu_handle_recording_mid_press();
     }
-    else if(current_level == MENU_LEVEL_S1_READY || current_level == MENU_LEVEL_S4_RUN)
+    else if(current_level == MENU_LEVEL_S1_READY || current_level == MENU_LEVEL_S3_RUN)
     {
         /* 这两个界面 MID 无对应菜单项,但 menu_handle_key_mid_press 一进去就
          * 置 need_repaint → 会在等发车/倒车推进期间插一次 IPS200 刷新
@@ -1608,8 +2184,73 @@ static void menu_scan_keys(void)
     if(key_left == 0 && key_left_last == 1)
         menu_handle_key_left_press();
 
+    /* RIGHT 只在摄像头调试页有用:准星【列】+1,撞到右边界回卷到 0。
+     * 【为什么不用编码器】原设计把列交给 EC11,但那个旋钮实测一直不好用
+     * (2026-08-13 确认),等于取样点根本挪不动,取色标定做不下去。
+     * 二维准星必须有两个输入件,而五向只剩 RIGHT 空着 —— LEFT 是返回、
+     * MID 是切叠加层、UP/DOWN 已经是行。
+     * 【为什么是单向回卷】双向要占两个键,没有了;单向长按 1s 出粗调 x10,
+     * 走完 160 列约 1.6s,现场举着板子能接受。
+     * 编码器那条路径保留不动,哪天旋钮修好了两个都能用。 */
+    if(menu_key_hold_fire(key_right, &key_right_hold, &right_mul))
+    {
+        if(current_level == MENU_LEVEL_CAMERA)
+        {
+            camdbg_probe_x = (int16)(camdbg_probe_x + (int16)right_mul);
+            if(camdbg_probe_x > (int16)(SCC8660_W - 1))
+            {
+                camdbg_probe_x = 0;
+            }
+            need_repaint = 1;
+            repaint_row_only = 0;
+        }
+        else if(current_level == MENU_LEVEL_S1_TRAJ && traj_edit)
+        {
+            if(kart_record_adjust_segment(traj_cursor, TRAJ_EDIT_RADIUS,
+                                          TRAJ_EDIT_STEP_M * (float)right_mul, 0.0f))
+                traj_dirty = 1;
+            kart_traj_view_set_cursor(traj_cursor, traj_edit, traj_dirty);
+            need_clear = 1;
+        }
+    }
+
+    /* START 只在轨迹页承担保存，覆盖科目一槽 0。未修改时不擦 Flash。 */
+    if(current_level == MENU_LEVEL_S1_TRAJ
+       && key_start == 0 && key_start_last == 1 && traj_dirty)
+    {
+        traj_edit = 0;
+        if(kart_record_save_to_flash(0) == 0)
+        {
+            traj_dirty = 0;
+            menu_flash_notice("Path Saved!", 800);
+        }
+        kart_traj_view_set_cursor(traj_cursor, traj_edit, traj_dirty);
+        need_clear = 1;
+    }
+
     /* 旋钮转动 = 连按 UP/DOWN。走同一套处理函数,行为与按键完全一致
-     * (含编辑态改值、S1_READY 热调速度倍率)。快旋时带粗调倍率。 */
+     * (含编辑态改值、S1_READY 热调速度倍率)。快旋时带粗调倍率。
+     *
+     * 唯一例外是摄像头调试页:那里 UP/DOWN 已经占了准星的【行】,旋钮改成调【列】。
+     * 不复用 up/down 处理函数是因为它们只认一个轴 —— 二维准星要靠两个输入件
+     * 分工,否则调个取样点得先切轴再调,现场举着板子腾不出第三只手。 */
+    if(current_level == MENU_LEVEL_CAMERA)
+    {
+        if(enc != 0)
+        {
+            int16 step = (int16)(enc_fast ? MENU_KEY_STEP_FAST : 1);
+
+            camdbg_probe_x = (int16)(camdbg_probe_x + (int16)enc * step);
+            if(camdbg_probe_x < 0) { camdbg_probe_x = 0; }
+            if(camdbg_probe_x > (int16)(SCC8660_W - 1))
+            {
+                camdbg_probe_x = (int16)(SCC8660_W - 1);
+            }
+            need_repaint = 1;
+            repaint_row_only = 0;
+        }
+    }
+    else if(current_level != MENU_LEVEL_S1_TRAJ) /* 轨迹页明确不用旋钮 */
     {
         uint8 emul = enc_fast ? MENU_KEY_STEP_FAST : 1u;
         while(enc > 0) { menu_handle_key_up_press(emul);   enc--; }
@@ -1625,6 +2266,7 @@ static void menu_scan_keys(void)
     /* UP/DOWN 不再记上一拍电平:边沿判定已交给 key_*_hold(0→1 就是按下第一拍)。 */
     key_mid_last = key_mid;
     key_left_last = key_left;
+    key_start_last = key_start;
     enc_sw_last = key_esw;
 
     /* RIGHT(P21.7)刻意不绑动作:新板它可用,但"右=进入"与 MID 重复,
@@ -1651,6 +2293,7 @@ void kart_menu_init(void)
      * 若某键上电时正被按住,记 0 就不会产生下降沿。 */
     key_mid_last  = gpio_get_level(KART_MENU_KEY_MID);
     key_left_last = gpio_get_level(KART_MENU_KEY_LEFT);
+    key_start_last = gpio_get_level(BOARD_START_KEY_PIN);
     enc_sw_last   = gpio_get_level(KART_MENU_ENC_SW);
     enc_a_last    = gpio_get_level(KART_MENU_ENC_A);
     enc_b_last    = gpio_get_level(KART_MENU_ENC_B);
@@ -1661,11 +2304,13 @@ void kart_menu_init(void)
      * 只有真正松开再按才会有新动作。 */
     key_up_hold   = (gpio_get_level(KART_MENU_KEY_UP)   == 0) ? MENU_KEY_REPEAT_DELAY : 0;
     key_down_hold = (gpio_get_level(KART_MENU_KEY_DOWN) == 0) ? MENU_KEY_REPEAT_DELAY : 0;
+    key_right_hold = (gpio_get_level(KART_MENU_KEY_RIGHT) == 0) ? MENU_KEY_REPEAT_DELAY : 0;
     enc_gap       = 0xFFFFu;
     enc_fast      = 0;
 
     ips200_init(IPS200_TYPE_SPI);
     ips200_set_font(IPS200_8X16_FONT);
+    kart_boot_anim_play();
     ui_clear();
 
     current_level = MENU_LEVEL_MAIN;
@@ -1707,7 +2352,9 @@ static void menu_draw_page(void)
             case MENU_LEVEL_S1_SLOT_SAVE:        menu_draw_slot_save();          break;
             case MENU_LEVEL_S1_SLOT_LOAD:        menu_draw_slot_load();          break;
             case MENU_LEVEL_S1_READY:            menu_draw_s1_ready();           break;
-            case MENU_LEVEL_S4_RUN:              menu_draw_s4_run();             break;
+            case MENU_LEVEL_S1_TRAJ:             kart_traj_view_draw();          break;
+            case MENU_LEVEL_S3_RUN:              menu_draw_s3_run();             break;
+            case MENU_LEVEL_CAMERA:              menu_draw_camera();             break;
             case MENU_LEVEL_SETTINGS:            menu_draw_settings();           break;
             default:                                                             break;
         }
@@ -1733,13 +2380,32 @@ void kart_menu_poll(void)
 
     /* 换页自动判定:哪个处理函数改了 current_level / rec_state 都不用自己记得置清屏标志,
      * 这里比对上一次画的是哪页即可。页内改值/移光标两者都不变 → 不清屏。
-     * 科目四阶段跳变刻意不算换页(2026-07-27 定):倒车过程自动推进,跟着刷屏会在
-     * 控制窗口里插整屏 SPI 写。进 S4 界面的首屏由换页那次画出,之后保持静止。 */
+     * 科目三阶段跳变刻意不算换页(2026-07-27 定):倒车过程自动推进,跟着刷屏会在
+     * 控制窗口里插整屏 SPI 写。进 S3 界面的首屏由换页那次画出,之后保持静止。 */
     if(current_level != last_drawn_level || rec_state != last_drawn_rec)
     {
         need_clear = 1;
         last_drawn_level = current_level;
         last_drawn_rec   = rec_state;
+    }
+
+
+    /* 科目三阶段跳变的唯一重绘例外:进 S3_SIGNAL / S3_FINISHED。
+     * 这两个阶段车已完整停机(倒车 playback 跑完 + mission_stop_all),
+     * 不存在"整屏 SPI 写挤掉控制拍"的风险;而 S3_SIGNAL 必须让现场看到
+     * 可以喊口令了,否则屏幕会一直停在倒车页。其余阶段跳变仍然不刷。 */
+    if(current_level == MENU_LEVEL_S3_RUN)
+    {
+        kart_subject3_stage_t s3 = kart_mission_get_subject3_stage();
+
+        if(s3 != last_drawn_s3)
+        {
+            if(s3 == S3_SIGNAL || s3 == S3_FINISHED)
+            {
+                need_clear = 1;
+            }
+            last_drawn_s3 = s3;
+        }
     }
 
     if(rec_state == REC_STATE_RECORDING)
@@ -1783,6 +2449,46 @@ void kart_menu_poll(void)
         }
     }
 
+    /* 摄像头调试页每拍都要重画:它是唯一"内容自己会变"的页面(要出实时视频),
+     * 其他页都是按键驱动 —— 不在这里主动置标志,画面就只在按键时更新一格,
+     * 那就不是预览而是单帧抓拍了。
+     * 【为什么敢每拍画】这一拍(50ms)本来就为换页留了整屏 ui_clear 的余量,
+     * 出图 4ms + 视觉 3ms 在同一量级;且本页强制 MISSION_IDLE,车不在动。
+     * 只置 need_repaint 不置 need_clear:清屏会让视频闪,而定宽文本 + 整幅
+     * 覆盖出图本来就能把上一帧盖干净。 */
+    if(current_level == MENU_LEVEL_CAMERA)
+    {
+        need_repaint = 1;
+        repaint_row_only = 0;
+    }
+
+    /* 科目三跟随实时画面(临时,测完删)。理由同上:内容自己会变,不主动置标志
+     * 就只在按键时更新一格,那不是预览而是单帧抓拍 —— 而这一页存在的唯一目的
+     * 就是看识别对不对。
+     * 【与上面那页不同,这里车是自己在动的】所以只放开跟随阶段这一个阶段:
+     *   倒车阶段 playback_is_running() 在上面已经 return 了,本来就轮不到;
+     *   S3_SIGNAL/FINISHED 车已停机,由换页那次画出即可。
+     * 只置 need_repaint 不置 need_clear:ips200_clear 整屏十几 ms,既闪又会
+     * 落在车正跑的时候。代价仍在:出图约 4ms 插进 50ms 拍,测完删掉本块。 */
+#if (KART_S3_FOLLOW_SRC == KART_S3_FOLLOW_SRC_VISION) && (KART_CAMERA_ENABLE)
+    if(current_level == MENU_LEVEL_S3_RUN
+       && kart_mission_get_subject3_stage() == S3_PHASE1_FOLLOW)
+    {
+        need_repaint = 1;
+        repaint_row_only = 0;
+    }
+#elif (KART_S3_FOLLOW_SRC == KART_S3_FOLLOW_SRC_PLINK)
+    /* PLINK 页同样要每拍刷（link/bear/h 都是自己在变的量），但它只有四行
+     * 定宽文本、不出图，1~2ms/拍，比视觉那页的 4ms 出图轻，不是“测完删”的临时块。
+     * 同样只放开跟随阶段：倒车阶段 playback_is_running() 已在上面 return。 */
+    if(current_level == MENU_LEVEL_S3_RUN
+       && kart_mission_get_subject3_stage() == S3_PHASE1_FOLLOW)
+    {
+        need_repaint = 1;
+        repaint_row_only = 0;
+    }
+#endif
+
     /* 三档开销,从大到小:
      *   换页   → ui_clear() 整屏 76800 像素(软件 SPI,十几 ms)+ 整页重画;
      *   页内   → 只重画本页各行(定宽文本盖旧字,不清屏),约 1~2ms;
@@ -1811,6 +2517,11 @@ void kart_menu_poll(void)
         repaint_row_only = 0;
     }
 
-    /* 状态栏每拍刷新(放主体之后,不会被清屏擦掉),IMU yaw 实时更新不靠按键。 */
-    menu_draw_status_bar();
+    /* 状态栏每拍刷新(放主体之后,不会被清屏擦掉),IMU yaw 实时更新不靠按键。
+     * 轨迹页的 y=18/36 两行用于点数、里程和包围盒，状态栏会与它们重叠；
+     * 该页又是停车后的静态诊断页，不需要实时 Yaw/RC/SW，故单独让出这两行。 */
+    if(current_level != MENU_LEVEL_S1_TRAJ)
+    {
+        menu_draw_status_bar();
+    }
 }

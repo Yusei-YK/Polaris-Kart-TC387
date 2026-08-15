@@ -2,6 +2,7 @@
 #define KART_PLAYBACK_H_
 
 #include "zf_common_headfile.h"
+#include "kart_calib.h"     /* 倒车纠偏符号、脉冲↔m/s 换算 */
 
 /*
  * 路径复现模块（Pure Pursuit 纯跟踪）
@@ -63,10 +64,11 @@
  * 平滑代价可算:锥距 >3m → 绕桩曲率空间波长约 6m,0.80m 跨度的均值滤波
  * 对 6m 波长的衰减 sinc(0.8/6) ≈ 0.97,只损失 3%,弯道形状基本不失真。 */
 #define KART_PLAYBACK_KAPPA_WIN     (8)         /* 曲率中心差分半窗(点):太小会被 2°量化噪声打乱 */
-/* 脉冲/5ms ↔ m/s 换算:0.00036816 m/脉冲 ÷ 0.005 s = 0.0736 m/s per (脉冲/5ms)。
- * 剖面内部用 m/s 算(a_lat/a_brake 才有物理意义),存表前换回脉冲/5ms。 */
-#define KART_PLAYBACK_V_TO_MS       (0.0736322f)
-#define KART_PLAYBACK_MS_TO_V       (13.5811f)
+/* 脉冲/5ms ↔ m/s 换算。剖面内部用 m/s 算(a_lat/a_brake 才有物理意义),
+ * 存表前换回脉冲/5ms。改为引用 kart_calib.h 的派生值:
+ * 换轮子重标脉冲当量后自动跟随,不用再手算这两个常数(以前是硬编码 0.0736322)。 */
+#define KART_PLAYBACK_V_TO_MS       (KART_PULSE_V_TO_MS)
+#define KART_PLAYBACK_MS_TO_V       (KART_PULSE_MS_TO_V)
 /* 复现速度总钳位(脉冲/5ms):下发给速度环之前的最后一道闸,剖面速度和录制速度都过它。
  * 【本值现已可现场调】菜单 PB Clamp,本宏只是出厂默认。
  * 60 脉冲 = 4.42 m/s = 15.9 km/h,只用到整车能力(25 km/h = 94 脉冲)的 64%,
@@ -88,7 +90,8 @@
  * 实测 = IMU yaw,误差经 P 增益转成打角修正量。倒车阿克曼动力学与前进相反,
  * 故纠偏符号取负(SIGN=-1);若上车发现越纠越斜(正反馈发散),改成 +1。 */
 #define KART_PLAYBACK_REV_HEAD_KP   (20.0f)     /* 倒车航向纠偏 P 增益(编码器计数/度) */
-#define KART_PLAYBACK_REV_HEAD_SIGN (-1.0f)     /* 倒车纠偏符号:-1=反向动力学负反馈;越纠越斜则改+1 */
+/* 符号统一由 kart_calib.h 第六节的 KART_REV_HEAD_SIGN 给(三处倒车路径同一套动力学) */
+#define KART_PLAYBACK_REV_HEAD_SIGN (KART_REV_HEAD_SIGN)
 /* 纠偏量钳位(计数):防坏参考点猛打方向。出厂 400,现已搬进菜单(PB RevCorr)。
  * 【为什么这项要能调】它是倒车段打角能偏离录制值的全部余量:
  *   delta = steer[nearest] + clamp(corr, ±本值)
@@ -112,16 +115,16 @@
  * 约 680 duty,靠积分补齐才能起步,偏marginal;起不来先调到 0.4~0.5。 */
 #define KART_PLAYBACK_REV_CREEP     (0.25f)
 
-/* ===== 科目四反向复现参数(方案 0/1 共用)===== */
+/* ===== 科目三反向复现参数(方案 0/1 共用)===== */
 /* 2026-07-28: -12 → -20。-12 = 0.88 m/s,15m 迷宫倒回要 17.0s;-20 = 1.47 m/s 要 10.2s,
  * 省 6.8s —— 这是全车单项最大的确定性提速。风险低的理由:提速不改索引/纠偏任何逻辑,
  * 且方案 0 的实测结论是"不撞筒、终点横向偏 0.5~1m、误差线性有界不发散",
  * 而线性累积的漂移与速度无关(它按里程累积,不按时间)。
- * 现场用菜单 S4 OLSpd 调;真撞了先退回 -15 再看,不要直接回 -12。 */
+ * 现场用菜单 S3 OLSpd 调;真撞了先退回 -15 再看,不要直接回 -12。 */
 #define KART_PLAYBACK_OL_SPEED      (-20.0f)    /* 倒车固定速度(脉冲/5ms,负=倒退) */
 #define KART_PLAYBACK_OL_FINISH     (0.10f)     /* 剩余里程<此值(m)判返回发车区,停车 */
 
-/* ===== 科目四倒车的航向 P 纠偏(2026-07-27 新增)=====
+/* ===== 科目三倒车的航向 P 纠偏(2026-07-27 新增)=====
  * 现象:纯回放打角倒车(那时确实是全开环),前两个桩正常,第三个桩起开始飘。
  * 原因:没有任何航向反馈,单拍的小误差(内环死区约 63 计数、左右轮不对称、
  *       地面侧滑、里程标量 dist_sum 把打滑也算成前进)逐点累积,越走越偏。
@@ -137,12 +140,13 @@
 /* 加上本段后系统已不是全开环:【航向闭环 + 横向位置开环】。位置误差仍没进反馈环,
  * 所以航向纠准了照样能带着 0.5~1m 横向偏移到终点 —— 补这一环的是下方方案 1。 */
 #define KART_PLAYBACK_OL_HEAD_EN    (1)         /* 1=开航向P纠偏 0=退回纯开环(对比用) */
-#define KART_PLAYBACK_OL_HEAD_KP    (20.0f)     /* 纠偏 P 增益(编码器计数/度)的【出厂默认】,运行时读菜单 S4 OL Kh */
-#define KART_PLAYBACK_OL_HEAD_SIGN  (-1.0f)     /* 纠偏符号:-1=倒车反向动力学负反馈;越纠越斜改 +1 */
+#define KART_PLAYBACK_OL_HEAD_KP    (20.0f)     /* 纠偏 P 增益(编码器计数/度)的【出厂默认】,运行时读菜单 S3 OL Kh */
+/* 符号与上面倒车段共用 kart_calib.h 的 KART_REV_HEAD_SIGN */
+#define KART_PLAYBACK_OL_HEAD_SIGN  (KART_REV_HEAD_SIGN)
 #define KART_PLAYBACK_OL_CORR_MAX   (400.0f)    /* 纠偏量钳位(计数):防坏参考点猛打方向 */
 #define KART_PLAYBACK_OL_HEAD_DB    (1.5f)      /* 误差死区(度):内环有约63计数死区,小误差别抖 */
 
-/* ===== 科目四倒车方案 1:位置闭环(2026-07-28 新增,菜单 S4 OLMode=1 才走)=====
+/* ===== 科目三倒车方案 1:位置闭环(2026-07-28 新增,菜单 S3 OLMode=1 才走)=====
  * 【方案 0 的实测结论】里程查表 + 航向纠偏:不撞筒,15m 走完终点横向偏 0.5~1m。
  *   误差有界线性累积、不发散,是能完赛的方案 —— 所以它是默认,本方案是可选。
  *
@@ -164,14 +168,14 @@
  *      前馈项 steer[k] 保留 —— 它是已验证有效的基准,两个 P 只做修正。
  *
  * 【符号】倒车横向反馈的符号只有 ±1 两种可能,共用航向那个 SIGN(同一套倒车
- *   阿克曼动力学)。若实车发现横向越纠越歪,把菜单 S4 OL Ke 调成负值即可,
+ *   阿克曼动力学)。若实车发现横向越纠越歪,把菜单 S3 OL Ke 调成负值即可,
  *   不用重新烧写。这也是 Ke 的量程给成 ±800 的原因。
  *
  * 【调参顺序】必须一次只引入一个变量:
  *   1. OLMode=0 先确认与改动前行为一致(证明隔离有效);
  *   2. OLMode=1、Ke=0 → 只验证"最近点索引"比"里程查表"好不好;
  *   3. Ke 从 100 往上加,看 CH21(e_lat) 有没有被压向 0,变大就取负;
- *   4. e_lat 稳定收敛后,再用 S4 OLSpd 提速。 */
+ *   4. e_lat 稳定收敛后,再用 S3 OLSpd 提速。 */
 #define KART_PLAYBACK_OL_NEAR_WIN   (40)        /* 最近点搜索窗(点):与正向 NEAREST_FORWARD 同量级 */
 #define KART_PLAYBACK_OL_ELAT_MAX   (400.0f)    /* 横向修正量单独钳位(计数):与航向项各自限幅再合并 */
 #define KART_PLAYBACK_OL_ELAT_DB    (0.02f)     /* 横向误差死区(m):2cm 内不纠,防内环死区上抖动 */
@@ -180,6 +184,14 @@
 #define KART_PLAYBACK_OL_FIN_DIST   (0.15f)     /* 距录制起点(m)判返回发车区 */
 
 void   kart_playback_init(void);
+
+typedef enum
+{
+    KART_PLAYBACK_RESULT_NONE = 0,
+    KART_PLAYBACK_RESULT_COMPLETED,
+    KART_PLAYBACK_RESULT_ABORTED
+} kart_playback_result_t;
+
 uint8  kart_playback_start(void);       /* 1=成功启动，0=路径无效 */
 
 /* 按【录制原点】启动正向复现(2026-07-29 加,科目二语音返回用)。1=成功,0=路径无效。
@@ -201,10 +213,11 @@ uint8  kart_playback_start_at_recorded_origin(void);
 void   kart_playback_stop(void);
 void   kart_playback_poll(void);
 uint8  kart_playback_is_running(void);
+kart_playback_result_t kart_playback_get_result(void);
 uint16 kart_playback_get_index(void);
 float  kart_playback_get_target_yaw(void);
 
-/* 科目四开环反向复现接口:车头不掉转,直接挂倒挡按里程回放录制打角原路倒回。
+/* 科目三开环反向复现接口:车头不掉转,直接挂倒挡按里程回放录制打角原路倒回。
  * 不走 Pure Pursuit/航向外环/IMU 重建,只开转角内环 + 速度环负速。1=成功,0=路径无效。 */
 uint8  kart_playback_start_openloop_reverse(void);
 

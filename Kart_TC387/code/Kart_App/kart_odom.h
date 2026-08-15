@@ -2,6 +2,7 @@
 #define KART_ODOM_H_
 
 #include "zf_common_headfile.h"
+#include "kart_calib.h"     /* KART_ODOM_YAW_SIGN、脉冲当量 */
 #include "kart_calc.h"
 
 /*
@@ -27,8 +28,7 @@
  *          绝不调用 kart_encoder_update()(那会偷走计数、搞坏速度环)。
  */
 
-/* IMU 航向正负号(若轨迹左右转反了,改成 -1) */
-#define KART_ODOM_YAW_SIGN              (+1)
+/* IMU 航向正负号 KART_ODOM_YAW_SIGN → kart_calib.h 第六节(控制环反馈符号) */
 
 typedef struct
 {

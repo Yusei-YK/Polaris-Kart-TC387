@@ -738,7 +738,7 @@ uint8 wifi_spi_init (char *wifi_ssid, char *pass_word)
     spi_init(WIFI_SPI_INDEX, SPI_MODE3, WIFI_SPI_SPEED, WIFI_SPI_SCK_PIN, WIFI_SPI_MOSI_PIN, WIFI_SPI_MISO_PIN, SPI_CS_NULL);//硬件SPI初始化
     gpio_init(WIFI_SPI_CS_PIN,  GPO, 1, GPO_PUSH_PULL);
     gpio_init(WIFI_SPI_RST_PIN, GPO, 1, GPO_PUSH_PULL);
-    gpio_init(WIFI_SPI_INT_PIN, GPI, 0, GPI_PULL_DOWN);
+    gpio_init(WIFI_SPI_INT_PIN, GPI, 0, GPI_FLOATING_IN);
     
     // 复位
     gpio_set_level(WIFI_SPI_RST_PIN, 0);

@@ -37,20 +37,21 @@ static const kart_param_meta_t param_meta[KART_PARAM_MAX] =
     { "PB LdMax",    0.30f,   6.00f,  0.05f, KART_PLAYBACK_LD_MAX,              2 },
     { "RC Vmax",     5.0f,  150.0f,   1.0f,  KART_REMOTE_MAX_SPEED,             0 },
     { "Head Kp",     0.0f,  400.0f,   1.0f,  KART_HEAD_KP_DEFAULT,              0 },
-    { "S1 RevSpd",  -95.0f,  -1.0f,   1.0f,  KART_S1_REVERSE_SPEED,             0 },
-    { "S1 RevStop",  0.05f,   5.00f,  0.05f, KART_S1_REVERSE_STOP_DIST,         2 },
-    { "S4 OLSpd",   -95.0f,  -1.0f,   1.0f,  KART_PLAYBACK_OL_SPEED,            0 },
+    /* 保留两个占位项，避免后续参数的 Flash 下标整体移动。运行时和菜单均不使用。 */
+    { "Reserved 1", -95.0f,  -1.0f,   1.0f, -25.0f,                             0 },
+    { "Reserved 2",  0.05f,   5.00f,  0.05f,  1.40f,                            2 },
+    { "S3 OLSpd",   -95.0f,  -1.0f,   1.0f,  KART_PLAYBACK_OL_SPEED,            0 },
     /* 倒车方案:出厂 0 = 已实车验证能完赛的里程查表方案。1 = 位置闭环(待验证)。
      * step=1 → 一下按键就切换,不用连点。 */
-    { "S4 OLMode",   0.0f,    1.0f,   1.0f,  0.0f,                              0 },
+    { "S3 OLMode",   0.0f,    1.0f,   1.0f,  0.0f,                              0 },
     /* 横向增益(计数/米):满舵约 1100 计数,给 400 意味着偏 1m 就出 36% 舵。
      * 允许负值:倒车横向反馈符号只有 ±1 两种可能,现场发现越纠越歪就取负,
      * 不必重新烧写。出厂 0 → 新方案首次打开时只有最近点索引在起作用,
      * 与老方案只差"索引怎么算"这一个变量,便于单独判断索引改动的效果。 */
-    { "S4 OL Ke", -3000.0f,3000.0f,  20.0f,  0.0f,                              0 },
+    { "S3 OL Ke", -3000.0f,3000.0f,  20.0f,  0.0f,                              0 },
     /* 倒车航向增益(计数/度):原 OL_HEAD_KP 宏搬进菜单。日志已验证 20 够用
      * (误差穿零、修正量没碰 ±400 钳位),故默认保持 20 不变。 */
-    { "S4 OL Kh",    0.0f,  400.0f,   2.0f,  KART_PLAYBACK_OL_HEAD_KP,          0 },
+    { "S3 OL Kh",    0.0f,  400.0f,   2.0f,  KART_PLAYBACK_OL_HEAD_KP,          0 },
     /* ---- 2026-07-28 第二批:限制项本身进菜单。默认值一律等于原宏,行为不变 ---- */
     /* 速度环积分限幅。出厂 3000 = 原 KART_SPEED_IMAX_DEFAULT。
      * 上限给满量程 10000:提速要吃掉那 27% 拿不到的 duty 就得能放到这么大。
@@ -70,7 +71,7 @@ static const kart_param_meta_t param_meta[KART_PARAM_MAX] =
     /* 倒车段航向纠偏钳位(计数)。出厂 400 = 原 KART_PLAYBACK_REV_CORR_MAX。
      * 上限 1133 = 转向软限位:纠偏最多允许打到满舵,再大也被软限位截断,给了也没用。
      * 【生效范围只有一处】前进复现里夹着的倒车段(kart_playback.c:482)。
-     * 科目四那段独立开环倒车【不看它】,两条路径都用死宏 OL_CORR_MAX=400
+     * 科目三那段独立开环倒车【不看它】,两条路径都用死宏 OL_CORR_MAX=400
      * (kart_playback.c:690/794)—— 科四倒车拐不进去调本项没用,详见 kart_params.h。
      * 【什么时候加】科一录制里带倒车段、该段拐不到位/半径偏大 → 加;左右摆头 → 减。 */
     { "PB RevCorr",  0.0f, 1133.0f, 25.0f,  KART_PLAYBACK_REV_CORR_MAX,        0 },

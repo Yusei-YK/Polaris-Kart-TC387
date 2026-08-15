@@ -70,7 +70,8 @@ typedef struct{
 extern IMU_Handle_struct IMU_Handle;
 
 /* --- 对外接口 --- */
-void  kart_imu_init(void);      // 初始化 + 上电静止标定零偏(车必须放稳别动)
+uint8 kart_imu_init(void);      // 1=初始化成功并完成标定，0=硬件初始化失败
+uint8 kart_imu_is_ready(void);  // 1=IMU 可用；自动任务启动前检查
 void  kart_imu_set_calib_hook(void (*hook)(void));  // 注册标定期间刷新钩子(点阵扫描),NULL 关闭
 void  kart_imu_update(void);    // 读数 + Madgwick 解算,放 5ms 定时中断里调
 float kart_imu_get_yaw(void);   // 取当前航向角(度,-180~180)

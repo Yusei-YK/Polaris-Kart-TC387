@@ -10,6 +10,7 @@
 #include <math.h>
 
 static uint8  playback_running = 0;
+static kart_playback_result_t playback_result = KART_PLAYBACK_RESULT_NONE;
 static uint16 playback_index = 0;
 static float  playback_target_yaw = 0.0f;
 
@@ -17,12 +18,12 @@ static float  playback_target_yaw = 0.0f;
  * 1=倒车段(开环回放录制打角)。死区内维持上一拍值,防边界抖动翻转使能位。 */
 static uint8  playback_seg_reverse = 0;
 
-/* ===== 科目四反向复现状态(不走 Pure Pursuit)=====
+/* ===== 科目三反向复现状态(不走 Pure Pursuit)=====
  * 命名沿用 openloop 是历史包袱:方案 0 现在已有【航向闭环】(航向 P 纠偏),
  * 真正开环的只剩【横向位置】—— 位置误差从头到尾没被测量,也没进反馈环,
  * 所以航向再准也会带着 0.5~1m 的横向偏移走到终点。方案 1 补的就是这一环。
  * 变量/函数名不改:改名要动 8 处调用点,收益只有可读性,风险不划算。 */
-static uint8  playback_openloop_mode = 0;   /* =1 时 poll 走科目四倒车分支 */
+static uint8  playback_openloop_mode = 0;   /* =1 时 poll 走科目三倒车分支 */
 static float  playback_ol_dist0 = 0.0f;     /* 倒车起点累计里程基准 */
 static float  playback_ol_total = 0.0f;     /* 原路全程总里程 */
 static uint16 playback_ol_index = 0;        /* 里程查表游标(单调递减) */
@@ -57,8 +58,14 @@ static float kart_playback_wrap180(float angle)
     return angle;
 }
 
-static void kart_playback_poll_openloop(void);      /* 科目四倒车方案0:里程查表(下方实现) */
-static void kart_playback_poll_closedloop(void);    /* 科目四倒车方案1:位置闭环(下方实现) */
+static void kart_playback_poll_openloop(void);      /* 科目三倒车方案0:里程查表(下方实现) */
+static void kart_playback_poll_closedloop(void);    /* 科目三倒车方案1:位置闭环(下方实现) */
+
+static void kart_playback_complete(void)
+{
+    kart_playback_stop();
+    playback_result = KART_PLAYBACK_RESULT_COMPLETED;
+}
 
 /* 该点录制速度(脉冲/5ms):左右取平均。只用于判前进/倒车段,不决定快慢。 */
 static float kart_playback_rec_v(const kart_waypoint_t *wp, uint16 i)
@@ -196,6 +203,7 @@ static void kart_playback_build_profile(const kart_waypoint_t *wp, uint16 n)
 void kart_playback_init(void)
 {
     playback_running = 0;
+    playback_result = KART_PLAYBACK_RESULT_NONE;
     playback_openloop_mode = 0;
     playback_index = 0;
     playback_target_yaw = 0.0f;
@@ -249,12 +257,15 @@ static uint8 playback_start_common(uint8 use_rec_origin)
      * index 钉死在 0,速度取起点静止段≈0 → 永远卡原点起不了步。故跳过起点
      * 静止段,从第3点起步给非零初速;不足4点则退回0(短路径由完成判定收尾)。 */
     playback_index = (n > 3) ? 3 : 0;
+    playback_result = KART_PLAYBACK_RESULT_NONE;
     playback_running = 1;
 
     /* 外环目标初始化为当前航向,消除发车瞬间用残留 target_yaw 乱打方向。 */
     playback_target_yaw = kart_imu_get_yaw();
     kart_steer_set_target_yaw(playback_target_yaw);
 
+    /* 正向回放的起始段固定用前进转角增益，不继承上一次倒车状态。 */
+    kart_steer_use_fwd_gains();
     kart_steer_set_head_enable(1);
     kart_control_set_enable(1);
     return 1;
@@ -272,6 +283,10 @@ uint8 kart_playback_start_at_recorded_origin(void)
 
 void kart_playback_stop(void)
 {
+    if(playback_running)
+    {
+        playback_result = KART_PLAYBACK_RESULT_ABORTED;
+    }
     playback_running = 0;
     playback_openloop_mode = 0;
     /* 剖面判废:下次 start 会重算(可能改了 Vmax/Alat),不让旧剖面漏用。 */
@@ -279,6 +294,7 @@ void kart_playback_stop(void)
     kart_control_set_enable(0);
     kart_steer_set_head_enable(0);
     kart_steer_set_angle_enable(0);     /* 开环倒车只开内环,停机一并关掉 */
+    kart_steer_use_fwd_gains();          /* 给遥控/下一个正向任务留下统一默认状态 */
     kart_control_set_target(0.0f);
 }
 
@@ -372,14 +388,14 @@ void kart_playback_poll(void)
         return;
     }
 
-    /* ===== 科目四倒车分支(两套方案,菜单 S4 OLMode 选)=====
+    /* ===== 科目三倒车分支(两套方案,菜单 S3 OLMode 选)=====
      * 0 = 里程查表索引 + 航向 P 纠偏。已实车验证能完赛(不撞筒,终点横向偏
      *     0.5~1m),故为出厂默认。不做定位/最近点/坐标投影。
      * 1 = 最近点索引 + 航向 P + 横向位置 P(位置闭环)。推导见 kart_playback.h。
      * 两条路径完全独立,方案 1 出问题现场把 OLMode 打回 0 即恢复已验证行为。 */
     if(playback_openloop_mode)
     {
-        if(kart_params_get(KART_PARAM_S4_OL_MODE) > 0.5f)
+        if(kart_params_get(KART_PARAM_S3_OL_MODE) > 0.5f)
             kart_playback_poll_closedloop();
         else
             kart_playback_poll_openloop();
@@ -407,15 +423,22 @@ void kart_playback_poll(void)
     nearest = kart_playback_find_nearest(cur, wp, n);
     playback_index = nearest;
 
-    /* 完成判定按进度点:进度已到末点,或离末点足够近 → 停。
-     * 不再只看到终点距离,脱线绕圈时进度推到末点也能正常结束。 */
+    /* 只有实际进入终点距离圈才算完成。索引到末点但位置仍远，说明末段
+     * 跳点或车辆脱线：异常停车，不能把“搜索到末点”冒充“车到终点”。 */
     {
         Point_2D last;
+        float last_dist;
         last.x = wp[n - 1].x;
         last.y = wp[n - 1].y;
-        if(nearest >= n - 1 || get_distance(cur, last) < KART_PLAYBACK_FINISH_DIST)
+        last_dist = get_distance(cur, last);
+        if(last_dist < KART_PLAYBACK_FINISH_DIST)
         {
-            kart_playback_stop();
+            kart_playback_complete();
+            return;
+        }
+        if(nearest >= n - 1)
+        {
+            kart_playback_stop();       /* result=ABORTED，任务层进入对应FAULT */
             return;
         }
     }
@@ -442,8 +465,22 @@ void kart_playback_poll(void)
      * 判据必须用 rec_v(录制速度)而非 target_v:剖面里前进段最后几点会被
      * 反向传播压到接近 0(终点收油),若拿它判段会误判成"死区/倒车"翻掉航向环。
      * steer_buf 与 record_buf 同索引,倒车段可直接取录制打角开环回放。 */
-    if(rec_v >  KART_PLAYBACK_REV_SPEED_EPS)      playback_seg_reverse = 0;
-    else if(rec_v < -KART_PLAYBACK_REV_SPEED_EPS) playback_seg_reverse = 1;
+    if(rec_v > KART_PLAYBACK_REV_SPEED_EPS)
+    {
+        if(playback_seg_reverse)
+        {
+            playback_seg_reverse = 0;
+            kart_steer_use_fwd_gains();
+        }
+    }
+    else if(rec_v < -KART_PLAYBACK_REV_SPEED_EPS)
+    {
+        if(!playback_seg_reverse)
+        {
+            playback_seg_reverse = 1;
+            kart_steer_use_back_gains();
+        }
+    }
 
     if(!playback_seg_reverse)
     {
@@ -506,6 +543,11 @@ uint8 kart_playback_is_running(void)
     return playback_running;
 }
 
+kart_playback_result_t kart_playback_get_result(void)
+{
+    return playback_result;
+}
+
 uint16 kart_playback_get_index(void)
 {
     return playback_index;
@@ -529,8 +571,8 @@ float kart_playback_get_profile_v(uint16 i)
 
 uint8 kart_playback_profile_valid(void) { return (playback_prof_n > 0) ? 1u : 0u; }
 
-/* =========================== 科目四反向复现 =========================== */
-/* 启动倒车:车头不掉转,直接挂倒挡回放录制打角(索引方式由菜单 S4 OLMode 定)。
+/* =========================== 科目三反向复现 =========================== */
+/* 启动倒车:车头不掉转,直接挂倒挡回放录制打角(索引方式由菜单 S3 OLMode 定)。
  * 前置:车已停在原路终点(停车区),odom 仍在录制世界系(未 reset)。
  * 基准:total=录制全程里程,dist0=当前 odom 累计里程(倒车起点)。
  * 倒车中 odom.dist_sum 是标量(只增不减),故倒退里程 d=odom-dist0 单调增,
@@ -566,9 +608,11 @@ uint8 kart_playback_start_openloop_reverse(void)
     play_origin_y = kart_record_get_origin_y();
 
     playback_openloop_mode = 1;
+    playback_result = KART_PLAYBACK_RESULT_NONE;
     playback_running = 1;
 
     /* 只开内环(锁打角),不开航向外环。初始目标转角=末点录制打角。 */
+    kart_steer_use_back_gains();
     kart_steer_set_head_enable(0);
     kart_steer_set_angle_enable(1);
     {
@@ -577,7 +621,7 @@ uint8 kart_playback_start_openloop_reverse(void)
     }
 
     kart_control_set_enable(1);
-    kart_control_set_target(kart_params_get(KART_PARAM_S4_OL_SPD));
+    kart_control_set_target(kart_params_get(KART_PARAM_S3_OL_SPD));
     return 1;
 }
 
@@ -648,7 +692,7 @@ static float kart_playback_ol_cross_track(Point_2D cur, const kart_waypoint_t *w
     return (tx * (cur.y - wp[k].y) - ty * (cur.x - wp[k].x)) / len;
 }
 
-/* 位置闭环倒车一拍(菜单 S4 OLMode=1)。与方案 0 的差别只有两处:
+/* 位置闭环倒车一拍(菜单 S3 OLMode=1)。与方案 0 的差别只有两处:
  * 索引改最近点搜索、打角多一个横向 P 项。速度/软限幅/停机走同一套。
  * 推导与调参顺序见 kart_playback.h 的方案 1 注释块。 */
 static void kart_playback_poll_closedloop(void)
@@ -673,7 +717,7 @@ static void kart_playback_poll_closedloop(void)
     start.y = wp[0].y;
     if(k == 0 || get_distance(cur, start) < KART_PLAYBACK_OL_FIN_DIST)
     {
-        kart_playback_stop();
+        kart_playback_complete();
         return;
     }
 
@@ -681,8 +725,8 @@ static void kart_playback_poll_closedloop(void)
     delta = (float)steer[k];
 
     sign = KART_PLAYBACK_OL_HEAD_SIGN;
-    kh   = kart_params_get(KART_PARAM_S4_OL_KH);
-    ke   = kart_params_get(KART_PARAM_S4_OL_KE);
+    kh   = kart_params_get(KART_PARAM_S3_OL_KH);
+    ke   = kart_params_get(KART_PARAM_S3_OL_KE);
 
     /* ---- 反馈项①:航向 P(与方案 0 同构,只是 Kp 改从菜单取)---- */
     {
@@ -718,7 +762,7 @@ static void kart_playback_poll_closedloop(void)
     if(delta < KART_STEER_DELTA_LIMIT_R) delta = KART_STEER_DELTA_LIMIT_R;
     kart_steer_set_target_delta(delta);
 
-    kart_control_set_target(kart_params_get(KART_PARAM_S4_OL_SPD));
+    kart_control_set_target(kart_params_get(KART_PARAM_S3_OL_SPD));
 
     /* 诊断:CH20=航向误差(度) CH21=横向偏差(m) CH22=索引 k CH23=最终打角。
      * 判读:e_lat 应被压向 0;若持续单向增大就是 Ke 符号反了,菜单取负。 */
@@ -758,7 +802,7 @@ static void kart_playback_poll_openloop(void)
     /* 返回发车区判定:剩余弧长足够小,停车。 */
     if(s <= KART_PLAYBACK_OL_FINISH)
     {
-        kart_playback_stop();
+        kart_playback_complete();
         return;
     }
 
@@ -770,7 +814,7 @@ static void kart_playback_poll_openloop(void)
     /* 到起点也停(游标见底,防越界与卡死)。 */
     if(k == 0)
     {
-        kart_playback_stop();
+        kart_playback_complete();
         return;
     }
 
@@ -792,10 +836,10 @@ static void kart_playback_poll_openloop(void)
 
         if(head_err > KART_PLAYBACK_OL_HEAD_DB || head_err < -KART_PLAYBACK_OL_HEAD_DB)
         {
-            /* 增益改读菜单 S4 OL Kh(两套方案共用):它的出厂默认就是
+            /* 增益改读菜单 S3 OL Kh(两套方案共用):它的出厂默认就是
              * KART_PLAYBACK_OL_HEAD_KP,经 params 元表灌入,故默认行为与改动前
              * 完全一致 —— 只是现在不用重编译就能在现场加减。 */
-            corr = KART_PLAYBACK_OL_HEAD_SIGN * kart_params_get(KART_PARAM_S4_OL_KH) * head_err;
+            corr = KART_PLAYBACK_OL_HEAD_SIGN * kart_params_get(KART_PARAM_S3_OL_KH) * head_err;
             if(corr >  KART_PLAYBACK_OL_CORR_MAX) corr =  KART_PLAYBACK_OL_CORR_MAX;
             if(corr < -KART_PLAYBACK_OL_CORR_MAX) corr = -KART_PLAYBACK_OL_CORR_MAX;
             delta += corr;
@@ -816,8 +860,8 @@ static void kart_playback_poll_openloop(void)
     if(delta < KART_STEER_DELTA_LIMIT_R) delta = KART_STEER_DELTA_LIMIT_R;
     kart_steer_set_target_delta(delta);
 
-    /* 固定负速倒车(菜单 S4 OLSpd 可调,不改这里的宏)。 */
-    kart_control_set_target(kart_params_get(KART_PARAM_S4_OL_SPD));
+    /* 固定负速倒车(菜单 S3 OLSpd 可调,不改这里的宏)。 */
+    kart_control_set_target(kart_params_get(KART_PARAM_S3_OL_SPD));
 
     /* 诊断快照:开环无投影坐标,借 cur/aim 四通道。
      * 关纠偏:CH20=倒退里程 d、CH21=剩余弧长 s、CH22=索引 k、CH23=最终打角;

@@ -2,6 +2,8 @@
 #include "kart_imu.h"
 #include "kart_odom.h"
 #include "kart_record.h"
+#include "kart_vision.h"
+#include "kart_preprocess.h"
 #include "zf_device_dot_matrix_screen.h"
 
 typedef enum
@@ -38,6 +40,38 @@ typedef struct
 #pragma section all "cpu0_dsram"
 #endif
 static kart_mc_shared_t kart_mc_shared;
+
+#if KART_MC_VISION_ENABLE
+/*==================== core3 异步视觉的共享块 ====================
+ * 全放 cpu0_dsram:它走 SRI 总线,不是 LMU 别名,两个核看到的是同一份。
+ *
+ * 【为什么要自己拷一份图】DMA 会持续往 scc8660_image 里写。如果直接把那个
+ * 指针交给 core3,core3 算 360ms 期间 DMA 会改了它读的行,算出来的团块是
+ * 跨了好几帧的碎片 —— 比丢帧更坏,因为它会给出一个看着合法的错结果。
+ * 所以 CPU0 在投递时把 38400 字节整帧拷进 vis_img,然后立刻 frame_release()
+ * 把缓冲还给 DMA。拷贝约 38400/4 次 4 字节写,几十微秒量级,可以进控制窗口。
+ *
+ * 【同步协议】单生产者(CPU0)单消费者(core3),只用两个序号,不用锁:
+ *   CPU0: busy==0 时填 vis_img → __dsync() → req++ → busy=1
+ *   core3: req!=ack 时算 → 写 result → __dsync() → ack=req → busy=0
+ * CPU0 只在 busy==0 时写 vis_img,core3 只在 req!=ack 时读它,两者不重叠。 */
+typedef struct
+{
+    volatile uint32 req;              /* CPU0 投递计数 */
+    volatile uint32 ack;              /* core3 完成计数 */
+    volatile uint8  busy;             /* 1 = core3 持有 vis_img,CPU0 不得写 */
+    volatile int16  w;
+    volatile int16  h;
+    volatile uint32 frames;           /* 算完的帧数 */
+    volatile uint32 last_us;          /* 上一帧耗时 */
+    volatile uint32 max_us;           /* 历史最大耗时 */
+    volatile uint32 reject;           /* 投递被拒次数(core3 忙) */
+    kart_vision_result_t result;      /* core3 写,CPU0 读 */
+    uint16 vis_img[KART_PREPROCESS_HEIGHT][KART_PREPROCESS_WIDTH];
+}kart_mc_vision_t;
+
+static kart_mc_vision_t kart_mc_vis;
+#endif
 #if defined(__TASKING__)
 #pragma section all restore
 #endif
@@ -189,6 +223,77 @@ void kart_multicore_dot_scan(void)
     }
 }
 
+#if KART_MC_VISION_ENABLE
+/*==================== core3 异步视觉:CPU0 侧 ====================*/
+
+uint8 kart_multicore_vision_submit(const uint16 *img, int16 w, int16 h)
+{
+    int32 n;
+    int32 i;
+    uint16 *dst;
+
+    if((img == NULL) || (w <= 0) || (h <= 0)
+       || (w > KART_PREPROCESS_WIDTH) || (h > KART_PREPROCESS_HEIGHT))
+    {
+        return 0;
+    }
+
+    /* core3 还在算上一帧:直接拒,不等。丢这一帧远好过卡住控制环。 */
+    if(kart_mc_vis.busy)
+    {
+        kart_mc_vis.reject++;
+        return 0;
+    }
+
+    n   = (int32)w * (int32)h;
+    dst = &kart_mc_vis.vis_img[0][0];
+    for(i = 0; i < n; i++)
+    {
+        dst[i] = img[i];
+    }
+
+    kart_mc_vis.w = w;
+    kart_mc_vis.h = h;
+    __dsync();
+    kart_mc_vis.req++;
+    kart_mc_vis.busy = 1;
+    __dsync();
+    return 1;
+}
+
+uint8 kart_multicore_vision_ready(void)
+{
+    return (uint8)((kart_mc_vis.busy == 0) && (kart_mc_vis.ack == kart_mc_vis.req)
+                   && (kart_mc_vis.frames > 0u));
+}
+
+const kart_vision_result_t *kart_multicore_vision_get(void)
+{
+    __dsync();
+    return (const kart_vision_result_t *)&kart_mc_vis.result;
+}
+
+uint32 kart_multicore_vision_frames(void)  { return kart_mc_vis.frames;  }
+uint32 kart_multicore_vision_last_us(void) { return kart_mc_vis.last_us; }
+uint32 kart_multicore_vision_max_us(void)  { return kart_mc_vis.max_us;  }
+uint32 kart_multicore_vision_reject(void)  { return kart_mc_vis.reject;  }
+#else
+uint8 kart_multicore_vision_submit(const uint16 *img, int16 w, int16 h)
+{
+    (void)img; (void)w; (void)h;
+    return 0;
+}
+uint8 kart_multicore_vision_ready(void) { return 0; }
+const kart_vision_result_t *kart_multicore_vision_get(void)
+{
+    return kart_vision_get();
+}
+uint32 kart_multicore_vision_frames(void)  { return 0; }
+uint32 kart_multicore_vision_last_us(void) { return 0; }
+uint32 kart_multicore_vision_max_us(void)  { return 0; }
+uint32 kart_multicore_vision_reject(void)  { return 0; }
+#endif
+
 static uint8 kart_mc_take_request(kart_mc_channel_t *channel, uint32 *request, kart_mc_command_t *command)
 {
     uint32 current = channel->request_seq;
@@ -258,6 +363,39 @@ uint8 kart_multicore_core3_service(void)
 {
     uint32 request;
     kart_mc_command_t command;
+
+#if KART_MC_VISION_ENABLE
+    /* 视觉优先,而且不看 runtime_enabled —— 这条通道跟 COMPAT 无关。
+     * 整条流水线(预处理 + 识别)都在 core3 上跑,CPU0 一个周期都不出。 */
+    if(kart_mc_vis.req != kart_mc_vis.ack)
+    {
+        uint32 t0 = system_getval();
+        uint32 us;
+        const uint16 *pp;
+        int16 w = kart_mc_vis.w;
+        int16 h = kart_mc_vis.h;
+        const kart_vision_result_t *r;
+
+        pp = kart_preprocess_frame((const uint16 *)&kart_mc_vis.vis_img[0][0], w, h);
+        r  = kart_vision_process(pp, w, h);
+
+        kart_mc_vis.result = *r;
+
+        us = (system_getval() - t0) / 100u;
+        kart_mc_vis.last_us = us;
+        if((us < 1000000u) && (us > kart_mc_vis.max_us))
+        {
+            kart_mc_vis.max_us = us;
+        }
+        kart_mc_vis.frames++;
+
+        __dsync();
+        kart_mc_vis.ack  = kart_mc_vis.req;
+        kart_mc_vis.busy = 0;
+        __dsync();
+        return 1;
+    }
+#endif
 
     if(!kart_mc_take_request(&kart_mc_shared.core3, &request, &command))
     {

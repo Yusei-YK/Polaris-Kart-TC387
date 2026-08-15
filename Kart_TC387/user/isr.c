@@ -43,8 +43,12 @@
 #include "kart_multicore.h"
 #include "kart_remote.h"
 #include "kart_debug_uart.h"
+#include "kart_person_link.h"
 #include "zf_device_tld7002.h"
 #include "zf_device_dot_matrix_screen.h"
+/* 2026-08-10 已删除 #include "kart_camera.h": UART1 不再需要动态分派，
+ * uart1_rx_isr 直接调 tld7002_callback() 即可。摄像头 UART 配置在 init 期完成，
+ * 之后 UART1 静态归灯板，见 kart_camera.h 文件头说明。 */
 
 /* 5ms PIT 节拍计数器:主循环协作式调度的时基,每个 5ms 中断 +1。 */
 volatile uint32 g_kart_tick_5ms = 0;
@@ -242,10 +246,18 @@ IFX_INTERRUPT(uart1_rx_isr, UART1_INT_VECTAB_NUM, UART1_RX_INT_PRIO)
 {
     interrupt_global_enable(0);                     // 开启中断嵌套
 
-    /* 2026-07-24 TLD7002 飞线到 UART1(P11.12/P11.10),原摄像头回调 camera_uart_handler
-     * 暂停用(摄像头当前不用)。喂 TLD7002 回调:把芯片响应/半双工回环字节写入 fifo,
-     * 否则 init/setDuty 诊断永不完成,列输出停在高阻态。 */
+#if KART_DOT_MATRIX_MUTED
+    /* 2026-08-12 UART1 已改归 TC4D7 人体视觉链路（灯板拔了，4D7 插在那个坐子）。
+     * 必须二选一、不能两个都调：两边都从同一个 1 字节深的 RX FIFO 取字节，
+     * 谁先取走另一方就永远收不到；而且 tld7002_callback() 用的是阻塞式
+     * uart_read_byte()，没字节时会在中断里死自旋。 */
+    kart_person_link_rx_callback();
+#else
+    /* 2026-07-24 TLD7002 飞线到 UART1(P11.12/P11.10)。喂 TLD7002 回调:把芯片响应/
+     * 半双工回环字节写入 fifo,否则 init/setDuty 诊断永不完成,列输出停在高阻态。
+     */
     tld7002_callback();
+#endif
 }
 
 // ����2Ĭ�����ӵ�����ת����ģ��
@@ -372,6 +384,14 @@ IFX_INTERRUPT(uart10_tx_isr, UART10_INT_VECTAB_NUM, UART10_TX_INT_PRIO)
 IFX_INTERRUPT(uart10_rx_isr, UART10_INT_VECTAB_NUM, UART10_RX_INT_PRIO)
 {
     interrupt_global_enable(0);                     // �����ж�Ƕ��
+
+    /* 语音模块不在这里：kart_voice_poll() 用 uart_query_byte() 直读硬件 RX FIFO，
+     * 它的帧很稀疏（人说一句才来一帧），轮询足够。
+     * 人体视觉链路不同：115200 下背靠背连发，25 字节一帧只需 ~2.2ms，
+     * 放到 10ms 任务里轮询必丢字节，所以这里必须用中断。 */
+#if (KART_PERSON_LINK_ENABLE && (KART_PERSON_LINK_PORT == KART_PERSON_LINK_PORT_VOFA))
+    kart_person_link_rx_callback();
+#endif
 
 
 

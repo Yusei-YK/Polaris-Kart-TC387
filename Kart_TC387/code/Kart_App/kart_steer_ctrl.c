@@ -104,14 +104,14 @@ void kart_steer_set_angle_enable(uint8 en)
 
 void kart_steer_set_head_enable(uint8 en)
 {
-    if(en)
+    if(en && !kart_steer.head_enable)
     {
         kart_steer.angle_enable = 1;     // 开外环必须先有内环托底
-        kart_steer.target_yaw = kart_imu_get_yaw();  // he1 上升沿:记住当前航向作目标
+        kart_steer.target_yaw = kart_imu_get_yaw();  // 0→1 时用当前航向初始化目标
         kart_steer.head_enable  = 1;
         kart_pid_reset(&kart_steer.head_pid);
     }
-    else
+    else if(!en)
     {
         kart_steer.head_enable = 0;
         kart_pid_reset(&kart_steer.head_pid);

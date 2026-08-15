@@ -40,12 +40,17 @@ uint8  kart_record_is_running(void);
 uint16 kart_record_get_count(void);
 const  kart_waypoint_t* kart_record_get_waypoints(void);
 
+/* 停车后的板上路径修正：把 center 前后 radius 个点平滑平移。
+ * 中心移动 dx/dy 米，越靠近范围边缘移动越小；点 0 固定为录制原点。
+ * 返回 1=已修改，0=参数无效/正在录制。 */
+uint8  kart_record_adjust_segment(uint16 center, uint16 radius, float dx, float dy);
+
 /* 取本次录制起点航向(度,世界系):录制坐标系相对里程计世界系的旋转量。
  * 科目三反向复现用它把世界 odom 投影回录制坐标系,与倒序数组同系。 */
 float  kart_record_get_origin_yaw(void);
 
 /* 取本次录制起点的世界坐标(米)。与 origin_yaw 合起来才是完整的坐标系变换:
- * 录制坐标 = R(-origin_yaw) * (世界坐标 - 录制原点)。科目四位置闭环倒车用它
+ * 录制坐标 = R(-origin_yaw) * (世界坐标 - 录制原点)。科目三位置闭环倒车用它
  * 把当前 odom 位置换算到与 wp[].x/y 同系,才能算横向偏差。 */
 float  kart_record_get_origin_x(void);
 float  kart_record_get_origin_y(void);

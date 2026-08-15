@@ -415,14 +415,34 @@ void IMU_check(void){
  * 顺序:复位姿态 → 初始化 660RA(内部按 zf_device_imu660ra.h 里的宏配 SPI_0/引脚)
  *       → 标定零偏 → 放行 update。
  * 注:先算好二阶巴特沃斯系数,再初始化传感器。 */
-void kart_imu_init(void){
+uint8 kart_imu_init(void){
+    uint8 retry;
+
     reset_attitude();
+    IMU_Handle.FLAG_enable_running_CALLBACK = 0;
     /* 二阶巴特沃斯系数按 200Hz 采样初始化(陀螺 7.5Hz、加速度 35Hz) */
     kart_butter_set_cutoff(sampleFreq, KART_IMU_GYRO_CUTOFF_HZ, &g_gyro_butter);
     kart_butter_set_cutoff(sampleFreq, KART_IMU_ACC_CUTOFF_HZ,  &g_acc_butter);
-    imu660ra_init();
+    for(retry = 0; retry < 3U; retry++)
+    {
+        if(0U == imu660ra_init())
+        {
+            break;
+        }
+        system_delay_ms(20);
+    }
+    if(retry >= 3U)
+    {
+        return 0;
+    }
     IMU_check();                 // 上电静止标定(车必须放稳)
     IMU_Handle.FLAG_enable_running_CALLBACK=1;
+    return 1;
+}
+
+uint8 kart_imu_is_ready(void)
+{
+    return IMU_Handle.FLAG_enable_running_CALLBACK ? 1U : 0U;
 }
 
 /* =========================== 周期更新(放 5ms 中断)=========================== */

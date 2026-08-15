@@ -169,7 +169,12 @@ static void voice_feed_byte(uint8 byte)
  * 故 isr.c 的 uart10_rx_isr 保持为空即可,也不会和日志 TX 抢中断。 */
 void kart_voice_init(void)
 {
-#if !BOARD_VOICE_SHARES_AUX_UART
+    /* 2026-08-12 KART_VOICE_MUTED：4D7 人体视觉链路选了 VOFA 口(UART_10)，
+     * 而语音模块插的是同一个坐子 —— 硬件上已经不在了。
+     * 这里必须不碰 uart_init：它末尾是 uart_rx_interrupt(n, 0)，
+     * 而本函数在 cpu0_main 里比 kart_person_link_init() 晚，
+     * 一跑就把链路刚开的 RX 中断又关了 → 一个字节也收不到。 */
+#if (!BOARD_VOICE_SHARES_AUX_UART && !KART_VOICE_MUTED)
     /* 独占外设:启动时就配好 115200,一直挂着。 */
     uart_init(BOARD_VOICE_UART_INDEX, BOARD_VOICE_UART_BAUD,
               BOARD_VOICE_UART_TX_PIN, BOARD_VOICE_UART_RX_PIN);
@@ -186,7 +191,7 @@ void kart_voice_init(void)
  * 会以 115200 喷向语音模块 RX。不共用时本函数只做状态复位。 */
 void kart_voice_uart_acquire(void)
 {
-#if BOARD_VOICE_SHARES_AUX_UART
+#if (BOARD_VOICE_SHARES_AUX_UART && !KART_VOICE_MUTED)
     uart_init(BOARD_VOICE_UART_INDEX, BOARD_VOICE_UART_BAUD,
               BOARD_VOICE_UART_TX_PIN, BOARD_VOICE_UART_RX_PIN);
 #endif
@@ -198,7 +203,7 @@ void kart_voice_uart_acquire(void)
  * 不共用时是空操作,语音口继续以 115200 挂着无妨。 */
 void kart_voice_uart_release(void)
 {
-#if BOARD_VOICE_SHARES_AUX_UART
+#if (BOARD_VOICE_SHARES_AUX_UART && !KART_VOICE_MUTED)
     uart_init(BOARD_AUX_UART_INDEX, BOARD_AUX_UART_BAUD_FAST,
               BOARD_AUX_UART_TX_PIN, BOARD_AUX_UART_RX_PIN);
 #endif
@@ -209,6 +214,15 @@ void kart_voice_uart_release(void)
 void kart_voice_poll(void)
 {
     uint8 byte;
+
+#if KART_VOICE_MUTED
+    /* UART_10 已归 4D7 视觉链路：uart_query_byte() 会与链路的 RX 中断
+     * 抢同一个 1 字节 FIFO，谁先取走另一方就永远收不到。
+     * 在入口拦而不在 kart_mission 的三个调用处拦：入口拦一次不可能漏。
+     * 命令队列不动，kart_voice_get_cmd() 自然一直返回 0。 */
+    (void)byte;
+    return;
+#endif
 
     while(uart_query_byte(BOARD_VOICE_UART_INDEX, &byte))
     {
@@ -255,7 +269,7 @@ uint32 kart_voice_get_byte_count(void)
     return voice_byte_count;
 }
 
-/* =========================== 临时命令分发 =========================== */
+/* =========================== 通用命令分发 =========================== */
 void kart_voice_dispatch(void)
 {
     kart_voice_cmd_t cmd;

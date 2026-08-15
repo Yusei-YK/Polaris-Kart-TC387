@@ -21,7 +21,7 @@
 * 许可证副本在 libraries 文件夹下 即该文件夹下的 LICENSE 文件
 * 欢迎各位使用并传播本程序 但修改内容时必须保留逐飞科技的版权声明（即本声明）
 *
-* 文件名称          cpu2_main
+* 文件名称          cpu3_main
 * 公司名称          成都逐飞科技有限公司
 * 版本信息          查看 libraries/doc 文件夹内 version 文件 版本说明
 * 开发环境          ADS v1.10.2
@@ -38,7 +38,7 @@
 #if defined(__TASKING__)
 #pragma section all "cpu3_dsram"
 #endif
-// 将本语句与#pragma section all restore语句之间的全局变量都放在CPU1的RAM中
+// 将本语句与#pragma section all restore语句之间的全局变量都放在CPU3的RAM中
 
 
 // 工程导入到软件之后，应该选中工程然后点击refresh刷新一下之后再编译

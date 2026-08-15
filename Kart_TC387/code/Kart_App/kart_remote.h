@@ -2,6 +2,7 @@
 #define KART_REMOTE_H_
 
 #include "zf_common_headfile.h"
+#include "kart_calib.h"     /* 通道端点标定、KART_REMOTE_STEER_SIGN */
 #include "board_pins.h"
 
 /*
@@ -47,19 +48,8 @@
  * SBUS 正常约 14ms/帧,阈值取 100ms(约 7 帧余量),既不误报又能快速兜底。 */
 #define KART_REMOTE_LOST_TIMEOUT_MS (100)
 
-/* -------------------- 通道标定(2026-07-20 实测,枪式遥控器) -------------------- */
-/* 方向 CH1:中位 968,摇杆左满 1768,右满 168。 */
-#define KART_REMOTE_STEER_CENTER    (968)
-#define KART_REMOTE_STEER_LEFT      (1768)   /* 摇杆左满 */
-#define KART_REMOTE_STEER_RIGHT     (168)    /* 摇杆右满 */
-/* 油门 CH2(扳机式):中位 880 停车,扳到底 579=前进满,前推 1180=倒车满。 */
-#define KART_REMOTE_THR_CENTER      (880)    /* 停车 */
-#define KART_REMOTE_THR_FWD         (579)    /* 扳到底=前进满 */
-#define KART_REMOTE_THR_REV         (1180)   /* 前推=倒车满 */
-/* 三段开关 CH4:低 192 / 中 992 / 高 1792。 */
-#define KART_REMOTE_SW3_LOW         (192)
-#define KART_REMOTE_SW3_MID         (992)
-#define KART_REMOTE_SW3_HIGH        (1792)
+/* 通道端点标定(方向/油门/三段开关的中位与满行程)→ kart_calib.h 第七节。
+ * 换遥控器或重做遥控器行程校准后只改那里。 */
 
 /* -------------------- 接管参数(已与用户确认) -------------------- */
 #define KART_REMOTE_DEADZONE        (60)     /* 方向/油门中位死区,防抖动漂移(07-20 实车加大) */
@@ -72,7 +62,8 @@
  * 复现速度由路径几何算,与录制速度无关。录制反而应该录慢些:路径更准、不打滑。
  * 本值现在只决定【录制/遥控手感】,不再决定复现快慢,两者不需要同步。 */
 #define KART_REMOTE_MAX_SPEED       (50.0f)
-#define KART_REMOTE_STEER_SIGN      (-1)     /* 2026-07-29 摇杆左右反,翻号(最终仍硬钳软限位) */
+
+/* 摇杆左右方向 KART_REMOTE_STEER_SIGN → kart_calib.h 第六节(控制环反馈符号) */
 
 /* 三段开关挡位语义(接管总闸):
  *   LOW  = 全关急停(速度=0关使能;转向内环回中 target_delta=0)

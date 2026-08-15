@@ -2,6 +2,7 @@
 #define KART_MOTION_H_
 
 #include "zf_common_headfile.h"
+#include "kart_calib.h"     /* 转向中位偏置、倒车纠偏符号、软限位、满舵半径 */
 
 /*
  * 科目二语音运动控制 —— 执行层状态机
@@ -100,7 +101,9 @@
  * 【符号约定】下发值 = 期望转角 + OFS。往负方向调=让车更偏左,反之偏右。 */
 /* 2026-07-30 重标后仍为 0:新中值 164 也是硬限位几何中点,左右软限对称(±1064),
  * 不需要补偏置。若实测转圈左右半径差 >5cm 再重新标。 */
-#define KART_MOTION_DELTA_CENTER_OFS (0.0f)
+/* 统一取 kart_calib.h 第四节的 KART_STEER_CENTER_OFS(当前 0.0f,值未变)。
+ * 重标中位后只改那一处,这里自动跟随。 */
+#define KART_MOTION_DELTA_CENTER_OFS (KART_STEER_CENTER_OFS)
 
 /* -------------------- 保向修正(前进/后退共用) --------------------
  * 本模块所有"要走直"的段(MOTION_FWD / MOTION_BACK / 蛇形收尾)都用这一套
@@ -131,7 +134,8 @@
  *   初始偏 3°:head_pid 0.175m;本地 KP=15 → 0.080m、KP=25 → 0.048m。
  *   蛇形收尾把 20° 拉回 2° 以内:KP=15 走满 3m 不收敛;KP=25 → 2.55m 收敛。
  *   取 25:再往上收敛更快但余量变小(怕实车增益比模型大而振)。 */
-#define KART_MOTION_REV_YAW_SIGN    (-1.0f)
+/* 与科目一/四倒车共用 kart_calib.h 第六节的 KART_REV_HEAD_SIGN(当前 -1.0f,值未变) */
+#define KART_MOTION_REV_YAW_SIGN    (KART_REV_HEAD_SIGN)
 #define KART_MOTION_YAW_KP          (25.0f)
 #define KART_MOTION_YAW_LIMIT       (300.0f)
 

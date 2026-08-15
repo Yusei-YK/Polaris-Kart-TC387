@@ -182,7 +182,6 @@ void kart_horn_isr(void)
             }
         }
     }
-
     horn_gpio_tick();
 }
 

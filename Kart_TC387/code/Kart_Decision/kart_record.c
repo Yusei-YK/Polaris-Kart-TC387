@@ -80,6 +80,56 @@ void kart_record_start(void)
 
 void kart_record_stop(void)
 {
+    kart_odom_snapshot_t odom;
+    float dx, dy, cx, cy, cyaw;
+    float origin_rad, origin_sin, origin_cos;
+    uint16 i;
+
+    if(!record_running)
+    {
+        return;
+    }
+
+    /* 按 START 收尾时强制记住当前终点。尤其要把停车后的最终回正打角
+     * 写进 steer_buf；常规 poll 按里程/航向阈值采样，车不动时不会自动记这一次。 */
+    kart_odom_get_snapshot(&odom);
+    dx = odom.x - origin_x;
+    dy = odom.y - origin_y;
+    origin_rad = origin_yaw * 0.01745329252f;
+    origin_sin = sinf(origin_rad);
+    origin_cos = cosf(origin_rad);
+    cx   =  origin_cos * dx + origin_sin * dy;
+    cy   = -origin_sin * dx + origin_cos * dy;
+    cyaw = kart_record_yaw_diff(odom.yaw, origin_yaw);
+
+    /* 与末点几乎重合就覆盖末点；否则追加一点。缓冲已满时也覆盖最后一点，
+     * 保证真实终点优先于倒数第二个采样点。 */
+    i = (record_count > 0U) ? (uint16)(record_count - 1U) : 0U;
+    if(record_count > 0U)
+    {
+        float ex = cx - record_buf[i].x;
+        float ey = cy - record_buf[i].y;
+        float eyaw = fabsf(kart_record_yaw_diff(cyaw, record_buf[i].yaw));
+        if((ex * ex + ey * ey) >= 0.000001f || eyaw >= 0.01f)
+        {
+            if(record_count < KART_RECORD_MAX_WAYPOINTS)
+            {
+                i = record_count++;
+            }
+        }
+    }
+
+    record_buf[i].x       = cx;
+    record_buf[i].y       = cy;
+    record_buf[i].yaw     = cyaw;
+    record_buf[i].v_left  = kart_control_get_left_meas();
+    record_buf[i].v_right = kart_control_get_right_meas();
+    steer_buf[i]          = kart_steer_abs_get_center_delta();
+    dist_buf[i]           = odom.dist_sum - origin_dist;
+
+    last_x = cx;
+    last_y = cy;
+    last_yaw = cyaw;
     record_running = 0;
 }
 
@@ -128,7 +178,7 @@ void kart_record_poll(void)
     wp->yaw     = cyaw;
     wp->v_left  = kart_control_get_left_meas();
     wp->v_right = kart_control_get_right_meas();
-    /* 科目四开环回放:同帧记打角 + 相对起点累计里程(与该点坐标严格对齐)。 */
+    /* 科目三开环回放:同帧记打角 + 相对起点累计里程(与该点坐标严格对齐)。 */
     steer_buf[record_count] = kart_steer_abs_get_center_delta();
     dist_buf[record_count]  = odom.dist_sum - origin_dist;
     record_count++;
@@ -141,13 +191,45 @@ void kart_record_poll(void)
 uint8  kart_record_is_running(void)          { return record_running; }
 uint16 kart_record_get_count(void)           { return record_count; }
 const  kart_waypoint_t* kart_record_get_waypoints(void) { return record_buf; }
+
+uint8 kart_record_adjust_segment(uint16 center, uint16 radius, float dx, float dy)
+{
+    uint16 first, last, i;
+    uint8 changed = 0;
+
+    if(record_running || record_count < 2U || center >= record_count || radius == 0U)
+        return 0;
+
+    first = (center > radius) ? (uint16)(center - radius) : 0U;
+    last  = ((uint32)center + radius < record_count)
+          ? (uint16)(center + radius) : (uint16)(record_count - 1U);
+
+    for(i = first; i <= last; i++)
+    {
+        uint16 d;
+        float weight;
+
+        if(i == 0U) continue;                 /* 录制坐标原点必须保持 (0,0) */
+        /* 倒车段实际按 steer/dist/yaw 开环回放，不按 x/y 追踪。改它的坐标只会
+         * 让屏幕看起来变了、车辆动作却不变，因此红色倒车点明确锁住。 */
+        if(0.5f * (record_buf[i].v_left + record_buf[i].v_right) < -0.02f)
+            continue;
+        d = (i > center) ? (uint16)(i - center) : (uint16)(center - i);
+        weight = (float)(radius + 1U - d) / (float)(radius + 1U);
+        record_buf[i].x += dx * weight;
+        record_buf[i].y += dy * weight;
+        changed = 1;
+    }
+    return changed;
+}
+
 float  kart_record_get_origin_yaw(void)      { return origin_yaw; }
-/* 录制起点的世界坐标。科目四位置闭环倒车要把当前 odom 位置投影回录制坐标系,
+/* 录制起点的世界坐标。科目三位置闭环倒车要把当前 odom 位置投影回录制坐标系,
  * 光有 origin_yaw 不够(那只给旋转),还要这两个做平移基准。 */
 float  kart_record_get_origin_x(void)        { return origin_x; }
 float  kart_record_get_origin_y(void)        { return origin_y; }
 
-/* 科目四开环回放取数据(与 record_buf 同索引):打角数组 / 累计里程数组 / 总里程。 */
+/* 科目三开环回放取数据(与 record_buf 同索引):打角数组 / 累计里程数组 / 总里程。 */
 const int16* kart_record_get_steer(void)     { return steer_buf; }
 const float* kart_record_get_dist(void)      { return dist_buf; }
 float  kart_record_get_total_dist(void)
