@@ -1,6 +1,5 @@
 #ifndef KART_MOTION_H_
 #define KART_MOTION_H_
-
 #include "zf_common_headfile.h"
 #include "kart_calib.h"     /* 转向中位偏置、倒车纠偏符号、软限位、满舵半径 */
 
@@ -12,7 +11,7 @@
  * 不用 x/y 位置积分(用户要求:惯导已标定,直接用路程+航向,不做二维定位)。
  *
  * 实际 PWM 仍由主循环的 kart_steer_ctrl_update()/速度环产生,本模块只设
- * 目标转角/航向/速度和使能(与 playback/remote 同架构,5ms 延迟无感)。
+ * 目标转角/航向/速度和使能(与 kart_playback/kart_remote 同架构,5ms 延迟无感)。
  *
  * 转圈/转弯完成判据用【累计 yaw】(每拍 wrap180 增量累加),不受 ±180 回绕影响;
  * 直行/蛇形用【路程】判完成;蛇形的左右【翻转】判据用航向(见 SNAKE_YAW)。
@@ -20,11 +19,11 @@
  * ------------------------------------------------------------------
  * 【本模块自己算保向,不用共享航向环 head_pid】
  * 所有"要走直"的段(前进/后退/approach/蛇形收尾)都走 motion_yaw_corr_delta(),
- * 打角一律经 motion_set_delta() 下发以补中位偏置。理由见 KART_MOTION_YAW_KP:
+ * 打角一律经 motion_set_delta() 下发以补中位偏置。理由见 MOTION_YAW_KP:
  * head_pid 绕开偏置、纯 P 有常驻误差、且这点误差落在转向内环的静摩擦死区里
  * => 实车表现就是"前行十米修的很少,后边走斜了"。head_pid 留给科目一/四/遥控。
  *
- * 【动作正常做完会先原地回正方向盘再停】见 KART_MOTION_CENTER_TOL。
+ * 【动作正常做完会先原地回正方向盘再停】见 MOTION_CENTER_TOL。
  * 急停/切模式走 kart_motion_stop() 硬停,不回正(人要立刻接管)。
  *
  * ------------------------------------------------------------------
@@ -64,11 +63,11 @@
  *   拟合 v ≈ 0.00046*duty - 0.10 (m/s)。
  *   2026-07-28 起分两档:要穿门洞的(FWD/BACK/SNAKE)留 0.6~0.8 m/s 保精度,
  *   不穿门洞的(CIRCLE/TURN)提到 1.28 m/s 抢时间。 */
-#define KART_MOTION_OPENLOOP_REAR   (1)
+#define MOTION_OPENLOOP_REAR   (1)
 
-#define KART_MOTION_DUTY_FWD        (2200)      /* 直行前进 duty(正=前进) */
-#define KART_MOTION_DUTY_BACK       (-2000)     /* 直行后退 duty(负=后退),比前进略小更可控 */
-#define KART_MOTION_DUTY_SNAKE      (2000)      /* 蛇形 duty 幅值(取正,后退段代码里取负) */
+#define MOTION_DUTY_FWD        (2200)      /* 直行前进 duty(正=前进) */
+#define MOTION_DUTY_BACK       (-2000)     /* 直行后退 duty(负=后退),比前进略小更可控 */
+#define MOTION_DUTY_SNAKE      (2000)      /* 蛇形 duty 幅值(取正,后退段代码里取负) */
 /* 2026-07-28 赛前提速:转圈/左右转 2000 → 3250(0.66 → 1.28 m/s,按上面实测表)。
  * 【为什么这两个可以放心提速,而 FWD/BACK/SNAKE 不动】
  *   完成判据是累计 yaw(转圈/掉头)与路程(直行),不是时间 —— 上面注释已论证
@@ -80,10 +79,10 @@
  * 【时间收益】2 圈 + 2 次掉头,速度 ×1.94,约省 21s,是全车第二大确定性提速。
  * 3250 不再往上:实测表 3500→1.40 已接近饱和,收益 9% 却更靠近堵转区;
  * 且打死转向时阻力大,留点电流余量。 */
-#define KART_MOTION_DUTY_CIRCLE     (3250)      /* 转圈 duty(打死大转角阻力大,别给太小否则转不动) */
-#define KART_MOTION_DUTY_TURN       (3250)      /* 左右转(approach + rotate 同用) */
+#define MOTION_DUTY_CIRCLE     (3250)      /* 转圈 duty(打死大转角阻力大,别给太小否则转不动) */
+#define MOTION_DUTY_TURN       (3250)      /* 左右转(approach + rotate 同用) */
 
-/* 统一速度(脉冲/5ms)。仅当 KART_MOTION_OPENLOOP_REAR=0(速度环闭环模式)时生效,
+/* 统一速度(脉冲/5ms)。仅当 MOTION_OPENLOOP_REAR=0(速度环闭环模式)时生效,
  * 出厂 OPENLOOP_REAR=1 → 本值当前【不参与控制】,只是回退对比时的初值。
  * 2026-07-28: 7 → 15,与开环 3250 duty(1.28 m/s ≈ 17 脉冲/5ms)大致对齐,
  * 免得一键切回闭环时速度突然掉到原来的 1/2,对比失去意义。 */
@@ -103,7 +102,7 @@
  * 不需要补偏置。若实测转圈左右半径差 >5cm 再重新标。 */
 /* 统一取 kart_calib.h 第四节的 KART_STEER_CENTER_OFS(当前 0.0f,值未变)。
  * 重标中位后只改那一处,这里自动跟随。 */
-#define KART_MOTION_DELTA_CENTER_OFS (KART_STEER_CENTER_OFS)
+#define MOTION_DELTA_CENTER_OFS (KART_STEER_CENTER_OFS)
 
 /* -------------------- 保向修正(前进/后退共用) --------------------
  * 本模块所有"要走直"的段(MOTION_FWD / MOTION_BACK / 蛇形收尾)都用这一套
@@ -124,7 +123,7 @@
  * 【符号】修正量 delta = SIGN * KP * (yaw0 - yaw),前进 SIGN=+1、后退 SIGN=-1:
  *   前进 Δyaw = +k*delta*Δs;后退 Δs 反向 => 同一打角航向变化整体反号,
  *   直接套前进那套 = 正反馈发散。
- * 【实车若发现越倒越歪(而不是被拉回)】只翻 KART_MOTION_REV_YAW_SIGN 一个字,
+ * 【实车若发现越倒越歪(而不是被拉回)】只翻 MOTION_REV_YAW_SIGN 一个字,
  *   这是符号搞错时的唯一现象,别去动 KP。
  * LIMIT:修正封在小角度内,一是别让修正抢过"直线"语义,二是符号万一反了
  *   也不会瞬间怼到软限位(+1103/-1048)。
@@ -135,15 +134,15 @@
  *   蛇形收尾把 20° 拉回 2° 以内:KP=15 走满 3m 不收敛;KP=25 → 2.55m 收敛。
  *   取 25:再往上收敛更快但余量变小(怕实车增益比模型大而振)。 */
 /* 与科目一/四倒车共用 kart_calib.h 第六节的 KART_REV_HEAD_SIGN(当前 -1.0f,值未变) */
-#define KART_MOTION_REV_YAW_SIGN    (KART_REV_HEAD_SIGN)
-#define KART_MOTION_YAW_KP          (25.0f)
-#define KART_MOTION_YAW_LIMIT       (300.0f)
+#define MOTION_REV_YAW_SIGN    (KART_REV_HEAD_SIGN)
+#define MOTION_YAW_KP          (25.0f)
+#define MOTION_YAW_LIMIT       (300.0f)
 
 /* 直线路程阈值(米):语音命令词是"前行十米/后退十米",对齐到 10m。
  * (原 3.0f 是小测值,已按语音命令语义放大到规定值。)
  * 【裁判不量尺】用户确认比赛不测实际距离,重要的是【走直】。所以这两个值
  * 可按场地自由缩短(改小更安全,别撞墙),精度不是指标 —— 别为了凑 10.00m
- * 去动 KART_LEFT/RIGHT_ENC_PULSE_TO_M(那是科目一录制/复刻共用的尺度)。 */
+ * 去动 KART_LEFT/KART_RIGHT_ENC_PULSE_TO_M(那是科目一录制/复刻共用的尺度)。 */
 #define KART_MOTION_FWD_DIST        (10.0f)
 #define KART_MOTION_BACK_DIST       (10.0f)
 
@@ -176,16 +175,16 @@
  * 完成后必须摆正:摆数不整 => 终点航向有残留(仿真 -4.9°),
  *   所以到路程后不直接停,进 SNAKE_END 段把航向拉回起始值。 */
 #define KART_MOTION_SNAKE_DIST      (10.0f)
-#define KART_MOTION_SNAKE_YAW       (15.0f)     /* 每摆的航向幅度(度,相对本摆起点) */
-#define KART_MOTION_SNAKE_MAX_HALF  (3.0f)      /* 单摆保底路程(米):摆不到角度也翻 */
+#define MOTION_SNAKE_YAW       (15.0f)     /* 每摆的航向幅度(度,相对本摆起点) */
+#define MOTION_SNAKE_MAX_HALF  (3.0f)      /* 单摆保底路程(米):摆不到角度也翻 */
 #define KART_MOTION_SNAKE_DELTA     (900.0f)   /* 2026-07-30 恢复(软限 1064) */
 
 /* 蛇形收尾摆正:航向误差进 TOL 就算正了;最多再走 MAX_DIST 就无条件停
  * (保底,防收尾段因符号/增益不对一直修不回来,变成没有终点的动作)。
  * MAX_DIST 取 4.0:仿真(带死区)KP=25 把 20° 拉回 2° 要 2.55m,
  *   给 3.0m 余量偏紧,踩保底就是斜着结束 —— 那这个段就白加了。 */
-#define KART_MOTION_SNAKE_END_TOL      (2.0f)
-#define KART_MOTION_SNAKE_END_MAX_DIST (4.0f)
+#define MOTION_SNAKE_END_TOL      (2.0f)
+#define MOTION_SNAKE_END_MAX_DIST (4.0f)
 
 /* -------------------- 动作结束回正方向盘 --------------------
  * 【2026-07-26 实车反馈】"左转右转顺时针逆时针转结束后,轮胎还是打死的状态,
@@ -210,8 +209,8 @@
  *   (subject2_loop ← kart_mission_poll ← kart_task_10ms)=> 2.0s;
  *   旧主循环退化成 5ms 拍 => 1.0s。最坏 1103 计数 / 1800 计数每秒 ≈ 0.62s,
  *   两条路径都留够余量,所以不用去关心当前挂在哪个拍上。 */
-#define KART_MOTION_CENTER_TOL      (60.0f)
-#define KART_MOTION_CENTER_TICKS    (200u)
+#define MOTION_CENTER_TOL      (60.0f)
+#define MOTION_CENTER_TICKS    (200u)
 
 /* 转圈:固定打角(计数),半径由打角大小决定(角越大半径越小)。
  * 完成判据 = 累计 yaw 达到一整圈 360°。
@@ -256,8 +255,8 @@
  *
  * 【与本模块其它动作的根本区别:GOTO 用 x/y】
  *   头注释说"不用 x/y 位置积分",那条对固定动作成立(判据是路程+累计yaw)。
- *   GOTO 不成立 —— "开到某个位置"本身就是位置任务,只能用 odom x/y。
- *   前提:科目二全程 odom 只在 mission_enter 清零一次(2026-07-29 起),
+ *   GOTO 不成立 —— "开到某个位置"本身就是位置任务,只能用 kart_odom x/y。
+ *   前提:科目二全程 kart_odom 只在 mission_enter 清零一次(2026-07-29 起),
  *   所以 (x,y) 是发车区坐标系里的绝对位置,与录制返程路径时同源。
  *
  * 【阿克曼车不能原地转 → 不能"先到点再转头"】
@@ -271,8 +270,8 @@
  *     ④ GOTO_AXIS  沿目标轴线做直线 Pure Pursuit(瞄轴线上前视点),
  *        横向偏差和航向偏差【同时】收敛 —— 这才是不毁位置的转头方式。
  *   走到 s>=0(沿轴线到达目标)即 motion_finish():停车 + 回正方向盘,
- *   再由 kart_mission 交接给 playback。停一下是有意的:交接瞬间车静止,
- *   playback_start 的起步逻辑(跳到第3点给初速)最干净。
+ *   再由 kart_mission 交接给 kart_playback。停一下是有意的:交接瞬间车静止,
+ *   kart_playback_start 的起步逻辑(跳到第3点给初速)最干净。
  *
  * 【不保证什么(必须知道)】全车只有 IMU + 编码器,没有任何能看见桩桶的
  *   传感器,所以本原语【不做避障】:它只保证把车开到目标位姿,不保证
@@ -283,16 +282,16 @@
 /* 摆位用 duty:刻意【不用】CIRCLE/TURN 的 3250。
  * 那两个提速的理由是"完成判据是累计yaw/路程,不看时间,没人依赖位置";
  * GOTO 恰恰相反 —— 位置就是它的交付物,1.28m/s 打死转的轮胎侧滑会直接
- * 记进 odom 误差预算。2200 = 0.91m/s(实测表 v≈0.00046*duty-0.10)。 */
-#define KART_MOTION_DUTY_GOTO       (2200)
-#define KART_MOTION_DUTY_GOTO_REV   (-2000)    /* 倒车段(与 DUTY_BACK 同值,已验证可控) */
+ * 记进 kart_odom 误差预算。2200 = 0.91m/s(实测表 v≈0.00046*duty-0.10)。 */
+#define MOTION_DUTY_GOTO       (2200)
+#define MOTION_DUTY_GOTO_REV   (-2000)    /* 倒车段(与 DUTY_BACK 同值,已验证可控) */
 
 /* 方位角 → 打角的比例增益(计数/度)与限幅。
  * KP 沿用 YAW_KP=25(同一套转向内环、同一个死区,已实车验证);
  * 限幅【不能】用 YAW_LIMIT=300 —— 那是"走直线"的小修正量,摆位要允许打死,
  * 故单独给 950(与 CIRCLE_DELTA 同,接近软限位 +1103/-1048 留余量)。 */
-#define KART_MOTION_GOTO_KP         (25.0f)
-#define KART_MOTION_GOTO_STEER_MAX  (950.0f)   /* 2026-07-30 恢复(软限 1064) */
+#define MOTION_GOTO_KP         (25.0f)
+#define MOTION_GOTO_STEER_MAX  (950.0f)   /* 2026-07-30 恢复(软限 1064) */
 
 /* 前置点:目标位姿沿 tyaw 【反】方向退这么多米。
  *
@@ -312,52 +311,52 @@
  * 横向→航向串级,同样 261/304),是几何硬限制。
  * 所以【方案A 不可作为唯一手段】,必须配人工兜底(kart_mission.h 的
  * kart_mission_subject2_start_return_here,遥控回集结点后直接复现)。 */
-#define KART_MOTION_GOTO_LEAD       (6.0f)
-/* 轴线跟踪前视距离(米)。比 playback 的 1.5m 略短:这里是低速直线收敛,
+#define MOTION_GOTO_LEAD       (6.0f)
+/* 轴线跟踪前视距离(米)。比 kart_playback 的 1.5m 略短:这里是低速直线收敛,
  * 前视短一点收得快;太短(<0.8m)会在内环死区上左右画龙。 */
-#define KART_MOTION_GOTO_LD         (1.20f)
+#define MOTION_GOTO_LD         (1.20f)
 
-#define KART_MOTION_GOTO_TURN_TOL   (25.0f)    /* TURN 段出口:前置点方位角进这个带(度) */
-#define KART_MOTION_GOTO_ARRIVE     (0.50f)    /* DRIVE 段出口:到前置点距离(米) */
-#define KART_MOTION_GOTO_AXIS_STOP  (0.05f)    /* AXIS 段出口:沿轴线到目标的余量(米) */
+#define MOTION_GOTO_TURN_TOL   (25.0f)    /* TURN 段出口:前置点方位角进这个带(度) */
+#define MOTION_GOTO_ARRIVE     (0.50f)    /* DRIVE 段出口:到前置点距离(米) */
+#define MOTION_GOTO_AXIS_STOP  (0.05f)    /* AXIS 段出口:沿轴线到目标的余量(米) */
 
 /* 倒车预摆(三点掉头前半程)。目标在车后方 REV_BEAR 度以外才启用,
  * 把方位角拧进 REV_EXIT 度或倒够 REV_DIST 米就转前进段。
  * 【EN 是现场退路】倒车转向符号靠 REV_YAW_SIGN,万一实车发现倒的时候
  * 越拧越偏(符号反),把 EN 改 0 即退化成"纯前进画圆掉头",功能不受影响,
  * 只是多占场地。不要在场上去猜着翻 SIGN —— 那个符号科目一/四也在用。 */
-#define KART_MOTION_GOTO_REV_EN     (1)
-#define KART_MOTION_GOTO_REV_BEAR   (120.0f)
-#define KART_MOTION_GOTO_REV_EXIT   (90.0f)
-#define KART_MOTION_GOTO_REV_DIST   (1.50f)
+#define MOTION_GOTO_REV_EN     (1)
+#define MOTION_GOTO_REV_BEAR   (120.0f)
+#define MOTION_GOTO_REV_EXIT   (90.0f)
+#define MOTION_GOTO_REV_DIST   (1.50f)
 
 /* 兜底:走过这么多米、或跑过这么多拍还没到,判 FAULT 停机。
  * 25m:任务区到集结点直线量级 10~15m,加一次掉头绕行的余量。
  * 3000 拍 = 30s(kart_motion_update 挂 10ms 拍):25m/0.91m/s = 27s,刚好包住。
- * 【为什么必须有】GOTO 的每个出口都是几何条件,若 odom 已经漂得离谱
+ * 【为什么必须有】GOTO 的每个出口都是几何条件,若 kart_odom 已经漂得离谱
  * (或 tyaw 反了),几何条件可能永远不满足 —— 那就成了一条没有终点的动作,
  * 车会一直在场地里绕。宁可停机让人接管。 */
-#define KART_MOTION_GOTO_MAX_DIST   (25.0f)
-#define KART_MOTION_GOTO_TICKS      (3000u)
+#define MOTION_GOTO_MAX_DIST   (25.0f)
+#define MOTION_GOTO_TICKS      (3000u)
 
 /* GOTO 结果码。kart_mission 靠它判"该不该启动复现"。 */
 typedef enum
 {
     KART_MOTION_GOTO_NONE = 0,      /* 没发起过/已被 stop 清掉 */
     KART_MOTION_GOTO_RUNNING,       /* 摆位进行中 */
-    KART_MOTION_GOTO_DONE,          /* 到位并已停车回正 → 可以交接给 playback */
+    KART_MOTION_GOTO_DONE,          /* 到位并已停车回正 → 可以交接给 kart_playback */
     KART_MOTION_GOTO_FAULT,         /* 超时/超距/急停 → 不得交接 */
 } kart_motion_goto_state_t;
 
 /* --- 对外接口 --- */
 
-/* 上电 init(与 voice/horn 同批做一次):复位状态机,不碰电机。 */
+/* 上电 init(与 kart_voice/kart_horn 同批做一次):复位状态机,不碰电机。 */
 void  kart_motion_init(void);
 
 /* 科目二 loop 每拍调:推进状态机 + deadman 急停。idle 时空操作。 */
 void  kart_motion_update(void);
 
-/* 由 voice dispatch 调:按语音命令码(0x1F~0x26)启动对应动作。
+/* 由 kart_voice dispatch 调:按语音命令码(0x1F~0x26)启动对应动作。
  * 正在跑动作(busy)时返回 0 不打断;成功启动返回 1;非运动命令返回 0。 */
 uint8 kart_motion_start(uint8 voice_cmd);
 

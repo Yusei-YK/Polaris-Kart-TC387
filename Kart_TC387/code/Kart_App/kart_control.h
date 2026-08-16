@@ -1,6 +1,5 @@
 #ifndef KART_CONTROL_H_
 #define KART_CONTROL_H_
-
 #include "zf_common_headfile.h"
 #include "kart_calib.h"    /* KART_REAR_GEAR_RATIO、脉冲↔m/s 换算 */
 #include "kart_pid.h"
@@ -11,7 +10,7 @@
  * ------------------------------------------------------------------
  * 移植自 TopSpeed 速度环(Subject_1 里的 vel_ctrler + Speed_encoder 滤波)。
  * 对照原版的改动(都是为卡丁车硬件适配,不是瞎改):
- *   1. 测速:TopSpeed 靠无刷电机板 UART 回传脉冲;卡丁车编码器直连 TC387,
+ *   1. 测速:TopSpeed 靠无刷电机板 UART 回传脉冲;卡丁车编码器直连 Kart_TC387,
  *      本地读 delta,固定 5ms 采样(原版是收到帧才算,异步)。
  *   2. duty:TopSpeed 用 += 累加(它同节拍多个环叠加);卡丁车速度环单独跑,
  *      改成直接赋值 duty = output,更直观好调(已跟用户确认)。
@@ -29,7 +28,7 @@
 #define KART_SPEED_LPF_LEN              (10)
 
 /* ===== 目标速度斜坡(治起步/加速顿挫)=====
- * 病因链(2026-07-27 定位):遥控油门/playback 把目标速度阶跃写进速度环,
+ * 病因链(2026-07-27 定位):遥控油门/kart_playback 把目标速度阶跃写进速度环,
  *   ① Kp=200,起步误差 40 → P 项一拍就要 8000 duty;
  *   ② power_sync 的 slew 限幅只放 400 duty/拍,PID 想给的给不出去(执行器饱和);
  *   ③ kart_pid 的抗饱和只看自己 output 是否撞 out_max,看不见 slew 造成的饱和,
@@ -66,7 +65,7 @@
 #define KART_SPEED_IMAX_DEFAULT        (3000.0f)
 #define KART_SPEED_OUTMAX_DEFAULT      ((float)KART_POWER_MAX_DUTY)
 
-#define KART_SPEED_RAMP_STEP_DEFAULT    (0.4f)
+#define SPEED_RAMP_STEP_DEFAULT    (0.4f)
 
 /* 后轮减速比 KART_REAR_GEAR_RATIO → kart_calib.h 第三节 */
 
@@ -88,9 +87,9 @@
  * ------------------------------------------------------------------------- */
 typedef struct
 {
-    /* pid 保持为左轮控制器，兼容现有在线调参命令。 */
+    /* kart_pid 保持为左轮控制器，兼容现有在线调参命令。 */
     kart_pid_t  pid_right;
-    kart_pid_t  pid;                            // 速度环 PID(复用 kart_pid)
+    kart_pid_t  kart_pid;                            // 速度环 PID(复用 kart_pid)
     uint8       enable;                         // =1 才输出,=0 输出 0(悬空/急停用)
 
     float       target;                         // 斜坡后的实际 PID 目标(脉冲/5ms)
@@ -115,7 +114,7 @@ typedef struct
      * 【为什么放在本模块内、不在上层直接写 PWM】
      *   enable 是"后轮有没有主人"的唯一开关,全工程有三处冗余检查它并清零后轮:
      *     kart_control.c(本模块) / isr.c:70(硬写 PWM) / cpu0_main.c:103
-     *   上游改这个开关的是遥控挡位(SW3_H 开 / SW3_M 关)、遥控失联、mission 切模式。
+     *   上游改这个开关的是遥控挡位(SW3_H 开 / SW3_M 关)、遥控失联、kart_mission 切模式。
      *   上层若绕过本模块直接 power_set_rear_duty(),会被这三处里的某一处抹成 0。
      *   所以开环也走本模块:enable 照样置 1(三处检查放行、遥控急停链完全不变),
      *   只把输出源从 PID 换成固定值。 */

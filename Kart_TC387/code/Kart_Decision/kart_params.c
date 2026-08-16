@@ -5,14 +5,15 @@
 #include "kart_remote.h"
 #include "kart_mission.h"
 #include "kart_power.h"
+#include "kart_follow.h"
 #include "zf_driver_flash.h"
 
 /* 参数表元数据。def 一律引用各模块原有的宏,保证"出厂值"与代码里写的一致,
  * 改宏后 Load Default 即生效,不会出现两处默认值打架。 */
-static const kart_param_meta_t param_meta[KART_PARAM_MAX] =
+static const kart_param_meta_t param_meta[PARAM_MAX] =
 {
     /* name          min      max      step    def                              dec */
-    { "Ramp Step",   0.0f,   30.0f,   0.1f,  KART_SPEED_RAMP_STEP_DEFAULT,      1 },
+    { "Ramp Step",   0.0f,   30.0f,   0.1f,  SPEED_RAMP_STEP_DEFAULT,      1 },
     /* 2026-07-28 赛前改为出厂开(原出厂 0)。理由:剖面关着时复现是"照抄录制速度",
      * 录得慢就跑得慢,提速这条路直接堵死。开着 + Vmax 仍留 30 是"开了但钳保守":
      * 剖面被钳在 2.21 m/s,行为与原来慢速录制接近,风险可控;要快现场推 Vmax。
@@ -30,10 +31,10 @@ static const kart_param_meta_t param_meta[KART_PARAM_MAX] =
      * 只剩终点锚点刹车。想要真正的过弯减速必须把 Vmax 放到 40~50。 */
     { "PB Vmax",     5.0f,  150.0f,   1.0f,  30.0f,                             0 },
     { "PB Vmin",     0.0f,   95.0f,   0.5f,  0.0f,                              1 },
-    { "PB Alat",     0.5f,   40.0f,   0.2f,  KART_PLAYBACK_ALAT_DEFAULT,        1 },
+    { "PB Alat",     0.5f,   40.0f,   0.2f,  PLAYBACK_ALAT_DEFAULT,        1 },
     { "PB LdGain",   0.0f,    0.50f,  0.002f,KART_PLAYBACK_LD_GAIN,             3 },
     { "PB Clamp",    5.0f,  150.0f,   1.0f,  KART_PLAYBACK_SPEED_MAX,           0 },
-    { "PB ABrake",   0.2f,   20.0f,   0.1f,  KART_PLAYBACK_ABRAKE,              1 },
+    { "PB ABrake",   0.2f,   20.0f,   0.1f,  PLAYBACK_ABRAKE,              1 },
     { "PB LdMax",    0.30f,   6.00f,  0.05f, KART_PLAYBACK_LD_MAX,              2 },
     { "RC Vmax",     5.0f,  150.0f,   1.0f,  KART_REMOTE_MAX_SPEED,             0 },
     { "Head Kp",     0.0f,  400.0f,   1.0f,  KART_HEAD_KP_DEFAULT,              0 },
@@ -51,7 +52,7 @@ static const kart_param_meta_t param_meta[KART_PARAM_MAX] =
     { "S3 OL Ke", -3000.0f,3000.0f,  20.0f,  0.0f,                              0 },
     /* 倒车航向增益(计数/度):原 OL_HEAD_KP 宏搬进菜单。日志已验证 20 够用
      * (误差穿零、修正量没碰 ±400 钳位),故默认保持 20 不变。 */
-    { "S3 OL Kh",    0.0f,  400.0f,   2.0f,  KART_PLAYBACK_OL_HEAD_KP,          0 },
+    { "S3 OL Kh",    0.0f,  400.0f,   2.0f,  PLAYBACK_OL_HEAD_KP,          0 },
     /* ---- 2026-07-28 第二批:限制项本身进菜单。默认值一律等于原宏,行为不变 ---- */
     /* 速度环积分限幅。出厂 3000 = 原 KART_SPEED_IMAX_DEFAULT。
      * 上限给满量程 10000:提速要吃掉那 27% 拿不到的 duty 就得能放到这么大。
@@ -75,9 +76,13 @@ static const kart_param_meta_t param_meta[KART_PARAM_MAX] =
      * (kart_playback.c:690/794)—— 科四倒车拐不进去调本项没用,详见 kart_params.h。
      * 【什么时候加】科一录制里带倒车段、该段拐不到位/半径偏大 → 加;左右摆头 → 减。 */
     { "PB RevCorr",  0.0f, 1133.0f, 25.0f,  KART_PLAYBACK_REV_CORR_MAX,        0 },
+    /* 跟随巡航速度(m/s)。出厂 1.10 = 原 FOLLOW_V_CRUISE_MS。
+     * 下限 0.65:见 kart_params.h 的堵转区推导。上限 2.20（2026-08-17 从 1.80 提高，FIXED 分支不受 V_MAX_MS 钳位，那个宏只管 SCALE 分支）。
+     * 【别一次跳过 1.5】速度上去后方位角环滞后会放大,先确认不振荡。 */
+    { "Flw Cruise",  0.65f,   2.20f,  0.05f, FOLLOW_V_CRUISE_MS,           2 },
 };
 
-static float param_val[KART_PARAM_MAX];
+static float param_val[PARAM_MAX];
 
 /* 脏标记:有值被改过且还没落盘。只有它=1 时才擦写 DFlash。
  * 目的两条:①现场调完不用记得手动 Save,退出界面自动存,reset 重置 IMU 不丢值;
@@ -96,30 +101,30 @@ static void param_apply(uint8 id)
 {
     switch(id)
     {
-        case KART_PARAM_RAMP:
+        case PARAM_RAMP:
             kart_control_set_ramp_step(param_val[id]);
             break;
 
-        case KART_PARAM_HEAD_KP:
+        case PARAM_HEAD_KP:
             /* 只改 Kp,Ki/Kd 沿用当前值(外环 Ki/Kd 默认为 0,不放进菜单)。 */
             kart_steer_set_head_pid(param_val[id],
                                     KART_HEAD_KI_DEFAULT,
                                     KART_HEAD_KD_DEFAULT);
             break;
 
-        case KART_PARAM_SPD_IMAX:
+        case PARAM_SPD_IMAX:
             kart_control_set_speed_imax(param_val[id]);
             break;
 
-        case KART_PARAM_SPD_KP:
+        case PARAM_SPD_KP:
             kart_control_set_speed_kp(param_val[id]);
             break;
 
-        case KART_PARAM_STR_OUTMAX:
+        case PARAM_STR_OUTMAX:
             kart_steer_set_angle_outmax(param_val[id]);
             break;
 
-        case KART_PARAM_SLEW_REAR:
+        case PARAM_SLEW_REAR:
             power_set_slew_rear_step((int16)param_val[id]);
             break;
 
@@ -131,13 +136,13 @@ static void param_apply(uint8 id)
 static void param_apply_all(void)
 {
     uint8 i;
-    for(i = 0; i < KART_PARAM_MAX; i++) param_apply(i);
+    for(i = 0; i < PARAM_MAX; i++) param_apply(i);
 }
 
 void kart_params_load_default(void)
 {
     uint8 i;
-    for(i = 0; i < KART_PARAM_MAX; i++) param_val[i] = param_meta[i].def;
+    for(i = 0; i < PARAM_MAX; i++) param_val[i] = param_meta[i].def;
     param_apply_all();
     param_dirty = 1;        /* 恢复默认也算改动:退出界面时落盘,否则下次上电又读回旧值 */
 }
@@ -149,13 +154,13 @@ void kart_params_init(void)
     kart_params_load_default();
     param_dirty = 0;        /* 上电阶段不算改动:载默认/载 Flash 都不该触发回写 */
 
-    flash_read_page(0, KART_PARAMS_PAGE, page_buf, EEPROM_PAGE_LENGTH);
+    flash_read_page(0, PARAMS_PAGE, page_buf, EEPROM_PAGE_LENGTH);
 
-    /* count 必须与当前 KART_PARAM_MAX 完全一致:加/删参数后旧数据整表判废,
+    /* count 必须与当前 PARAM_MAX 完全一致:加/删参数后旧数据整表判废,
      * 避免按错位下标读到别的参数的值(比宁可用默认更危险)。 */
-    if(page_buf[0] == KART_PARAMS_MAGIC && page_buf[1] == (uint32)KART_PARAM_MAX)
+    if(page_buf[0] == PARAMS_MAGIC && page_buf[1] == (uint32)PARAM_MAX)
     {
-        for(i = 0; i < KART_PARAM_MAX; i++)
+        for(i = 0; i < PARAM_MAX; i++)
         {
             float v = u2f(page_buf[2 + i]);
             /* 逐个钳位:Flash 位翻转或改过 min/max 时不让越界值进来。 */
@@ -169,13 +174,13 @@ void kart_params_init(void)
 
 float kart_params_get(uint8 id)
 {
-    if(id >= KART_PARAM_MAX) return 0.0f;
+    if(id >= PARAM_MAX) return 0.0f;
     return param_val[id];
 }
 
 void kart_params_set(uint8 id, float v)
 {
-    if(id >= KART_PARAM_MAX) return;
+    if(id >= PARAM_MAX) return;
     if(v < param_meta[id].min) v = param_meta[id].min;
     if(v > param_meta[id].max) v = param_meta[id].max;
     /* 值没变就不置脏:钳位到边界后反复按 UP 不会白擦一次 Flash。 */
@@ -193,14 +198,14 @@ void kart_params_step(uint8 id, int8 dir)
  * 变成点 2 下。mul=0 当 1 处理,防调用点算出 0 导致按了没反应。 */
 void kart_params_step_mul(uint8 id, int8 dir, uint8 mul)
 {
-    if(id >= KART_PARAM_MAX) return;
+    if(id >= PARAM_MAX) return;
     if(mul == 0u) mul = 1u;
     kart_params_set(id, param_val[id] + param_meta[id].step * (float)dir * (float)mul);
 }
 
 const kart_param_meta_t* kart_params_meta(uint8 id)
 {
-    if(id >= KART_PARAM_MAX) return &param_meta[0];
+    if(id >= PARAM_MAX) return &param_meta[0];
     return &param_meta[id];
 }
 
@@ -211,12 +216,12 @@ uint8 kart_params_save(void)
 
     for(k = 0; k < EEPROM_PAGE_LENGTH; k++) page_buf[k] = 0u;
 
-    page_buf[0] = KART_PARAMS_MAGIC;
-    page_buf[1] = (uint32)KART_PARAM_MAX;
-    for(i = 0; i < KART_PARAM_MAX; i++) page_buf[2 + i] = f2u(param_val[i]);
+    page_buf[0] = PARAMS_MAGIC;
+    page_buf[1] = (uint32)PARAM_MAX;
+    for(i = 0; i < PARAM_MAX; i++) page_buf[2 + i] = f2u(param_val[i]);
 
     /* 阻塞擦写一页(数 ms)。调用方保证车已停(菜单里只在静止界面提供该项)。 */
-    flash_write_page(0, KART_PARAMS_PAGE, page_buf, EEPROM_PAGE_LENGTH);
+    flash_write_page(0, PARAMS_PAGE, page_buf, EEPROM_PAGE_LENGTH);
     param_dirty = 0;
     return 0;
 }

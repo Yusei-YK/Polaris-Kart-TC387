@@ -1,6 +1,5 @@
 #ifndef KART_ODOM_H_
 #define KART_ODOM_H_
-
 #include "zf_common_headfile.h"
 #include "kart_calib.h"     /* KART_ODOM_YAW_SIGN、脉冲当量 */
 #include "kart_calc.h"
@@ -19,7 +18,7 @@
  *   若发现 X 轴镜像/转向反了,先翻 KART_ODOM_YAW_SIGN,再考虑改这两行符号。
  * ------------------------------------------------------------------
  * 两个必须标定的量:
- *   1. KART_LEFT/RIGHT_ENC_PULSE_TO_M:左右编码器各自一个脉冲对应多少米。
+ *   1. KART_LEFT/KART_RIGHT_ENC_PULSE_TO_M:左右编码器各自一个脉冲对应多少米。
  *      左右原始计数分辨率不同,必须先分别换算成米,不能直接平均脉冲。
  *   2. KART_ODOM_YAW_SIGN:IMU yaw 正方向与坐标系是否一致(+1/-1)。
  * ------------------------------------------------------------------

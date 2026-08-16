@@ -12,8 +12,8 @@
  *   word[3]      = origin_x       (录制起点世界坐标,米)
  *   word[4]      = origin_y
  *   word[5..7]   = 保留(写 0)
- *   word[8..]    = 每点 7 个 word:x/y/yaw/v_left/v_right/steer/dist
- *                  (float 按位存为 uint32;steer 是 int16 打角,存时转 float)
+ *   word[8..]    = 每点 7 个 word:x/y/yaw/v_left/v_right/kart_steer/dist
+ *                  (float 按位存为 uint32;kart_steer 是 int16 打角,存时转 float)
  * 一槽位跨 S1/S2/S2R_PAGES_PER_SLOT 页(21/14/7),每页 EEPROM_PAGE_LENGTH(512) 个 word。
  * 存时只写用到的页(ceil(总字数/512)),读时以页头 count 为准,尾部残留不影响。
  * ------------------------------------------------------------------
@@ -29,7 +29,7 @@ static uint32 slot_base_page(uint8 slot)
         /* 槽0: 科目一,页0~20 */
         return KART_FLASH_BASE_PAGE;
     }
-    else if(slot < KART_FLASH_S2R_FIRST_SLOT)
+    else if(slot < FLASH_S2R_FIRST_SLOT)
     {
         /* 槽1~5: 科目二门洞去程,页21开始,每槽14页(到页90) */
         return KART_FLASH_BASE_PAGE + KART_FLASH_S1_PAGES_PER_SLOT + (slot - 1) * KART_FLASH_S2_PAGES_PER_SLOT;
@@ -37,8 +37,8 @@ static uint32 slot_base_page(uint8 slot)
     else if(slot < KART_FLASH_SLOT_NUM)
     {
         /* 槽6~10: 科目二门洞返程,页91开始,每槽7页(到页125) */
-        return KART_FLASH_S2R_BASE_PAGE
-             + (uint32)(slot - KART_FLASH_S2R_FIRST_SLOT) * KART_FLASH_S2R_PAGES_PER_SLOT;
+        return FLASH_S2R_BASE_PAGE
+             + (uint32)(slot - FLASH_S2R_FIRST_SLOT) * FLASH_S2R_PAGES_PER_SLOT;
     }
     return 0;
 }
@@ -50,10 +50,10 @@ static uint16 slot_capacity(uint8 slot)
 {
     if(slot == 0)
         return KART_FLASH_S1_SLOT_CAPACITY;
-    else if(slot < KART_FLASH_S2R_FIRST_SLOT)
+    else if(slot < FLASH_S2R_FIRST_SLOT)
         return KART_FLASH_S2_SLOT_CAPACITY;
     else if(slot < KART_FLASH_SLOT_NUM)
-        return KART_FLASH_S2R_SLOT_CAPACITY;
+        return FLASH_S2R_SLOT_CAPACITY;
     return 0;
 }
 
@@ -72,10 +72,10 @@ static const float            *sw_dist;
 static const kart_flash_meta_t*sw_meta;
 static uint16                  sw_count;
 
-/* 取逻辑流第 idx 个 word(前 KART_FLASH_HDR_WORDS 个是页头,其余为点数据)。 */
+/* 取逻辑流第 idx 个 word(前 FLASH_HDR_WORDS 个是页头,其余为点数据)。 */
 static uint32 stream_word(uint32 idx)
 {
-    if(idx < KART_FLASH_HDR_WORDS)
+    if(idx < FLASH_HDR_WORDS)
     {
         switch(idx)
         {
@@ -88,9 +88,9 @@ static uint32 stream_word(uint32 idx)
         }
     }
 
-    uint32 di = idx - KART_FLASH_HDR_WORDS;      /* 数据区偏移 */
-    uint32 p  = di / KART_FLASH_FIELDS_PER_PT;   /* 第几个点 */
-    uint32 f  = di % KART_FLASH_FIELDS_PER_PT;   /* 点内第几个字段 */
+    uint32 di = idx - FLASH_HDR_WORDS;      /* 数据区偏移 */
+    uint32 p  = di / FLASH_FIELDS_PER_PT;   /* 第几个点 */
+    uint32 f  = di % FLASH_FIELDS_PER_PT;   /* 点内第几个字段 */
     if(p >= sw_count) return 0;
 
     switch(f)
@@ -100,7 +100,7 @@ static uint32 stream_word(uint32 idx)
         case 2: return f2u(sw_wp[p].yaw);
         case 3: return f2u(sw_wp[p].v_left);
         case 4: return f2u(sw_wp[p].v_right);
-        /* steer 是 int16,统一按 float 存:全流一个字宽,读回不必分类型解析。
+        /* kart_steer 是 int16,统一按 float 存:全流一个字宽,读回不必分类型解析。
          * 打角量程 ±2800 计数,float 精确表示整数到 2^24,没有精度损失。 */
         case 5: return sw_steer ? f2u((float)sw_steer[p]) : 0u;
         default:return sw_dist  ? f2u(sw_dist[p])         : 0u;
@@ -108,7 +108,7 @@ static uint32 stream_word(uint32 idx)
 }
 
 uint8 kart_flash_save_path(uint8 slot, const kart_waypoint_t *wp,
-                           const int16 *steer, const float *dist,
+                           const int16 *kart_steer, const float *dist,
                            const kart_flash_meta_t *meta, uint16 count)
 {
     if(slot >= KART_FLASH_SLOT_NUM)               return 1;
@@ -118,10 +118,10 @@ uint8 kart_flash_save_path(uint8 slot, const kart_waypoint_t *wp,
     if(count > max_cap)
         count = max_cap;                          /* 超容量截断,保证不越页 */
 
-    sw_wp = wp; sw_steer = steer; sw_dist = dist; sw_meta = meta; sw_count = count;
+    sw_wp = wp; sw_steer = kart_steer; sw_dist = dist; sw_meta = meta; sw_count = count;
 
-    uint32 total_words = (uint32)KART_FLASH_HDR_WORDS
-                       + (uint32)count * KART_FLASH_FIELDS_PER_PT;
+    uint32 total_words = (uint32)FLASH_HDR_WORDS
+                       + (uint32)count * FLASH_FIELDS_PER_PT;
     uint32 need_pages  = (total_words + EEPROM_PAGE_LENGTH - 1) / EEPROM_PAGE_LENGTH;
     uint32 base_page   = slot_base_page(slot);
 
@@ -169,13 +169,13 @@ uint16 kart_flash_load_path(uint8 slot, kart_waypoint_t *wp_out,
     /* 首页里已含页头 + 前若干点。逐点从逻辑流取,跨页时按需重读。 */
     uint32 cur_page = 0;                               /* 当前 page_buf 装的是槽位第几页 */
     uint32 p, f;
-    float  fld[KART_FLASH_FIELDS_PER_PT];
+    float  fld[FLASH_FIELDS_PER_PT];
     for(p = 0; p < count; p++)
     {
-        for(f = 0; f < KART_FLASH_FIELDS_PER_PT; f++)
+        for(f = 0; f < FLASH_FIELDS_PER_PT; f++)
         {
-            uint32 widx = (uint32)KART_FLASH_HDR_WORDS
-                        + p * KART_FLASH_FIELDS_PER_PT + f;
+            uint32 widx = (uint32)FLASH_HDR_WORDS
+                        + p * FLASH_FIELDS_PER_PT + f;
             uint32 pg   = widx / EEPROM_PAGE_LENGTH;
             uint32 off  = widx % EEPROM_PAGE_LENGTH;
             if(pg != cur_page)

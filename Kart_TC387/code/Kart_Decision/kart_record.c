@@ -20,7 +20,7 @@ static uint8  record_running = 0;
  *                    d 映射回原路弧长 s=total-d,查该 s 对应的打角。
  * 与 record_buf 同索引、同帧采样,保证打角/里程与坐标严格对齐。
  * 【为什么后来必须入 Flash】科目一从槽位载入后倒车半径明显大于手动、倒不进库:
- * playback 倒车段的打角是开环回放 steer_buf[nearest] 的,过去这数组不进 Flash,
+ * kart_playback 倒车段的打角是开环回放 steer_buf[nearest] 的,过去这数组不进 Flash,
  * 载入路径后它还是上次录制的残留(冷启动即全 0)→ 打角只剩航向纠偏一项,而纠偏被
  * REV_CORR_MAX=400 计数钳死 → R=1480/400≈3.7m,手动满锁只要 1.32m。 */
 static int16 steer_buf[KART_RECORD_MAX_WAYPOINTS];
@@ -51,17 +51,17 @@ void kart_record_init(void)
 
 void kart_record_start(void)
 {
-    kart_odom_snapshot_t odom;
+    kart_odom_snapshot_t kart_odom;
 
     record_count = 0;
     record_running = 1;
 
     /* 起点位姿一次性取整帧,x/y/yaw 必须同帧,否则录制坐标系原点就是歪的。 */
-    kart_odom_get_snapshot(&odom);
-    origin_x   = odom.x;
-    origin_y   = odom.y;
-    origin_yaw = odom.yaw;
-    origin_dist = odom.dist_sum;        /* 里程基准:dist_buf 记相对增量 */
+    kart_odom_get_snapshot(&kart_odom);
+    origin_x   = kart_odom.x;
+    origin_y   = kart_odom.y;
+    origin_yaw = kart_odom.yaw;
+    origin_dist = kart_odom.dist_sum;        /* 里程基准:dist_buf 记相对增量 */
 
     last_x   = 0.0f;
     last_y   = 0.0f;
@@ -80,7 +80,7 @@ void kart_record_start(void)
 
 void kart_record_stop(void)
 {
-    kart_odom_snapshot_t odom;
+    kart_odom_snapshot_t kart_odom;
     float dx, dy, cx, cy, cyaw;
     float origin_rad, origin_sin, origin_cos;
     uint16 i;
@@ -92,15 +92,15 @@ void kart_record_stop(void)
 
     /* 按 START 收尾时强制记住当前终点。尤其要把停车后的最终回正打角
      * 写进 steer_buf；常规 poll 按里程/航向阈值采样，车不动时不会自动记这一次。 */
-    kart_odom_get_snapshot(&odom);
-    dx = odom.x - origin_x;
-    dy = odom.y - origin_y;
+    kart_odom_get_snapshot(&kart_odom);
+    dx = kart_odom.x - origin_x;
+    dy = kart_odom.y - origin_y;
     origin_rad = origin_yaw * 0.01745329252f;
     origin_sin = sinf(origin_rad);
     origin_cos = cosf(origin_rad);
     cx   =  origin_cos * dx + origin_sin * dy;
     cy   = -origin_sin * dx + origin_cos * dy;
-    cyaw = kart_record_yaw_diff(odom.yaw, origin_yaw);
+    cyaw = kart_record_yaw_diff(kart_odom.yaw, origin_yaw);
 
     /* 与末点几乎重合就覆盖末点；否则追加一点。缓冲已满时也覆盖最后一点，
      * 保证真实终点优先于倒数第二个采样点。 */
@@ -125,7 +125,7 @@ void kart_record_stop(void)
     record_buf[i].v_left  = kart_control_get_left_meas();
     record_buf[i].v_right = kart_control_get_right_meas();
     steer_buf[i]          = kart_steer_abs_get_center_delta();
-    dist_buf[i]           = odom.dist_sum - origin_dist;
+    dist_buf[i]           = kart_odom.dist_sum - origin_dist;
 
     last_x = cx;
     last_y = cy;
@@ -137,7 +137,7 @@ void kart_record_poll(void)
 {
     float cx, cy, cyaw, dx, dy, dyaw, dist;
     float origin_rad, origin_sin, origin_cos;
-    kart_odom_snapshot_t odom;
+    kart_odom_snapshot_t kart_odom;
 
     if(!record_running) return;
     if(record_count >= KART_RECORD_MAX_WAYPOINTS)
@@ -147,9 +147,9 @@ void kart_record_poll(void)
     }
 
     /* 一致快照:x/y/yaw 一次性取整帧,避免被 5ms 中断插到半路取到撕裂位姿。 */
-    kart_odom_get_snapshot(&odom);
-    dx = odom.x - origin_x;
-    dy = odom.y - origin_y;
+    kart_odom_get_snapshot(&kart_odom);
+    dx = kart_odom.x - origin_x;
+    dy = kart_odom.y - origin_y;
 
     /*
      * 里程计世界坐标与局部坐标都采用x向右、y向前。
@@ -162,7 +162,7 @@ void kart_record_poll(void)
     origin_cos = cosf(origin_rad);
     cx =  origin_cos * dx + origin_sin * dy;
     cy = -origin_sin * dx + origin_cos * dy;
-    cyaw = kart_record_yaw_diff(odom.yaw, origin_yaw);
+    cyaw = kart_record_yaw_diff(kart_odom.yaw, origin_yaw);
 
     dx   = cx - last_x;
     dy   = cy - last_y;
@@ -180,7 +180,7 @@ void kart_record_poll(void)
     wp->v_right = kart_control_get_right_meas();
     /* 科目三开环回放:同帧记打角 + 相对起点累计里程(与该点坐标严格对齐)。 */
     steer_buf[record_count] = kart_steer_abs_get_center_delta();
-    dist_buf[record_count]  = odom.dist_sum - origin_dist;
+    dist_buf[record_count]  = kart_odom.dist_sum - origin_dist;
     record_count++;
 
     last_x   = cx;
@@ -210,7 +210,7 @@ uint8 kart_record_adjust_segment(uint16 center, uint16 radius, float dx, float d
         float weight;
 
         if(i == 0U) continue;                 /* 录制坐标原点必须保持 (0,0) */
-        /* 倒车段实际按 steer/dist/yaw 开环回放，不按 x/y 追踪。改它的坐标只会
+        /* 倒车段实际按 kart_steer/dist/yaw 开环回放，不按 x/y 追踪。改它的坐标只会
          * 让屏幕看起来变了、车辆动作却不变，因此红色倒车点明确锁住。 */
         if(0.5f * (record_buf[i].v_left + record_buf[i].v_right) < -0.02f)
             continue;
@@ -224,7 +224,7 @@ uint8 kart_record_adjust_segment(uint16 center, uint16 radius, float dx, float d
 }
 
 float  kart_record_get_origin_yaw(void)      { return origin_yaw; }
-/* 录制起点的世界坐标。科目三位置闭环倒车要把当前 odom 位置投影回录制坐标系,
+/* 录制起点的世界坐标。科目三位置闭环倒车要把当前 kart_odom 位置投影回录制坐标系,
  * 光有 origin_yaw 不够(那只给旋转),还要这两个做平移基准。 */
 float  kart_record_get_origin_x(void)        { return origin_x; }
 float  kart_record_get_origin_y(void)        { return origin_y; }
@@ -260,13 +260,13 @@ uint16 kart_record_load_from_flash(uint8 slot)
     kart_flash_meta_t meta;
     uint16 n = kart_flash_load_path(slot, record_buf, steer_buf, dist_buf,
                                     &meta, KART_RECORD_MAX_WAYPOINTS);
-    record_count = n;                           /* 覆盖当前缓冲,供 playback 读 */
+    record_count = n;                           /* 覆盖当前缓冲,供 kart_playback 读 */
 
     if(n > 0)
     {
-        /* 起点位姿也一并还原:playback 倒车段用 origin_yaw 当参考系原点,
+        /* 起点位姿也一并还原:kart_playback 倒车段用 origin_yaw 当参考系原点,
          * 不还原就还是上次录制的值,整段参考航向偏多少车就跟着偏多少。
-         * 【坐标系前提】odom 的 yaw 零点由上电时 IMU 姿态决定,重启后世界系会变。
+         * 【坐标系前提】kart_odom 的 yaw 零点由上电时 IMU 姿态决定,重启后世界系会变。
          * 因此"载入槽位再复现"要求发车朝向与录制那次一致(与录制后直接复现同理),
          * 这一条没变,本改动只是不再额外叠加"参考系拿错"这个二次误差。 */
         origin_yaw = meta.origin_yaw;

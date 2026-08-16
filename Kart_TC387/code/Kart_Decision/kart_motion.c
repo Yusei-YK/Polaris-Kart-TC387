@@ -52,8 +52,8 @@ static uint16 motion_center_ticks = 0;   /* 回正段已等拍数(超时兜底) 
 
 /* -------------------- GOTO 摆位状态 --------------------
  * 目标位姿 + 前置点(目标沿 tyaw 反方向退 LEAD 米)在 start 时算一次就固定,
- * 不每拍重算 —— 它们是场地上的固定几何,重算只会把 odom 抖动引进来。 */
-static float motion_goto_tx   = 0.0f;   /* 目标位置 x(米,odom 世界系) */
+ * 不每拍重算 —— 它们是场地上的固定几何,重算只会把 kart_odom 抖动引进来。 */
+static float motion_goto_tx   = 0.0f;   /* 目标位置 x(米,kart_odom 世界系) */
 static float motion_goto_ty   = 0.0f;
 static float motion_goto_tyaw = 0.0f;   /* 目标航向(度,IMU 绝对值) */
 static float motion_goto_lx   = 0.0f;   /* 前置点 x */
@@ -66,14 +66,14 @@ static kart_motion_goto_state_t motion_goto_state = KART_MOTION_GOTO_NONE;
 
 /* -------------------- 转角下发:唯一出口 --------------------
  * 全模块所有打角都必须走这里,统一叠转向中位偏置。
- * 实测"真正走直"的 delta 不在 0 而在约 -25(见 KART_MOTION_DELTA_CENTER_OFS),
+ * 实测"真正走直"的 delta 不在 0 而在约 -25(见 MOTION_DELTA_CENTER_OFS),
  * 不补的话所有【左右对称的动作】都会一边大一边小:
  *   转圈 ±950 变成 左975/右925 => 顺时针半径比逆时针大 7cm(用户实车观察到了);
  *   蛇形左右摆幅不等 => 整条轨迹净漂,收尾再修也压不住。
  * 【别在别处直接调 kart_steer_set_target_delta()】—— 漏一处就漏一个偏置。 */
 static void motion_set_delta(float delta)
 {
-    kart_steer_set_target_delta(delta + KART_MOTION_DELTA_CENTER_OFS);
+    kart_steer_set_target_delta(delta + MOTION_DELTA_CENTER_OFS);
 }
 
 /* 航向误差(度,规整 ±180),定义为【目标 - 实测】= yaw0 - yaw,与航向环同惯例。
@@ -95,19 +95,19 @@ static float motion_yaw_err(void)
  *              => delta = +KP*err。
  *   后退 Δs<0,同一打角的航向变化整体反号 => delta = -KP*err = SIGN*KP*err。
  *   直接把前进那套用到倒车 = 正反馈,越倒越歪。
- * 【实车若发现越修越歪】只翻 KART_MOTION_REV_YAW_SIGN,别动 KP。
+ * 【实车若发现越修越歪】只翻 MOTION_REV_YAW_SIGN,别动 KP。
  * 限幅后叠中位偏置仍远在软限位(+1103/-1048)内。 */
 static float motion_yaw_corr_delta(uint8 reverse)
 {
-    float corr = KART_MOTION_YAW_KP * motion_yaw_err();
+    float corr = MOTION_YAW_KP * motion_yaw_err();
 
     if(reverse)
     {
-        corr *= KART_MOTION_REV_YAW_SIGN;
+        corr *= MOTION_REV_YAW_SIGN;
     }
 
-    if(corr >  KART_MOTION_YAW_LIMIT) corr =  KART_MOTION_YAW_LIMIT;
-    if(corr < -KART_MOTION_YAW_LIMIT) corr = -KART_MOTION_YAW_LIMIT;
+    if(corr >  MOTION_YAW_LIMIT) corr =  MOTION_YAW_LIMIT;
+    if(corr < -MOTION_YAW_LIMIT) corr = -MOTION_YAW_LIMIT;
     return corr;
 }
 
@@ -133,11 +133,11 @@ static void motion_snake_step(uint8 reverse)
 
     if(reverse)
     {
-        swung *= KART_MOTION_REV_YAW_SIGN;
+        swung *= MOTION_REV_YAW_SIGN;
     }
 
-    if((swung * motion_snake_sign) >= KART_MOTION_SNAKE_YAW ||
-       (kart_odom_get_dist() - motion_snake_half_d0) >= KART_MOTION_SNAKE_MAX_HALF)
+    if((swung * motion_snake_sign) >= MOTION_SNAKE_YAW ||
+       (kart_odom_get_dist() - motion_snake_half_d0) >= MOTION_SNAKE_MAX_HALF)
     {
         motion_snake_sign    = -motion_snake_sign;
         motion_snake_half_d0 = kart_odom_get_dist();
@@ -147,7 +147,7 @@ static void motion_snake_step(uint8 reverse)
 }
 
 /* 后轮出力:两种模式收在一处,避免 8 个 case 各写一遍 #if。
- *   开环(KART_MOTION_OPENLOOP_REAR=1):固定 duty 直下发,不跑速度环 PID。
+ *   开环(MOTION_OPENLOOP_REAR=1):固定 duty 直下发,不跑速度环 PID。
  *   闭环(=0):走速度环,行为与改造前完全一致(A/B 对照回退用)。
  * 两种模式都必须 set_enable(1) —— enable 是"后轮有没有主人"的唯一开关,
  * 全工程三处仲裁(kart_control.c / isr.c:70 / cpu0_main.c:103)都判它,
@@ -155,7 +155,7 @@ static void motion_snake_step(uint8 reverse)
  * duty 符号 = 方向:正前进、负后退。 */
 static void motion_set_rear(int16 open_duty, float closed_speed)
 {
-#if KART_MOTION_OPENLOOP_REAR
+#if MOTION_OPENLOOP_REAR
     kart_control_set_open_duty(open_duty);
     (void)closed_speed;
 #else
@@ -175,17 +175,17 @@ static void motion_accum_yaw(void)
 
 /* -------------------- GOTO 摆位:几何小工具 --------------------
  * 方位角误差:从【车头】到指定点还要转多少度(+ = 点在车头左边、需左转)。
- * get_angle(now,aim) 用的就是 odom 的坐标约定(x东y北、y轴当0度基准、
+ * get_angle(now,aim) 用的就是 kart_odom 的坐标约定(x东y北、y轴当0度基准、
  * 顺时针为负),与 kart_imu_get_yaw() 同一套,所以两者可以直接相减。
  * get_relative_angle(now,aim)=aim-now 已规整 ±180 => 参数顺序 (yaw, bearing)。
  * 【位姿必须由调用方传进来】同一拍里要算方位角、距离、轴线投影三样,
  *   各自再取一次快照就会拿到被 5ms 中断改过的不同帧,判据之间自相矛盾。 */
-static float motion_goto_bearing_err(const kart_odom_snapshot_t *odom, float px, float py)
+static float motion_goto_bearing_err(const kart_odom_snapshot_t *kart_odom, float px, float py)
 {
     Point_2D cur, aim;
 
-    cur.x = odom->x;
-    cur.y = odom->y;
+    cur.x = kart_odom->x;
+    cur.y = kart_odom->y;
     aim.x = px;
     aim.y = py;
 
@@ -195,16 +195,16 @@ static float motion_goto_bearing_err(const kart_odom_snapshot_t *odom, float px,
         return 0.0f;
     }
 
-    return get_relative_angle(odom->yaw, get_angle(cur, aim));
+    return get_relative_angle(kart_odom->yaw, get_angle(cur, aim));
 }
 
 /* 车到指定点的距离(米)。 */
-static float motion_goto_dist_to(const kart_odom_snapshot_t *odom, float px, float py)
+static float motion_goto_dist_to(const kart_odom_snapshot_t *kart_odom, float px, float py)
 {
     Point_2D cur, aim;
 
-    cur.x = odom->x;
-    cur.y = odom->y;
+    cur.x = kart_odom->x;
+    cur.y = kart_odom->y;
     aim.x = px;
     aim.y = py;
     return get_distance(cur, aim);
@@ -215,28 +215,28 @@ static float motion_goto_dist_to(const kart_odom_snapshot_t *odom, float px, flo
  * 限幅用 GOTO_STEER_MAX(950,允许打死)而不是走直线用的 YAW_LIMIT(300)。 */
 static float motion_goto_steer(float bearing_err, uint8 reverse)
 {
-    float delta = KART_MOTION_GOTO_KP * bearing_err;
+    float delta = MOTION_GOTO_KP * bearing_err;
 
     if(reverse)
     {
-        delta *= KART_MOTION_REV_YAW_SIGN;
+        delta *= MOTION_REV_YAW_SIGN;
     }
 
-    if(delta >  KART_MOTION_GOTO_STEER_MAX) delta =  KART_MOTION_GOTO_STEER_MAX;
-    if(delta < -KART_MOTION_GOTO_STEER_MAX) delta = -KART_MOTION_GOTO_STEER_MAX;
+    if(delta >  MOTION_GOTO_STEER_MAX) delta =  MOTION_GOTO_STEER_MAX;
+    if(delta < -MOTION_GOTO_STEER_MAX) delta = -MOTION_GOTO_STEER_MAX;
     return delta;
 }
 
 /* 当前位置沿【目标轴线】的纵坐标 s:以目标点为原点、tyaw 方向为正。
  *   车还没走到目标 → s<0;越过目标 → s>0 => 到位判据就是 s >= -AXIS_STOP。
- * 轴线单位向量按 odom 约定(dx=-sin*ds, dy=+cos*ds)由 tyaw 给出:fwd=(-sin,+cos)。
+ * 轴线单位向量按 kart_odom 约定(dx=-sin*ds, dy=+cos*ds)由 tyaw 给出:fwd=(-sin,+cos)。
  * 【不需要横向偏差 lat】AXIS 段瞄的是轴线上的前视点,方位角误差里已经同时
  *   包含了横向偏差和航向偏差,再单独算一个 lat 是死代码。 */
-static float motion_goto_axis_s(const kart_odom_snapshot_t *odom)
+static float motion_goto_axis_s(const kart_odom_snapshot_t *kart_odom)
 {
     float rad = degree_to_rad(motion_goto_tyaw);
-    float dx  = odom->x - motion_goto_tx;
-    float dy  = odom->y - motion_goto_ty;
+    float dx  = kart_odom->x - motion_goto_tx;
+    float dy  = kart_odom->y - motion_goto_ty;
 
     return -sinf(rad) * dx + cosf(rad) * dy;
 }
@@ -251,7 +251,7 @@ static void motion_goto_axis_aim(float s, float *ax, float *ay)
     float rad = degree_to_rad(motion_goto_tyaw);
     float sn  = sinf(rad);
     float cs  = cosf(rad);
-    float sa  = s + KART_MOTION_GOTO_LD;
+    float sa  = s + MOTION_GOTO_LD;
 
     /* 【2026-07-29 删掉了这里的 if(sa > 0.0f) sa = 0.0f;】
      * 那句话把前视点夹在目标点上,后果是【前视距离随 s→0 一起塌到 0】:
@@ -316,7 +316,7 @@ kart_motion_goto_state_t kart_motion_get_goto_state(void)
 
 uint8 kart_motion_start_goto(float tx, float ty, float tyaw)
 {
-    kart_odom_snapshot_t odom;
+    kart_odom_snapshot_t kart_odom;
     float rad, bear;
 
     if(kart_motion_is_busy())
@@ -324,13 +324,13 @@ uint8 kart_motion_start_goto(float tx, float ty, float tyaw)
         return 0;                       /* 忙不打断(与 kart_motion_start 同约定) */
     }
 
-    kart_odom_get_snapshot(&odom);
+    kart_odom_get_snapshot(&kart_odom);
 
     motion_goto_tx   = tx;
     motion_goto_ty   = ty;
     motion_goto_tyaw = tyaw;
 
-    /* 前置点 = 目标位姿沿 tyaw 【反】方向退 lead 米。odom 约定下车头方向
+    /* 前置点 = 目标位姿沿 tyaw 【反】方向退 lead 米。kart_odom 约定下车头方向
      * 单位向量是 (-sin, +cos),所以往后退是 (+sin, -cos)*lead。
      *
      * 【lead 不是常数,要保证前置点落在车的"轴线后方"】
@@ -344,8 +344,8 @@ uint8 kart_motion_start_goto(float tx, float ty, float tyaw)
      *   s0=+3 绕 11m),这正是阿克曼车该走的小回环,MAX_DIST=25m 包得住。 */
     rad = degree_to_rad(tyaw);
     {
-        float s0   = motion_goto_axis_s(&odom);
-        float lead = KART_MOTION_GOTO_LEAD;
+        float s0   = motion_goto_axis_s(&kart_odom);
+        float lead = MOTION_GOTO_LEAD;
 
         /* 【2026-07-29 把 > 改成 >=,并给推后量加 1 个 AXIS_STOP 的余量】
          * 原来 s0 == -LEAD 这个【边界】上条件不成立、一点不推 => 引入段长度
@@ -353,9 +353,9 @@ uint8 kart_motion_start_goto(float tx, float ty, float tyaw)
          * DRIVE 段的距离判据当拍就满足,AXIS 段没有任何收敛距离就判到位。
          * 交出去的是横向偏差原样保留的位姿,而 kart_mission 会照着它放出一整条
          * 返程路径。所以边界必须算作"要推",且推完再多留一点,别卡在等号上。 */
-        if(s0 >= -KART_MOTION_GOTO_LEAD)
+        if(s0 >= -MOTION_GOTO_LEAD)
         {
-            lead += (s0 + KART_MOTION_GOTO_LEAD) + KART_MOTION_GOTO_AXIS_STOP;
+            lead += (s0 + MOTION_GOTO_LEAD) + MOTION_GOTO_AXIS_STOP;
         }
         motion_goto_lx   = tx + sinf(rad) * lead;
         motion_goto_ly   = ty - cosf(rad) * lead;
@@ -376,22 +376,22 @@ uint8 kart_motion_start_goto(float tx, float ty, float tyaw)
 
     /* 已经站在目标位姿上(位置进 ARRIVE、航向进 TURN_TOL)→ 直接判 DONE,车不动。
      * 【为什么要这条】不加的话会先跑去 2.5m 外的前置点再开回来,白走 5m;
-     * 更糟的是那 5m 本身要消耗 odom 精度预算,等于为"已经对好了"付出误差。
+     * 更糟的是那 5m 本身要消耗 kart_odom 精度预算,等于为"已经对好了"付出误差。
      * 台架上原地测这条命令时也是这个分支(车不该乱动)。 */
-    if(motion_goto_dist_to(&odom, tx, ty) <= KART_MOTION_GOTO_ARRIVE &&
-       fabsf(get_relative_angle(odom.yaw, tyaw)) <= KART_MOTION_GOTO_TURN_TOL)
+    if(motion_goto_dist_to(&kart_odom, tx, ty) <= MOTION_GOTO_ARRIVE &&
+       fabsf(get_relative_angle(kart_odom.yaw, tyaw)) <= MOTION_GOTO_TURN_TOL)
     {
         motion_goto_state = KART_MOTION_GOTO_DONE;
         motion_phase = MOTION_IDLE;     /* 没启动电机,不必走 CENTER 回正 */
         return 1;
     }
 
-    bear = motion_goto_bearing_err(&odom, motion_goto_lx, motion_goto_ly);
+    bear = motion_goto_bearing_err(&kart_odom, motion_goto_lx, motion_goto_ly);
 
     /* 前置点在车【后方】很多 → 先倒车预摆(三点掉头前半程),比在前方画一个
      * 直径 3.1m 的圆更省场地。EN=0 时直接跳过,退化成纯前进掉头。 */
-#if KART_MOTION_GOTO_REV_EN
-    if(fabsf(bear) >= KART_MOTION_GOTO_REV_BEAR)
+#if MOTION_GOTO_REV_EN
+    if(fabsf(bear) >= MOTION_GOTO_REV_BEAR)
     {
         kart_steer_use_back_gains();    /* 真要打角的倒车必须换增益组,否则转角环振 */
         kart_steer_set_head_enable(0);
@@ -399,7 +399,7 @@ uint8 kart_motion_start_goto(float tx, float ty, float tyaw)
         motion_reverse = 1;
         motion_goto_rev_d0 = motion_dist0;
         motion_set_delta(motion_goto_steer(bear, 1));
-        motion_set_rear(KART_MOTION_DUTY_GOTO_REV, -KART_MOTION_SPEED);
+        motion_set_rear(MOTION_DUTY_GOTO_REV, -KART_MOTION_SPEED);
         motion_phase = MOTION_GOTO_REV;
         return 1;
     }
@@ -410,10 +410,10 @@ uint8 kart_motion_start_goto(float tx, float ty, float tyaw)
     kart_steer_set_angle_enable(1);
     motion_reverse = 0;
     motion_set_delta(motion_goto_steer(bear, 0));
-    motion_set_rear(KART_MOTION_DUTY_GOTO, +KART_MOTION_SPEED);
+    motion_set_rear(MOTION_DUTY_GOTO, +KART_MOTION_SPEED);
 
     /* 方位角已经进容差就不用先转了,直接进 DRIVE(省掉一次无意义的打死)。 */
-    motion_phase = (fabsf(bear) <= KART_MOTION_GOTO_TURN_TOL) ? MOTION_GOTO_DRIVE
+    motion_phase = (fabsf(bear) <= MOTION_GOTO_TURN_TOL) ? MOTION_GOTO_DRIVE
                                                              : MOTION_GOTO_TURN;
     return 1;
 }
@@ -449,14 +449,14 @@ static void motion_finish(void)
  * dist = 本次摆位已走的总路程(米),由调用方算好传进来。 */
 static void motion_goto_update(float dist)
 {
-    kart_odom_snapshot_t odom;
+    kart_odom_snapshot_t kart_odom;
     float bear, s, ax, ay;
 
-    /* 兜底:超距/超时 → FAULT 停机。GOTO 的出口全是几何条件,若 odom 漂到
+    /* 兜底:超距/超时 → FAULT 停机。GOTO 的出口全是几何条件,若 kart_odom 漂到
      * 离谱或 tyaw 给反了,几何条件可能【永远】不满足 => 车在场地里一直绕。
      * 宁可停机让人接管,也不能变成一条没有终点的动作。 */
     motion_goto_ticks++;
-    if(dist >= KART_MOTION_GOTO_MAX_DIST || motion_goto_ticks >= KART_MOTION_GOTO_TICKS)
+    if(dist >= MOTION_GOTO_MAX_DIST || motion_goto_ticks >= MOTION_GOTO_TICKS)
     {
         motion_goto_state = KART_MOTION_GOTO_FAULT;
         kart_motion_stop();             /* 已是 FAULT,stop 里的 RUNNING 分支不会再覆盖 */
@@ -464,7 +464,7 @@ static void motion_goto_update(float dist)
     }
 
     /* 整拍一致位姿:方位角、距离、轴线投影三个判据必须同源,否则互相矛盾。 */
-    kart_odom_get_snapshot(&odom);
+    kart_odom_get_snapshot(&kart_odom);
 
     switch(motion_phase)
     {
@@ -473,16 +473,16 @@ static void motion_goto_update(float dist)
              * 倒车时打角对【车头】的作用整体反号,motion_goto_steer(.,1) 已处理。
              * 两个出口:方位角拧进 REV_EXIT(正常),或倒够 REV_DIST(保底,
              * 防符号不对时越倒越偏 —— 那时把 GOTO_REV_EN 改 0 即可绕开本段)。 */
-            bear = motion_goto_bearing_err(&odom, motion_goto_lx, motion_goto_ly);
+            bear = motion_goto_bearing_err(&kart_odom, motion_goto_lx, motion_goto_ly);
             motion_set_delta(motion_goto_steer(bear, 1));
-            if(fabsf(bear) <= KART_MOTION_GOTO_REV_EXIT ||
-               (odom.dist_sum - motion_goto_rev_d0) >= KART_MOTION_GOTO_REV_DIST)
+            if(fabsf(bear) <= MOTION_GOTO_REV_EXIT ||
+               (kart_odom.dist_sum - motion_goto_rev_d0) >= MOTION_GOTO_REV_DIST)
             {
                 /* 转前进:增益换回前进组,后轮换向。 */
                 kart_steer_use_fwd_gains();
                 motion_reverse = 0;
                 motion_set_delta(motion_goto_steer(bear, 0));
-                motion_set_rear(KART_MOTION_DUTY_GOTO, +KART_MOTION_SPEED);
+                motion_set_rear(MOTION_DUTY_GOTO, +KART_MOTION_SPEED);
                 motion_phase = MOTION_GOTO_TURN;
             }
             break;
@@ -490,9 +490,9 @@ static void motion_goto_update(float dist)
         case MOTION_GOTO_TURN:
             /* ② 前进打死转,把前置点转到车前方。大角度旋转【集中在这一段】,
              * 之后就不再需要转大角度 —— 这是"到点再转头会毁位置"的规避方式。 */
-            bear = motion_goto_bearing_err(&odom, motion_goto_lx, motion_goto_ly);
+            bear = motion_goto_bearing_err(&kart_odom, motion_goto_lx, motion_goto_ly);
             motion_set_delta(motion_goto_steer(bear, 0));
-            if(fabsf(bear) <= KART_MOTION_GOTO_TURN_TOL)
+            if(fabsf(bear) <= MOTION_GOTO_TURN_TOL)
             {
                 motion_phase = MOTION_GOTO_DRIVE;
             }
@@ -511,14 +511,14 @@ static void motion_goto_update(float dist)
              *   引入段长度为 0 => 横向偏差压根没收敛就交出去,比 FAULT 更糟。
              *   所以先要求车真的退到过前置点后方一次,这条兜底才生效。
              *   起点就在后方(正常情况)时 behind 第一拍即置 1,行为不变。 */
-            bear = motion_goto_bearing_err(&odom, motion_goto_lx, motion_goto_ly);
+            bear = motion_goto_bearing_err(&kart_odom, motion_goto_lx, motion_goto_ly);
             motion_set_delta(motion_goto_steer(bear, 0));
-            s = motion_goto_axis_s(&odom);
+            s = motion_goto_axis_s(&kart_odom);
             if(s <= motion_goto_lead_s)
             {
                 motion_goto_behind = 1;
             }
-            if(motion_goto_dist_to(&odom, motion_goto_lx, motion_goto_ly) <= KART_MOTION_GOTO_ARRIVE ||
+            if(motion_goto_dist_to(&kart_odom, motion_goto_lx, motion_goto_ly) <= MOTION_GOTO_ARRIVE ||
                (motion_goto_behind && s >= motion_goto_lead_s))
             {
                 motion_phase = MOTION_GOTO_AXIS;
@@ -533,11 +533,11 @@ static void motion_goto_update(float dist)
              * 摆位精度此刻就已定死;等到 CENTER 结束再置只会让交接晚 0.x 秒。
              * 但 is_busy 要到 CENTER 走完才落 => kart_mission 必须【同时】
              * 判 DONE 和 !is_busy 才启动复现(否则会踩着歪轮子起步)。 */
-            s = motion_goto_axis_s(&odom);
+            s = motion_goto_axis_s(&kart_odom);
             motion_goto_axis_aim(s, &ax, &ay);
-            bear = motion_goto_bearing_err(&odom, ax, ay);
+            bear = motion_goto_bearing_err(&kart_odom, ax, ay);
             motion_set_delta(motion_goto_steer(bear, 0));
-            if(s >= -KART_MOTION_GOTO_AXIS_STOP)
+            if(s >= -MOTION_GOTO_AXIS_STOP)
             {
                 motion_goto_state = KART_MOTION_GOTO_DONE;
                 motion_finish();
@@ -581,7 +581,7 @@ uint8 kart_motion_start(uint8 voice_cmd)
             kart_steer_set_angle_enable(1);
             motion_reverse = 0;
             motion_set_delta(motion_yaw_corr_delta(0));
-            motion_set_rear(KART_MOTION_DUTY_FWD, motion_speed);
+            motion_set_rear(MOTION_DUTY_FWD, motion_speed);
             motion_phase = MOTION_FWD;
             break;
 
@@ -594,7 +594,7 @@ uint8 kart_motion_start(uint8 voice_cmd)
             kart_steer_set_angle_enable(1);
             motion_reverse = 1;
             motion_set_delta(motion_yaw_corr_delta(1));
-            motion_set_rear(KART_MOTION_DUTY_BACK, motion_speed);
+            motion_set_rear(MOTION_DUTY_BACK, motion_speed);
             motion_phase = MOTION_BACK;
             break;
 
@@ -607,7 +607,7 @@ uint8 kart_motion_start(uint8 voice_cmd)
             motion_snake_sign    = +1.0f;       /* 第一摆打左 */
             motion_snake_half_d0 = motion_dist0;
             motion_set_delta(motion_snake_sign * KART_MOTION_SNAKE_DELTA);
-            motion_set_rear(+KART_MOTION_DUTY_SNAKE, motion_speed);
+            motion_set_rear(+MOTION_DUTY_SNAKE, motion_speed);
             motion_phase = MOTION_SNAKE_FWD;
             break;
 
@@ -622,7 +622,7 @@ uint8 kart_motion_start(uint8 voice_cmd)
             motion_snake_sign    = +1.0f;
             motion_snake_half_d0 = motion_dist0;
             motion_set_delta(motion_snake_sign * KART_MOTION_SNAKE_DELTA);
-            motion_set_rear(-KART_MOTION_DUTY_SNAKE, motion_speed);
+            motion_set_rear(-MOTION_DUTY_SNAKE, motion_speed);
             motion_phase = MOTION_SNAKE_BACK;
             break;
 
@@ -635,7 +635,7 @@ uint8 kart_motion_start(uint8 voice_cmd)
             kart_steer_set_head_enable(0);
             kart_steer_set_angle_enable(1);
             motion_set_delta(+KART_MOTION_CIRCLE_DELTA);
-            motion_set_rear(KART_MOTION_DUTY_CIRCLE, motion_speed);
+            motion_set_rear(MOTION_DUTY_CIRCLE, motion_speed);
             motion_phase = MOTION_CIRCLE;
             break;
 
@@ -646,7 +646,7 @@ uint8 kart_motion_start(uint8 voice_cmd)
             kart_steer_set_head_enable(0);
             kart_steer_set_angle_enable(1);
             motion_set_delta(-KART_MOTION_CIRCLE_DELTA);
-            motion_set_rear(KART_MOTION_DUTY_CIRCLE, motion_speed);
+            motion_set_rear(MOTION_DUTY_CIRCLE, motion_speed);
             motion_phase = MOTION_CIRCLE;
             break;
 
@@ -659,7 +659,7 @@ uint8 kart_motion_start(uint8 voice_cmd)
             kart_steer_set_angle_enable(1);
             motion_reverse = 0;
             motion_set_delta(motion_yaw_corr_delta(0));
-            motion_set_rear(KART_MOTION_DUTY_TURN, motion_speed);
+            motion_set_rear(MOTION_DUTY_TURN, motion_speed);
             motion_phase = MOTION_TURN_APPROACH;
             break;
 
@@ -671,7 +671,7 @@ uint8 kart_motion_start(uint8 voice_cmd)
             kart_steer_set_angle_enable(1);
             motion_reverse = 0;
             motion_set_delta(motion_yaw_corr_delta(0));
-            motion_set_rear(KART_MOTION_DUTY_TURN, motion_speed);
+            motion_set_rear(MOTION_DUTY_TURN, motion_speed);
             motion_phase = MOTION_TURN_APPROACH;
             break;
 
@@ -689,7 +689,7 @@ void kart_motion_update(void)
         return;
     }
 
-    /* deadman 急停:遥控失联或三段拨低挡 → 立即停(与 playback 一致)。 */
+    /* deadman 急停:遥控失联或三段拨低挡 → 立即停(与 kart_playback 一致)。 */
     if(!kart_remote_is_online() ||
        kart_remote_get_sw3() == KART_REMOTE_SW3_L)
     {
@@ -747,8 +747,8 @@ void kart_motion_update(void)
              * 两个出口:误差进 TOL(正常),或再走 MAX_DIST(保底,防符号/增益
              * 不对时修不回来变成没有终点的动作)。 */
             motion_set_delta(motion_yaw_corr_delta(motion_reverse));
-            if(fabsf(motion_yaw_err()) <= KART_MOTION_SNAKE_END_TOL ||
-               (kart_odom_get_dist() - motion_snake_end_d0) >= KART_MOTION_SNAKE_END_MAX_DIST)
+            if(fabsf(motion_yaw_err()) <= MOTION_SNAKE_END_TOL ||
+               (kart_odom_get_dist() - motion_snake_end_d0) >= MOTION_SNAKE_END_MAX_DIST)
             {
                 motion_finish();
             }
@@ -802,9 +802,9 @@ void kart_motion_update(void)
              * 所以"到位"是 |meas - OFS| 小,不是 |meas| 小。 */
             motion_set_delta(0.0f);
             motion_center_ticks++;
-            if(fabsf(kart_steer_get_meas_delta() - KART_MOTION_DELTA_CENTER_OFS)
-                   <= KART_MOTION_CENTER_TOL ||
-               motion_center_ticks >= KART_MOTION_CENTER_TICKS)
+            if(fabsf(kart_steer_get_meas_delta() - MOTION_DELTA_CENTER_OFS)
+                   <= MOTION_CENTER_TOL ||
+               motion_center_ticks >= MOTION_CENTER_TICKS)
             {
                 kart_motion_stop();     /* 真正关内环、回 IDLE */
             }

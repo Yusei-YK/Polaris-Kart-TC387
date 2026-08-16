@@ -1,6 +1,5 @@
 #ifndef KART_PID_H_
 #define KART_PID_H_
-
 #include "zf_common_headfile.h"
 
 /* PID 控制器的"记忆本"：每一路 PID 都要有自己的一份，用来记住上一次的状态 */
@@ -22,12 +21,12 @@ typedef struct
 } kart_pid_t;
 
 /* 初始化一个 PID 控制器:填入三个系数和两个限幅值 */
-void kart_pid_init(kart_pid_t *pid, float Kp, float Ki, float Kd, float i_max, float out_max);
+void kart_pid_init(kart_pid_t *kart_pid, float Kp, float Ki, float Kd, float i_max, float out_max);
 
-/* 喂给它一个"当前误差",它算出"该给多少劲",结果存在 pid->output 里 */
-void kart_pid_update(kart_pid_t *pid, float err);
+/* 喂给它一个"当前误差",它算出"该给多少劲",结果存在 kart_pid->output 里 */
+void kart_pid_update(kart_pid_t *kart_pid, float err);
 
 /* 清零:把这个 PID 的记忆全部抹掉,重新开始(比如车停下来时用) */
-void kart_pid_reset(kart_pid_t *pid);
+void kart_pid_reset(kart_pid_t *kart_pid);
 
 #endif

@@ -2,7 +2,7 @@
  *  @file TLD7002_Definitions.h
  *  @author Infineon
  *  @date 17.06.2022
- *	@brief TLD7002 specific Device Driver implementation from Infineon Technologies AG.
+ *	@brief TLD7002 specific Device Kart_Driver implementation from Infineon Technologies AG.
  *	@note  This file includes the implementation for the TLD7002 hardware access layer.
  *		   Hardware version TLD7002-16ES B11
  *
@@ -649,7 +649,7 @@ typedef struct
  */
 typedef struct
 {
-    uint8 OTP_STATUS0;																				/*!< [0..1] OTP power mode status. Reports the power mode status during OTP programming. 0b00: BUS-ID emulation mode; 0b01: OTP emulation mode; 0b10: BUS-ID programming mode; 0b11: OTP programming mode */
+    uint8 OTP_STATUS0;																				/*!< [0..1] OTP kart_power mode status. Reports the kart_power mode status during OTP programming. 0b00: BUS-ID emulation mode; 0b01: OTP emulation mode; 0b10: BUS-ID programming mode; 0b11: OTP programming mode */
     boolean OTP_STATUS2;																			/*!< [2] OTP mode status. 0: device is not in OTP mode; 1: device is in OTP mode */
     boolean VS;																						/*!< [3] Reports the supply condition on VS during OTP mode. 0: VS is in range; 1: VS is above overvoltage or below undervoltage threshold */
     boolean VDD_PROG;																				/*!< [4] Reports the supply condition on VDD_PROG during OTP mode. 0: VDD_PROG is in range; 1: VDD_PROG is above overvoltage or below undervoltage threshold */
@@ -662,7 +662,7 @@ typedef struct
 } TLD7002_OTP_STATUS_t;
 
 /** TLD7002_OTP_STATUS positions */
-#define TLD7002_OTP_STATUS_OTP_STATUS0_POS								      0U					/*!< [0..1] OTP power mode status */
+#define TLD7002_OTP_STATUS_OTP_STATUS0_POS								      0U					/*!< [0..1] OTP kart_power mode status */
 #define TLD7002_OTP_STATUS_OTP_STATUS2_POS								      2U					/*!< [2] OTP mode status */
 #define TLD7002_OTP_STATUS_VS_POS										      3U					/*!< [3] Reports the supply condition on VS during OTP mode */
 #define TLD7002_OTP_STATUS_VDD_PROG_POS									      4U					/*!< [4] Reports the supply condition on VDD_PROG during OTP mode */
@@ -691,8 +691,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC1_OUT0;																					/*!< [0..7] PWM DC for OUT0 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC1_OUT1;																					/*!< [8..15] PWM DC for OUT1 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT0;																					/*!< [0..7] PWM DC for OUT0 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT1;																					/*!< [8..15] PWM DC for OUT1 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN1_0_t;
 
 /** TLD7002_PWM_DC_GPIN1_0 positions */
@@ -709,8 +709,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC1_OUT2;																					/*!< [0..7] PWM DC for OUT2 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC1_OUT3;																					/*!< [8..15] PWM DC for OUT3 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT2;																					/*!< [0..7] PWM DC for OUT2 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT3;																					/*!< [8..15] PWM DC for OUT3 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN1_1_t;
 
 /** TLD7002_PWM_DC_GPIN1_1 positions */
@@ -727,8 +727,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC1_OUT4;																					/*!< [0..7] PWM DC for OUT4 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC1_OUT5;																					/*!< [8..15] PWM DC for OUT5 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT4;																					/*!< [0..7] PWM DC for OUT4 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT5;																					/*!< [8..15] PWM DC for OUT5 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN1_2_t;
 
 /** TLD7002_PWM_DC_GPIN1_2 positions */
@@ -745,8 +745,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC1_OUT6;																					/*!< [0..7] PWM DC for OUT6 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC1_OUT7;																					/*!< [8..15] PWM DC for OUT7 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT6;																					/*!< [0..7] PWM DC for OUT6 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT7;																					/*!< [8..15] PWM DC for OUT7 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN1_3_t;
 
 /** TLD7002_PWM_DC_GPIN1_3 positions */
@@ -763,8 +763,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC1_OUT8;																					/*!< [0..7] PWM DC for OUT8 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC1_OUT9;																					/*!< [8..15] PWM DC for OUT9 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT8;																					/*!< [0..7] PWM DC for OUT8 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT9;																					/*!< [8..15] PWM DC for OUT9 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN1_4_t;
 
 /** TLD7002_PWM_DC_GPIN1_4 positions */
@@ -781,8 +781,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC1_OUT10;																				/*!< [0..7] PWM DC for OUT10 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC1_OUT11;																				/*!< [8..15] PWM DC for OUT11 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT10;																				/*!< [0..7] PWM DC for OUT10 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT11;																				/*!< [8..15] PWM DC for OUT11 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN1_5_t;
 
 /** TLD7002_PWM_DC_GPIN1_5 positions */
@@ -799,8 +799,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC1_OUT12;																				/*!< [0..7] PWM DC for OUT12 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC1_OUT13;																				/*!< [8..15] PWM DC for OUT13 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT12;																				/*!< [0..7] PWM DC for OUT12 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT13;																				/*!< [8..15] PWM DC for OUT13 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN1_6_t;
 
 /** TLD7002_PWM_DC_GPIN1_6 positions */
@@ -817,8 +817,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC1_OUT14;																				/*!< [0..7] PWM DC for OUT14 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC1_OUT15;																				/*!< [8..15] PWM DC for OUT15 mapped to GPIN1. Contains the direct control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT14;																				/*!< [0..7] PWM DC for OUT14 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC1_OUT15;																				/*!< [8..15] PWM DC for OUT15 mapped to GPIN1. Contains the direct kart_control duty cycle via GPIN1 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN1_7_t;
 
 /** TLD7002_PWM_DC_GPIN1_7 positions */
@@ -835,8 +835,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC0_OUT0;																					/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT0. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC0_OUT1;																					/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT1. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT0;																					/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT0. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT1;																					/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT1. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN0_0_t;
 
 /** TLD7002_PWM_DC_GPIN0_0 positions */
@@ -853,8 +853,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC0_OUT2;																					/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT2. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC0_OUT3;																					/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT3. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT2;																					/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT2. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT3;																					/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT3. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN0_1_t;
 
 /** TLD7002_PWM_DC_GPIN0_1 positions */
@@ -871,8 +871,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC0_OUT4;																					/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT4. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC0_OUT5;																					/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT5. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT4;																					/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT4. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT5;																					/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT5. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN0_2_t;
 
 /** TLD7002_PWM_DC_GPIN0_2 positions */
@@ -889,8 +889,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC0_OUT6;																					/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT6. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC0_OUT7;																					/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT7. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT6;																					/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT6. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT7;																					/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT7. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN0_3_t;
 
 /** TLD7002_PWM_DC_GPIN0_3 positions */
@@ -907,8 +907,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC0_OUT8;																					/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT8. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC0_OUT9;																					/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT9. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT8;																					/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT8. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT9;																					/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT9. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN0_4_t;
 
 /** TLD7002_PWM_DC_GPIN0_4 positions */
@@ -925,8 +925,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC0_OUT10;																				/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT10. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC0_OUT11;																				/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT11. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT10;																				/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT10. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT11;																				/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT11. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN0_5_t;
 
 /** TLD7002_PWM_DC_GPIN0_5 positions */
@@ -943,8 +943,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC0_OUT12;																				/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT12. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC0_OUT13;																				/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT13. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT12;																				/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT12. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT13;																				/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT13. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN0_6_t;
 
 /** TLD7002_PWM_DC_GPIN0_6 positions */
@@ -961,8 +961,8 @@ typedef struct
  */
 typedef struct
 {
-    uint8 DC0_OUT14;																				/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT14. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
-    uint8 DC0_OUT15;																				/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT15. Contains the fail-safe duty cycle and direct control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT14;																				/*!< [0..7] Fail-safe PWM DC and GPIN0 DC for OUT14. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
+    uint8 DC0_OUT15;																				/*!< [8..15] Fail-safe PWM DC and GPIN0 DC for OUT15. Contains the fail-safe duty cycle and direct kart_control duty cycle via GPIN0 configuration. 0x00: 0 % to 0xFF: 100 % */
 } TLD7002_PWM_DC_GPIN0_7_t;
 
 /** TLD7002_PWM_DC_GPIN0_7 positions */
@@ -1592,7 +1592,7 @@ typedef struct
     uint8 DIAG_WDT_SET;																				/*!< [0..2] Watchdog timeout. 0x0: 10 ms; 0x1: 20 ms; 0x2: 50 ms; 0x3: 100 ms; 0x4: 200 ms; 0x5: 500 ms; 0x6: 1000 ms; 0x7: 2000 ms */
     uint8 VFWD_VLED_TH;																				/*!< [3..6] Thresholds for the short to VLED - LSB=1.25 V. 0x0: 1.25 V; 0x1: 2.5 V; 0x2: 3.75 V; 0x3: 5 V; 0x4: 6.25 V; 0x5: 7.5 V; 0x6: 8.75 V; 0x7: 10 V; 0x8: 11.25 V; 0x9: 12.5 V; 0xA: 13.75 V; 0xB: 15 V; 0xC: 16.25 V; 0xD: 17.5 V; 0xE: 18.75 V; 0xF: 20 V */
     uint8 VFWD_VS_TH;																				/*!< [7..10] Thresholds for the short to VS - LSB=1.25 V. 0x0: 1.25 V; 0x1: 2.5 V; 0x2: 3.75 V; 0x3: 5 V; 0x4: 6.25 V; 0x5: 7.5 V; 0x6: 8.75 V; 0x7: 10 V; 0x8: 11.25 V; 0x9: 12.5 V; 0xA: 13.75 V; 0xB: 15 V; 0xC: 16.25 V; 0xD: 17.5 V; 0xE: 18.75 V; 0xF: 20 V */
-    uint8 DIAG_mgnt_SET;																			/*!< [11] Fault management configuration. 0: no state change (default); 1: change to init mode (power stages are turned off) if VS AND VLED >= VDEN_thresholds */
+    uint8 DIAG_mgnt_SET;																			/*!< [11] Fault management configuration. 0: no state change (default); 1: change to init mode (kart_power stages are turned off) if VS AND VLED >= VDEN_thresholds */
     boolean DIAG_OUT_SWOFF_DC100;																	/*!< [12] Diagnostic switch OFF for outputs with 100% duty cycle. 0: the output with DC=100% will not have the diagnostic switch OFF.; 1: the output with DC=100% will be switched OFF every 4 period to allow the short detection with its adjacent output. */
     boolean PWR_OFF_LOAD_EN;																		/*!< [13] Power off load global enable function. 0: Power off load global disabled; 1: Power off load global enabled */
     boolean DIAG_SLS_LOCK;																			/*!< [14] Lock of the SLS thresholds. 0: SLS thresholds used by LED driver can be programmed via HSLI.; 1: SLS thresholds used by LED driver is only from OTP. */
@@ -1695,7 +1695,7 @@ typedef struct
     uint8 HSLI_T_BITSMPL;																			/*!< [0..1] Setup of the sampling time. 0x0: (default) 6,7,8; 0x1: 7,8,9; 0x2: 8,9,10; 0x3: 9,10,11 */
     uint8 HSLI_T_SYNC_BREAK;																		/*!< [2..3] Setup of the sync break time. 0x0: 100 us; 0x1: 250 us; 0x2: 750 us; 0x3: (default) 1 ms  */
     uint8 HSLI_T_FRAME_DLY;																			/*!< [4..6] Setup of the frame delay time. 0x0: 50 us; 0x1: 100 us; 0x2: 250 us; 0x3: 500 us; 0x4: (default) 1 ms; 0x5: 2,5 ms */
-    boolean RAMP_EN;																				/*!< [7] Led Driver RAMP enable for each channels. 0: fast slew rate is set for all output channels; can be changed via REG_WRITE; 1: normal slew rate is set for all output channels; can be changed via REG_WRITE */
+    boolean RAMP_EN;																				/*!< [7] Led Kart_Driver RAMP enable for each channels. 0: fast slew rate is set for all output channels; can be changed via REG_WRITE; 1: normal slew rate is set for all output channels; can be changed via REG_WRITE */
     /*!< [8..15] RESERVED. Returns 0 if read; should be written with 0. */
 } TLD7002_OTP_REG9_t;
 
@@ -1703,14 +1703,14 @@ typedef struct
 #define TLD7002_OTP_REG9_HSLI_T_BITSMPL_POS								      0U					/*!< [0..1] Setup of the sampling time */
 #define TLD7002_OTP_REG9_HSLI_T_SYNC_BREAK_POS							      2U					/*!< [2..3] Setup of the sync break time */
 #define TLD7002_OTP_REG9_HSLI_T_FRAME_DLY_POS							      4U					/*!< [4..6] Setup of the frame delay time */
-#define TLD7002_OTP_REG9_RAMP_EN_POS									      7U					/*!< [7] Led Driver RAMP enable for each channels */
+#define TLD7002_OTP_REG9_RAMP_EN_POS									      7U					/*!< [7] Led Kart_Driver RAMP enable for each channels */
 #define TLD7002_OTP_REG9_RESERVED_POS									      8U					/*!< [8..15] RESERVED */
 
 /** TLD7002_OTP_REG9 masks */
 #define TLD7002_OTP_REG9_HSLI_T_BITSMPL_MSK								  0x0003U					/*!< [0..1] Setup of the sampling time */
 #define TLD7002_OTP_REG9_HSLI_T_SYNC_BREAK_MSK							  0x000CU					/*!< [2..3] Setup of the sync break time */
 #define TLD7002_OTP_REG9_HSLI_T_FRAME_DLY_MSK							  0x0070U					/*!< [4..6] Setup of the frame delay time */
-#define TLD7002_OTP_REG9_RAMP_EN_MSK									  0x0080U					/*!< [7] Led Driver RAMP enable for each channels */
+#define TLD7002_OTP_REG9_RAMP_EN_MSK									  0x0080U					/*!< [7] Led Kart_Driver RAMP enable for each channels */
 #define TLD7002_OTP_REG9_RESERVED_MSK									  0xFF00U					/*!< [8..15] RESERVED */
 
 /* TLD7002_OTP_REG10 register */

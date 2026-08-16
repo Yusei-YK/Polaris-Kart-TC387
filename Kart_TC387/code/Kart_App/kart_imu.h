@@ -1,6 +1,5 @@
 #ifndef KART_IMU_H_
 #define KART_IMU_H_
-
 #include "zf_common_headfile.h"
 #include "kart_calc.h"
 

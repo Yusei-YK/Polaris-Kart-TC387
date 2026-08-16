@@ -1,6 +1,5 @@
 #ifndef KART_STEER_CTRL_H_
 #define KART_STEER_CTRL_H_
-
 #include "zf_common_headfile.h"
 #include "kart_calib.h"     /* 软限位 KART_STEER_DELTA_LIMIT_L/R、KART_STEER_LOOP_SIGN */
 #include "kart_pid.h"
@@ -58,9 +57,9 @@
  * 只在【真要打角的倒车】起作用:直行倒车锁中位其实无所谓,
  *   但"蛇形后退十米"要真打角,不换增益会振。
  * 【待实车标定】先按前进组的 1/3 比例给,上车看 VOFA 转角波形有无过冲再调。 */
-#define KART_STEER_KP_BACK              (5.0f)      /* 前进 15 的 1/3 */
-#define KART_STEER_KI_BACK              (0.5f)      /* 与前进同:顶静摩擦用,不动 */
-#define KART_STEER_KD_BACK              (2.5f)      /* 前进 0 → 加阻尼压振 */
+#define STEER_KP_BACK              (5.0f)      /* 前进 15 的 1/3 */
+#define STEER_KI_BACK              (0.5f)      /* 与前进同:顶静摩擦用,不动 */
+#define STEER_KD_BACK              (2.5f)      /* 前进 0 → 加阻尼压振 */
 
 /* 航向外环 PID 默认。输出是"目标转角计数",限幅到转角软限位量级。
  * 【2026-07-28 赛前复核:30 已验证,不是占位,不动】原注释写"先占位"已作废。
@@ -100,7 +99,7 @@ extern kart_steer_ctrl_t kart_steer;
 
 /* --- 对外接口 --- */
 void  kart_steer_ctrl_init(void);           // 初始化两级 PID,默认全不使能
-void  kart_steer_ctrl_update(void);         // 串级一拍:放主循环 steer_abs_update 之后
+void  kart_steer_ctrl_update(void);         // 串级一拍:放主循环 kart_steer_abs_update 之后
 
 void  kart_steer_set_angle_enable(uint8 en);    // 内环使能
 void  kart_steer_set_head_enable(uint8 en);     // 外环使能(会连带开内环)

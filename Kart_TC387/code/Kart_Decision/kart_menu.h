@@ -1,6 +1,5 @@
 #ifndef KART_MENU_H_
 #define KART_MENU_H_
-
 #include "zf_common_headfile.h"
 
 /*
@@ -9,7 +8,7 @@
  * 功能：取代 VOFA m 命令，通过屏幕菜单 + 五向按键完成科目切换、语音控制、
  *       路线录制和复现准备。所有界面顶部固定显示状态栏（Yaw/遥控在线/挡位）。
  *
- * 交互：UP/DOWN 光标移动，MID 确认/开始录制/结束录制，LEFT 返回上级。
+ * 交互：UP/DOWN 光标移动，MID 确认/开始录制/结束录制，KART_LEFT 返回上级。
  *       旋转编码器等价接入：旋钮左右旋 = UP/DOWN，旋钮按下 = MID。
  *       调数值时旋钮比连点按键顺手，两套输入完全等价，可任意混用。
  *       RIGHT 刻意留空（"右=进入"与 MID 重复，误触会直接执行菜单项）。
@@ -43,7 +42,7 @@
  * 复现流程：
  *   选"Playback" → 弹出槽位选择（显示[已录xxx点]/[Empty]）→
  *   选中后自动执行 z(清里程) + f<slot>(加载) + 退出遥控模式 →
- *   等待 START 键触发 playback（由 kart_mission.c 状态机处理）。
+ *   等待 START 键触发 kart_playback（由 kart_mission.c 状态机处理）。
  *
  * 语音控制流程：
  *   选"Voice Control" → 显示"Speak Command" → 调用kart_odom_reset()清零 →
@@ -74,22 +73,22 @@
 
 /* 旋转编码器:转动=光标/改值(等价连按 UP/DOWN),按下=确认(等价 MID)。
  * 转一格发一次按键事件,长按 UP/DOWN 的活儿现在可以直接旋。 */
-#define KART_MENU_ENC_A         (BOARD_ENC_A_PIN)
-#define KART_MENU_ENC_B         (BOARD_ENC_B_PIN)
-#define KART_MENU_ENC_SW        (BOARD_ENC_SW_PIN)
+#define MENU_ENC_A         (BOARD_ENC_A_PIN)
+#define MENU_ENC_B         (BOARD_ENC_B_PIN)
+#define MENU_ENC_SW        (BOARD_ENC_SW_PIN)
 
 /* EC11 每个机械档位输出 4 个正交边沿。软件解码计满这么多计数才算"转过一格",
  * 否则转一下光标窜 4 行。若实测一格走多行就加大、转一格没反应就减小。 */
-#define KART_MENU_ENC_DIV       (4)
+#define MENU_ENC_DIV       (4)
 
 /* 待处理格数上限。快速猛旋一把可能攒下十几格,一次全兑成按键会让光标窜到底、
  * 或把参数一路顶到边界,不好收手,故截顶。 */
-#define KART_MENU_ENC_PEND_MAX  (8)
+#define MENU_ENC_PEND_MAX  (8)
 
 /* -------------------- 槽位分配 -------------------- */
 #define KART_MENU_S1_SLOT_NUM   (1)             /* 科目一槽位数(Flash slot 0, 1500点) */
 #define KART_MENU_S2_GATE_SLOT_NUM (5)          /* 科目二门洞槽位数(Flash slot 1~5, 每槽1000点) */
-#define KART_MENU_S2_RET_SLOT_NUM  (5)          /* 科目二返程槽位数(Flash slot 6~10, 每槽510点) */
+#define MENU_S2_RET_SLOT_NUM  (5)          /* 科目二返程槽位数(Flash slot 6~10, 每槽510点) */
 
 /* -------------------- 对外接口 -------------------- */
 

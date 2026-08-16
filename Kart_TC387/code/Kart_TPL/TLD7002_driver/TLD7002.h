@@ -2,7 +2,7 @@
  *  @file TLD7002.h
  *  @author Infineon
  *  @date 17.06.2022
- *	@brief TLD7002 specific Device Driver implementation from Infineon Technologies AG.
+ *	@brief TLD7002 specific Device Kart_Driver implementation from Infineon Technologies AG.
  *	@note  This file includes the implementation for the TLD7002 hardware access layer.
  *
  ***********************************************************************************************************************
@@ -24,7 +24,7 @@
 /******************************************************************************/
 /*	Includes																  */
 /******************************************************************************/
-/** Definition for external type definition include file */
+/** Definition for external type definition kart_include file */
 #define TLD7002_INCLUDE_EXT_TYPEDEF							1			/**< external types.h shall be included */
 
 #if(TLD7002_INCLUDE_EXT_TYPEDEF)
@@ -100,7 +100,7 @@ typedef struct
 #define TLD7002_FRAME_FUN_BRDC_DC_SYNC						   0x0U		/**< Broadcast duty cycle synchronization */
 #define TLD7002_FRAME_FUN_DC_UPDATE							   0x1U		/**< Duty cycle shadow register update */
 #define TLD7002_FRAME_FUN_READ_OST							   0x2U		/**< Request diagnostics */
-#define TLD7002_FRAME_FUN_HWCR								   0x3U		/**< Hardware control frame */
+#define TLD7002_FRAME_FUN_HWCR								   0x3U		/**< Hardware kart_control frame */
 #define TLD7002_FRAME_FUN_WRITE_REG							   0x4U		/**< Write register */
 #define TLD7002_FRAME_FUN_READ_REG							   0x5U		/**< Read register */
 #define TLD7002_FRAME_FUN_PM_CHANGE							   0x6U		/**< Power mode change */
@@ -268,8 +268,8 @@ typedef struct
  */
 typedef struct
 {
-    boolean OUT_STAT;                                                   /*!< [0] Output state flag. 0: power output
-                                                                         * channel is in OFF state; 1: power output
+    boolean OUT_STAT;                                                   /*!< [0] Output state flag. 0: kart_power output
+                                                                         * channel is in OFF state; 1: kart_power output
                                                                          * channel is in ON state */
     boolean VFWD_WRN;                                                   /*!< [1] Forward voltage warning flag. 0: no
                                                                          * forward voltage warning detected; 1: there
@@ -299,8 +299,8 @@ typedef struct
 } TLD7002_FRAME_OUTPUT_STATUS_BYTE_OUT_t;
 
 /** FRAME_OUTPUT_STATUS_BYTE_OUT masks */
-#define TLD7002_OUTPUT_STATUS_BYTE_OUT_OUT_STAT_MSK      (1U << 0U)     /*!< [0] Output state flag. 0: power output
-                                                                         * channel is in OFF state; 1: power output
+#define TLD7002_OUTPUT_STATUS_BYTE_OUT_OUT_STAT_MSK      (1U << 0U)     /*!< [0] Output state flag. 0: kart_power output
+                                                                         * channel is in OFF state; 1: kart_power output
                                                                          * channel is in ON state */
 #define TLD7002_OUTPUT_STATUS_BYTE_OUT_VFWD_WRN_MSK      (1U << 1U)     /*!< [1] Forward voltage warning flag. 0: no
                                                                          * forward voltage warning detected; 1: there
@@ -329,8 +329,8 @@ typedef struct
                                                                          * open load condition detected */
 
 /** FRAME_OUTPUT_STATUS_BYTE_OUT positions */
-#define TLD7002_OUTPUT_STATUS_BYTE_OUT_OUT_STAT_POS      0U             /*!< [0] Output state flag. 0: power output
-                                                                         * channel is in OFF state; 1: power output
+#define TLD7002_OUTPUT_STATUS_BYTE_OUT_OUT_STAT_POS      0U             /*!< [0] Output state flag. 0: kart_power output
+                                                                         * channel is in OFF state; 1: kart_power output
                                                                          * channel is in ON state */
 #define TLD7002_OUTPUT_STATUS_BYTE_OUT_VFWD_WRN_POS      1U             /*!< [1] Forward voltage warning flag. 0: no
                                                                          * forward voltage warning detected; 1: there
@@ -443,7 +443,7 @@ typedef TLD7002_FRAME_OUTPUT_STATUS_BYTE_t TLD7002_FRAME_HWCR_RESET_STATUS_t;
 #define TLD7002_HWCR_RESET_STATUS_OUT_SHRT_WRN_POS			TLD7002_OUTPUT_STATUS_BYTE_OUT_SHRT_WRN_POS	/*!< Bit 6 */
 #define TLD7002_HWCR_RESET_STATUS_VLED_VS_UV_POS			TLD7002_OUTPUT_STATUS_BYTE_VLED_VS_UV_POS	/*!< Bit 7 */
 
-/** Definition for frame POWER_MODE. Master power mode change byte comprises the commanded power mode state. */
+/** Definition for frame POWER_MODE. Master kart_power mode change byte comprises the commanded kart_power mode state. */
 #define TLD7002_FRAME_PM_INIT_MODE							   0x0U		/**< enter init mode */
 #define TLD7002_FRAME_PM_RES1								   0x1U		/**< reserved */
 #define TLD7002_FRAME_PM_FAIL_SAFE_MODE						   0x2U		/**< enter fail safe mode */
@@ -800,7 +800,7 @@ typedef struct
     uint8 slave_rc;														/*!< slave rolling counter */
 } TLD7002_READ_OST_FRAME_t;
 
-/* HWCR - Hardware control */
+/* HWCR - Hardware kart_control */
 #define TLD7002_POS_HWCR_SYNC								   0U
 #define TLD7002_POS_HWCR_CRC_REQ_S_ADD						   1U
 #define TLD7002_POS_HWCR_MRC_DLC_FUN						   2U

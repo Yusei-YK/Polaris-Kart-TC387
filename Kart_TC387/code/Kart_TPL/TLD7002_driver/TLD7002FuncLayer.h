@@ -71,7 +71,7 @@ enum TLDerr TLD7002setDutyReadDiag(uint16 *dutyArray, TLD7002_NetworkInstance_t 
 void TLD7002broadcastDCsync(TLD7002_NetworkInstance_t *HSLInetwork );
 void TLD7002HWCRall(TLD7002_NetworkInstance_t *HSLInetwork, uint8 add);
 
-/**************** Device Driver Wrappers TX,RX combined ***********/
+/**************** Device Kart_Driver Wrappers TX,RX combined ***********/
 uint8 TLD7002_TRX_READ_REG_DLC1(TLD7002_NetworkInstance_t *mcldNet, char *buffTxRx, uint8 add, uint8 startAdd);
 uint8 TLD7002_TRX_DC_UPDATE_14BIT(TLD7002_NetworkInstance_t *mcldNet, char *buffTxRx, uint8 add, uint16 *dc_val);
 uint8 TLD7002_TRX_DC_UPDATE_8BIT(TLD7002_NetworkInstance_t *mcldNet, char *buffTxRx, uint8 add, uint16 *dc_val);

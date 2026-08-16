@@ -1,6 +1,5 @@
 #ifndef KART_REMOTE_H_
 #define KART_REMOTE_H_
-
 #include "zf_common_headfile.h"
 #include "kart_calib.h"     /* 通道端点标定、KART_REMOTE_STEER_SIGN */
 #include "board_pins.h"
@@ -97,7 +96,7 @@ void kart_remote_rx_callback(void);
 void kart_remote_control_update(void);
 
 /* 接管退出时调:速度清零关使能、转向回中关内环(等同急停)。
- * mission 切出 REMOTE 模式时由 stop_all 统一处理,此接口备用。 */
+ * kart_mission 切出 REMOTE 模式时由 stop_all 统一处理,此接口备用。 */
 void kart_remote_control_stop(void);
 
 /* 读当前三段挡位(VOFA/调试用)。 */

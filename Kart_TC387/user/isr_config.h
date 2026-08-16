@@ -32,8 +32,8 @@
 // 中断优先级不能设置为相同值，所有中断优先级都必须设置为不一样的值
 //======================================================特别注意====================================================
 
-//ISR_PRIORITY：   TC387具有255个中断优先级可以设置 1-255，0优先级表示不开启中断，255为最高优先级
-//INT_SERVICE：    宏定义决定中断由谁处理，也称为服务提供者（在TC387中，中断被叫做服务），可设置范围IfxSrc_Tos_cpu0 IfxSrc_Tos_cpu1 IfxSrc_Tos_cpu2 IfxSrc_Tos_cpu3 IfxSrc_Tos_dma  不可设置为其他值
+//ISR_PRIORITY：   Kart_TC387具有255个中断优先级可以设置 1-255，0优先级表示不开启中断，255为最高优先级
+//INT_SERVICE：    宏定义决定中断由谁处理，也称为服务提供者（在Kart_TC387中，中断被叫做服务），可设置范围IfxSrc_Tos_cpu0 IfxSrc_Tos_cpu1 IfxSrc_Tos_cpu2 IfxSrc_Tos_cpu3 IfxSrc_Tos_dma  不可设置为其他值
 
 
 //如果INT_SERVICE设置为IfxSrc_Tos_dma的话，ISR_PRIORITY的可设置范围则是0-127。

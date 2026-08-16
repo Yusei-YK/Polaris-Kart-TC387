@@ -25,7 +25,7 @@ static void hw_test_gpio_init(void)
     gpio_init(KART_KEY_LEFT_PIN,  GPI, 0, GPI_FLOATING_IN);
     gpio_init(KART_KEY_RIGHT_PIN, GPI, 0, GPI_FLOATING_IN);
     gpio_init(KART_KEY_MID_PIN,   GPI, 0, GPI_FLOATING_IN);
-    gpio_init(KART_KEY_START_PIN, GPI, 0, GPI_FLOATING_IN);
+    gpio_init(KEY_START_PIN, GPI, 0, GPI_FLOATING_IN);
 
     knob_a_last = gpio_get_level(KART_KNOB_A_PIN);
     knob_b_last = gpio_get_level(KART_KNOB_B_PIN);
@@ -97,7 +97,7 @@ void kart_hw_test_run(void)
         ips200_show_int(80, 64, gpio_get_level(KART_KEY_UP_PIN), 2);
         ips200_show_string(0, 80,  "DOWN:");
         ips200_show_int(80, 80, gpio_get_level(KART_KEY_DOWN_PIN), 2);
-        ips200_show_string(0, 96,  "LEFT:");
+        ips200_show_string(0, 96,  "KART_LEFT:");
         ips200_show_int(80, 96, gpio_get_level(KART_KEY_LEFT_PIN), 2);
         ips200_show_string(0, 112, "RGHT:");
         ips200_show_int(80, 112, gpio_get_level(KART_KEY_RIGHT_PIN), 2);
@@ -106,7 +106,7 @@ void kart_hw_test_run(void)
         ips200_show_string(0, 144, "ESW :");
         ips200_show_int(80, 144, gpio_get_level(KART_KNOB_SW_PIN), 2);
         ips200_show_string(0, 160, "STRT:");
-        ips200_show_int(80, 160, gpio_get_level(KART_KEY_START_PIN), 2);
+        ips200_show_int(80, 160, gpio_get_level(KEY_START_PIN), 2);
 
         system_delay_ms(2);         /* 2ms 轮询,够软件读旋钮 */
     }

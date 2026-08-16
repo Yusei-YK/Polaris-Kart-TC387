@@ -169,12 +169,12 @@ static void voice_feed_byte(uint8 byte)
  * 故 isr.c 的 uart10_rx_isr 保持为空即可,也不会和日志 TX 抢中断。 */
 void kart_voice_init(void)
 {
-    /* 2026-08-12 KART_VOICE_MUTED：4D7 人体视觉链路选了 VOFA 口(UART_10)，
+    /* 2026-08-12 VOICE_MUTED：4D7 人体视觉链路选了 VOFA 口(UART_10)，
      * 而语音模块插的是同一个坐子 —— 硬件上已经不在了。
      * 这里必须不碰 uart_init：它末尾是 uart_rx_interrupt(n, 0)，
      * 而本函数在 cpu0_main 里比 kart_person_link_init() 晚，
      * 一跑就把链路刚开的 RX 中断又关了 → 一个字节也收不到。 */
-#if (!BOARD_VOICE_SHARES_AUX_UART && !KART_VOICE_MUTED)
+#if (!BOARD_VOICE_SHARES_AUX_UART && !VOICE_MUTED)
     /* 独占外设:启动时就配好 115200,一直挂着。 */
     uart_init(BOARD_VOICE_UART_INDEX, BOARD_VOICE_UART_BAUD,
               BOARD_VOICE_UART_TX_PIN, BOARD_VOICE_UART_RX_PIN);
@@ -191,7 +191,7 @@ void kart_voice_init(void)
  * 会以 115200 喷向语音模块 RX。不共用时本函数只做状态复位。 */
 void kart_voice_uart_acquire(void)
 {
-#if (BOARD_VOICE_SHARES_AUX_UART && !KART_VOICE_MUTED)
+#if (BOARD_VOICE_SHARES_AUX_UART && !VOICE_MUTED)
     uart_init(BOARD_VOICE_UART_INDEX, BOARD_VOICE_UART_BAUD,
               BOARD_VOICE_UART_TX_PIN, BOARD_VOICE_UART_RX_PIN);
 #endif
@@ -203,7 +203,7 @@ void kart_voice_uart_acquire(void)
  * 不共用时是空操作,语音口继续以 115200 挂着无妨。 */
 void kart_voice_uart_release(void)
 {
-#if (BOARD_VOICE_SHARES_AUX_UART && !KART_VOICE_MUTED)
+#if (BOARD_VOICE_SHARES_AUX_UART && !VOICE_MUTED)
     uart_init(BOARD_AUX_UART_INDEX, BOARD_AUX_UART_BAUD_FAST,
               BOARD_AUX_UART_TX_PIN, BOARD_AUX_UART_RX_PIN);
 #endif
@@ -215,7 +215,7 @@ void kart_voice_poll(void)
 {
     uint8 byte;
 
-#if KART_VOICE_MUTED
+#if VOICE_MUTED
     /* UART_10 已归 4D7 视觉链路：uart_query_byte() 会与链路的 RX 中断
      * 抢同一个 1 字节 FIFO，谁先取走另一方就永远收不到。
      * 在入口拦而不在 kart_mission 的三个调用处拦：入口拦一次不可能漏。
@@ -276,10 +276,10 @@ void kart_voice_dispatch(void)
 
     /* 鸣笛/运动/门洞复现都是长动作:任一忙时本拍不取新命令,让当前动作跑完再处理
      * 下一条,保证串行执行不打架(队列缓冲已在解析层入队)。
-     * 【2026-07-29 补 playback】原来漏判 kart_playback_is_running():门洞复现
-     * 途中来一条语音命令会立刻被派发,motion 和 playback 同时写 target_delta /
+     * 【2026-07-29 补 kart_playback】原来漏判 kart_playback_is_running():门洞复现
+     * 途中来一条语音命令会立刻被派发,kart_motion 和 kart_playback 同时写 target_delta /
      * target 速度,两个都在 5ms/10ms 拍上互相覆盖 → 车在门洞里乱打方向。
-     * playback 自己不看队列,所以只能在这里拦。 */
+     * kart_playback 自己不看队列,所以只能在这里拦。 */
     if(kart_horn_is_busy() || kart_motion_is_busy() || kart_playback_is_running())
     {
         return;
@@ -298,7 +298,7 @@ void kart_voice_dispatch(void)
          *   0x04左转向 0x05右转向 0x06远光 0x07近光
          *   0x08雾灯 0x09双闪 0x0A车内照明 0x0B雨刷
          * 对应 KART_LIGHT_CMD_LEFT_TURN..WIPER(枚举值 1..8)。
-         * 灯光是瞬时命令不占用 horn/motion 忙标志,动画推进在主循环 10ms 拍。 */
+         * 灯光是瞬时命令不占用 kart_horn/kart_motion 忙标志,动画推进在主循环 10ms 拍。 */
         kart_light_set_command((kart_light_command_t)
                                (KART_LIGHT_CMD_LEFT_TURN + (cmd.cmd - KART_VOICE_CMD_LEFT_LIGHT)));
     }
@@ -308,10 +308,10 @@ void kart_voice_dispatch(void)
     }
     else if(cmd.cmd >= 0x15 && cmd.cmd <= 0x19)
     {
-        /* 门洞前进 5 条 → gate playback 槽位:与 Gate Playback 菜单同一映射。
+        /* 门洞前进 5 条 → gate kart_playback 槽位:与 Gate Playback 菜单同一映射。
          *   0x15 门洞一左侧→slot1  0x16 门洞一→slot2  0x17 门洞二→slot3
          *   0x18 门洞三→slot4      0x19 门洞三右侧→slot5
-         * 复用已验证的 playback 链路:加载→启动(相对当前位姿复现)。
+         * 复用已验证的 kart_playback 链路:加载→启动(相对当前位姿复现)。
          * 前提同手动选槽:说命令时车须已停在发车区标记点且车头摆正。
          *
          * 【2026-07-29 删掉了这里的 kart_odom_reset()】
@@ -319,7 +319,7 @@ void kart_voice_dispatch(void)
          *   语音返回(0x1A~0x1E)就无从实现 —— 这是返回功能的头号阻塞项。
          * 为什么删了行为不变(可证明,不是赌):kart_playback_start() 自己把
          *   当前位姿快照存进 play_origin_x/y/yaw(kart_playback.c:204-207),
-         *   poll 里只用 odom - play_origin 的【差值】(345-346)。
+         *   poll 里只用 kart_odom - play_origin 的【差值】(345-346)。
          *   reset 只改绝对值不改差值 → 本条复现的每一拍输出完全一致。
          * 发车区原点改为整个科目二只清一次,在 mission_enter(MISSION_SUBJECT_2)。 */
         uint8 slot = (uint8)(cmd.cmd - 0x15 + 1);

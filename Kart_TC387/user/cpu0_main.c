@@ -21,7 +21,7 @@
 #include "kart_light.h"
 #include "kart_multicore.h"
 #include "kart_params.h"
-#include "isr.h"                 /* g_kart_tick_5ms + 调度器监测 g_sched_* */
+#include "isr.h"                 /* g_tick_5ms + 调度器监测 g_sched_* */
 #include "kart_vtrack.h"
 #include "kart_bench.h"
 #include "kart_wifi.h"
@@ -50,13 +50,13 @@
  *   ch0=本秒 SYNC_Hz ch1=init 返回码 ch2=本轮发出字节 ch3=本轮收到字节
  *   ch4=芯片应答字节(ch3-ch2) ch5=累计 SYNC 边沿
  * 期望:屏 7×15 全亮 + ch1=0 + ch0 数千。判读表见函数注释。测完必须改回 0。 */
-#define KART_DOT_ALLON_TEST (0)
+#define DOT_ALLON_TEST (0)
 
 /* 菜单系统开关。当前 IPS200 走软件 SPI(P02.8/P20.3)，与无线 SPI2 不冲突。 */
 #define KART_USE_MENU   (1)
 
 /* 协作式调度器开关(A/B 对照):
- *   =1  5ms PIT 节拍(g_kart_tick_5ms)驱动的分频调度,控制窗口对齐硬件拍;
+ *   =1  5ms PIT 节拍(g_tick_5ms)驱动的分频调度,控制窗口对齐硬件拍;
  *   =0  回退旧主循环(末尾 system_delay_ms(5),周期=执行耗时+5ms,非恒定)。
  * 出问题可临时改 0 用旧主循环 A/B 对照定位。 */
 #define KART_USE_SCHEDULER  (1)
@@ -100,10 +100,10 @@ static void kart_task_5ms(void)
     kart_steer_abs_update();
 
     /* 复现一拍:Pure Pursuit 找前视点覆写航向外环目标。
-     * 必须在 steer_abs_update 之后、steer_ctrl_update 之前。 */
+     * 必须在 kart_steer_abs_update 之后、kart_steer_ctrl_update 之前。 */
     kart_playback_poll();
 
-    /* 转向串级一拍:紧跟 steer_abs_update 吃到本拍最新 center_delta。 */
+    /* 转向串级一拍:紧跟 kart_steer_abs_update 吃到本拍最新 center_delta。 */
     kart_steer_ctrl_update();
 
     /* 速度环未使能时强制后轮归零;转向串级独立运行,不受速度环门控。 */
@@ -127,12 +127,12 @@ static void kart_task_5ms(void)
  *   kart_light.h  : bit14 = col0(最左) ... bit0 = col13(最右)
  *   show_frame()  : bit0  = C0 (最左) ... bit14 = C14(最右)
  * 左右转向箭头一旦镜像就是反向指示,属于评分错误,所以这层不能省。
- * 若实机发现整体还是左右颠倒,把 KART_LIGHT_MIRROR_COL 改成 0 即可。 */
-#define KART_LIGHT_MIRROR_COL   (1)
+ * 若实机发现整体还是左右颠倒,把 LIGHT_MIRROR_COL 改成 0 即可。 */
+#define LIGHT_MIRROR_COL   (1)
 
 static uint16 kart_light_bits_to_dot(uint16 v)
 {
-#if KART_LIGHT_MIRROR_COL
+#if LIGHT_MIRROR_COL
     uint16 r = 0;
     uint8  i;
 
@@ -184,9 +184,9 @@ static void kart_task_10ms(void)
     kart_debug_uart_poll();     /* 只采样组帧入环形缓冲(内部再 4tick=20ms 门控) */
 
     /* 摄像头只做帧率统计和"无信号"判定,不碰图像、不阻塞。
-     * KART_CAMERA_ENABLE=0 时是空函数。 */
+     * CAMERA_ENABLE=0 时是空函数。 */
     kart_camera_poll();
-    kart_person_link_poll(10);      /* 人体视觉链路：失联计时 + 合成 vtrack，不收字节 */
+    kart_person_link_poll(10);      /* 人体视觉链路：失联计时 + 合成 kart_vtrack，不收字节 */
 
     kart_task_light_10ms();     /* 灯板动画推进 + 帧下发(仅科目二有灯光命令时生效) */
 
@@ -202,7 +202,7 @@ static void kart_task_10ms(void)
 /* 50ms 拍:IPS200 屏幕刷新(换页时整屏 clear 耗时大,严禁进控制窗口)。
  * 按键扫描已搬到 10ms 拍,这里只画。 */
 static void kart_task_50ms(void){
-#if KART_AIMG_ENABLE
+#if AIMG_ENABLE
     /* 下载器有线图传：先抢一份新帧，再让菜单刷新；否则相机调试页可能
      * 已经消费并释放这一帧。发送忙时 request 立即返回，不会排队。 */
     static uint16 aimg_elapsed_ms = 0u;
@@ -210,7 +210,7 @@ static void kart_task_50ms(void){
     if(MISSION_IDLE == kart_mission_get_mode())
     {
         aimg_elapsed_ms = (uint16)(aimg_elapsed_ms + 50u);
-        if(aimg_elapsed_ms >= KART_AIMG_PERIOD_MS)
+        if(aimg_elapsed_ms >= AIMG_PERIOD_MS)
         {
             aimg_elapsed_ms = 0u;
             (void)kart_assist_img_request();
@@ -226,7 +226,7 @@ static void kart_task_50ms(void){
     kart_menu_poll();
 #endif
 
-#if KART_WIFI_ENABLE
+#if WIFI_ENABLE
     /* 只在停车 IDLE 时按配置帧率请求图像。真正的 SPI 分块发送仍在主循环
      * background_poll，绝不把阻塞发送塞进 50ms 任务。过去这里漏了请求入口，
      * 即使链路连通也只会发示波器、不会出现实时图像。 */
@@ -235,7 +235,7 @@ static void kart_task_50ms(void){
     if(MISSION_IDLE == kart_mission_get_mode())
     {
         wifi_img_elapsed_ms = (uint16)(wifi_img_elapsed_ms + 50u);
-        if(wifi_img_elapsed_ms >= KART_WIFI_IMG_PERIOD_MS)
+        if(wifi_img_elapsed_ms >= WIFI_IMG_PERIOD_MS)
         {
             wifi_img_elapsed_ms = 0u;
             (void)kart_wifi_request_image();
@@ -278,7 +278,7 @@ int core0_main(void)
     kart_control_init();        // 速度环:填默认 PID、清滤波、默认不使能(等 VOFA 发 e1 才输出)
     kart_steer_ctrl_init();     // 转向串级:填内/外环默认 PID,默认全不使能(等 VOFA 发 se1 才驱动转向电机)
 
-    /* SCC8660 彩色摄像头(凌瞳)。默认 KART_CAMERA_ENABLE=0,此调用编译期就是空壳,
+    /* SCC8660 彩色摄像头(凌瞳)。默认 CAMERA_ENABLE=0,此调用编译期就是空壳,
      * 已验证的低速基线一个字节都不受影响。
      *
      * 位置有两个硬约束,别挪:
@@ -289,7 +289,7 @@ int core0_main(void)
      *      (scc8660 单次 set_config 超时 240ms,还带重试),开了 5ms 环再阻塞就是漏拍。
      *
      * 返回非 0 只代表没摄像头/配置串口不通,不当致命错误处理:车照常能跑科目一/二。
-     * 诊断看 g_kart_cam_init_ret / _try / _us。 */
+     * 诊断看 g_cam_init_ret / _try / _us。 */
     (void)kart_camera_init();
 
     /* 下载器虚拟串口图传。本函数把 UART_0 最终配置为
@@ -319,14 +319,14 @@ int core0_main(void)
     dot_matrix_screen_test_rows_static();
 #endif
 
-#if KART_DOT_ALLON_TEST
+#if DOT_ALLON_TEST
     /* SYNC 驱动全亮自检(死循环永不返回):必须放在 dot_matrix_screen_init() 之后
      * (init 里已 exti_init 开了 P15.8 中断),且放在 kart_imu_init() 之前 ——
      * IMU 标定要静置约 6s,没必要为看灯等它;此处也不需要 5ms 拍。
      * 每秒(=每换一行)VOFA 6 通道,以被调函数为准:
      *   ch0=本秒 SYNC 边沿数(≈SYNC_Hz)  ch1=累计 SYNC 边沿  ch2=开机 init 返回码
      *   ch3=当前点亮行地址 0~6          ch4=本秒 UART1 收到字节  ch5=init 期芯片应答字节
-     * 测完必须把 KART_DOT_ALLON_TEST 改回 0,否则死循环进不了主循环。 */
+     * 测完必须把 DOT_ALLON_TEST 改回 0,否则死循环进不了主循环。 */
     dot_matrix_screen_test_all_on_sync();
 #endif
 
@@ -346,20 +346,20 @@ int core0_main(void)
 
     /* 视觉跟踪初始化。必须在 kart_camera_init() 之后、开 5ms 中断前。
      * 内部分配金字塔内存 24KB @ cpu0_dsram，清空点集。
-     * KART_VTRACK_ENABLE=0 时编译期空壳。 */
+     * VTRACK_ENABLE=0 时编译期空壳。 */
     kart_vtrack_init();
 
     /* 图像预处理初始化。必须在 kart_camera_init() 之后、视觉处理前。
      * 内部分配预处理缓冲 38KB @ cpu0_dsram，清统计量。
-     * KART_PREPROCESS_ENABLE=0 时编译期空壳。 */
+     * PREPROCESS_ENABLE=0 时编译期空壳。 */
     kart_preprocess_init();
 
-    /* 性能基准测试初始化。必须在 kart_vtrack_init() 之后（B9 会调 vtrack）。
+    /* 性能基准测试初始化。必须在 kart_vtrack_init() 之后（B9 会调 kart_vtrack）。
      * 内部分配假图 38KB @ cpu0_dsram，清零统计量。
-     * KART_BENCH_ENABLE=0 时编译期空壳。 */
+     * BENCH_ENABLE=0 时编译期空壳。 */
     kart_bench_init();
 
-#if KART_WIFI_ENABLE
+#if WIFI_ENABLE
     /* 【必须先关掉 P15.8 的 EXTI —— 2026-08-11 实测定位的 bug】
      * 现象：插上无线模块就收不到 VOFA 日志，拔了就正常。
      *
@@ -376,14 +376,14 @@ int core0_main(void)
      * 那是个被 KART_DOT_ROWS_TEST(=0) 卡死的诊断函数，正常开机流程根本不调。
      * 也就是说“让出来无代价”这个结论成立的前提一直没被执行过。
      *
-     * 放在这里（dot init 之后、wifi init 之前）而不是改 dot init：
-     * KART_WIFI_ENABLE=0 时仍保留点阵 SYNC 诊断能力不动。 */
+     * 放在这里（dot init 之后、kart_wifi init 之前）而不是改 dot init：
+     * WIFI_ENABLE=0 时仍保留点阵 SYNC 诊断能力不动。 */
     exti_disable(DOT_MATRIX_SCREEN_SYNC_PIN);
 #endif
 
     /* WiFi 图传初始化。必须在 kart_camera_init() 之后（图像地址指向 scc8660_image）
      * 且在 pit_ms_init() 之前（内部可能阻塞数秒）。
-     * KART_WIFI_ENABLE=0 时编译期空壳。返回非 0 表示没连上，不影响跑车。 */
+     * WIFI_ENABLE=0 时编译期空壳。返回非 0 表示没连上，不影响跑车。 */
     (void)kart_wifi_init();
 
     /* 开 5ms 周期中断,进 cc60_pit_ch0_isr 调 kart_imu_update()。
@@ -424,7 +424,7 @@ int core0_main(void)
     kart_playback_init();
 
     /* 现场可调参数表:从 DFlash 页127 载入上次存的值(无有效数据则用各模块宏的
-     * 出厂默认),再推给速度环/航向外环。必须放在 control/steer_ctrl init 之后,
+     * 出厂默认),再推给速度环/航向外环。必须放在 kart_control/kart_steer_ctrl init 之后,
      * 否则会被它们的默认值覆盖回去。 */
     kart_params_init();
 
@@ -433,7 +433,7 @@ int core0_main(void)
     if(!imu_init_ok)
     {
         /* IMU 通信初始化连续失败：保持全车无动力，状态屏显 FFF。
-         * 遥控模式仍可用；自动任务由 mission 入口的 IMU ready 闸拒绝。 */
+         * 遥控模式仍可用；自动任务由 kart_mission 入口的 IMU ready 闸拒绝。 */
         kart_mission_set_mode(MISSION_FAULT);
     }
 
@@ -452,7 +452,7 @@ int core0_main(void)
      * 抢占 CPU，表现为动画十几秒后才出现且播放巨卡。
      *
      * 此处已经满足端口所有权顺序：摄像头配置早已结束；点阵灯板在 PLINK
-     * 选 LIGHT 口时由 KART_DOT_MATRIX_MUTED 静默；菜单动画也已播放完成。
+     * 选 LIGHT 口时由 DOT_MATRIX_MUTED 静默；菜单动画也已播放完成。
      * 5ms PIT 虽已启动，但 kart_person_link_poll() 只在下方正式主循环开始后
      * 才会执行，因此现在初始化 UART 不存在“先 poll 后 init”的窗口。 */
     kart_person_link_init();
@@ -462,12 +462,12 @@ int core0_main(void)
 
 #if KART_USE_SCHEDULER
     /* ===== 5ms PIT 节拍驱动的协作式调度器 =====
-     * 时基:cc60_pit_ch0_isr 每 5ms 末尾 g_kart_tick_5ms++(硬件拍,不受主循环耗时影响)。
+     * 时基:cc60_pit_ch0_isr 每 5ms 末尾 g_tick_5ms++(硬件拍,不受主循环耗时影响)。
      * 调度:主循环忙等 tick 变化,每变一拍分发一次;分频出 10/50/100ms 拍。
      * 漏拍:一次跨 >1 tick(某拍耗时超 5ms 或被长任务挤占),累加 overrun 差值,只跑最新一拍,不补跑历史。
      * 空转:tick 未变时反复调 background_poll 非阻塞排空日志环形缓冲(每次 ≤16B,≤347us)。 */
     {
-        uint32 last_tick = g_kart_tick_5ms;
+        uint32 last_tick = g_tick_5ms;
         uint32 sched_count = 0;         /* 已分发拍计数,用于 10/50/100ms 分频 */
 
         for(;;)
@@ -480,7 +480,7 @@ int core0_main(void)
             kart_wifi_background_poll();     /* WiFi图传后台推进(分块发送、重连) */
             kart_assist_img_background_poll(); /* IDLE 下用官方协议连续发送一帧 */
 
-            now_tick = g_kart_tick_5ms;
+            now_tick = g_tick_5ms;
             if(now_tick == last_tick)
             {
                 continue;               /* 本拍未到,继续排日志/空转 */

@@ -14,7 +14,7 @@
 #include "kart_wifi.h"            /* WiFi 图传链路诊断 CH39-CH44(借用视觉通道,摄像头未启用) */
 #include "kart_person_link.h"     /* TC4D7 人体视觉链路诊断 CH39-CH44(与视觉通道二选一) */
 #include "isr.h"                 /* 协作式调度器运行时监测 g_sched_* */
-#include "kart_assist_img.h"      /* CH12 图传占用标志 g_kart_aimg_busy */
+#include "kart_assist_img.h"      /* CH12 图传占用标志 g_aimg_busy */
 #include "kart_multicore.h"       /* CH22/23/31 core3 视觉耗时与投递统计 */
 #include <string.h>
 
@@ -35,25 +35,29 @@
  * 注意 VOFA 端的通道数要同步改成50,否则帧长不匹配、波形会全体错位。 */
 /* 【日志通道组】1 = 科目三跟随精简 26 路,0 = 原 51 路全量(科目一/二/四用)。
  * 精简的理由是分析耗时:51 列 CSV 每次定位都要先翻注释找列号,而跟随段真正
- * 在变的只有二十几路,其余是 playback/遥控/odom,全程恒定。
+ * 在变的只有二十几路,其余是 kart_playback/遥控/kart_odom,全程恒定。
  * 【改这个宏必须同步改 VOFA 的通道数】否则帧长不匹配、波形全体错位。 */
-#define KART_LOG_PROFILE_S3         (1)
+#define LOG_PROFILE_S3         (1)
 
-#if KART_LOG_PROFILE_S3
-#define KART_LOG_CHANNELS           (26U)  /* VOFA 通道数:帧长 26*4+4=108B */
+#if LOG_PROFILE_S3
+#define KART_LOG_CHANNELS           (32U)  /* VOFA 通道数:帧长 32*4+4=132B。
+                                            * 【改这个宏必须同步补 ch[] 赋值】ch[] 是按宏开维的栈数组，
+                                            * 手写索引只到 25 时 ch[26..29] 是未初始化栈内存，
+                                            * 编译不报错，VOFA 上是随机跳变的四路 —— 比没有这几路更坏。
+                                            * 132B @460800(12bit/B) = 3.4ms，周期 20ms，余量够。 */
 #else
 #define KART_LOG_CHANNELS           (51U)  /* 帧长 51*4+4=208B */
 #endif
 
 static volatile uint16 kart_event_id = 0U;
-static volatile uint8  kart_event_level = KART_EVENT_LEVEL_INFO;
+static volatile uint8  kart_event_level = EVENT_LEVEL_INFO;
 static volatile uint32 kart_event_tick = 0U;
 
 void kart_debug_uart_set_event(uint16 event_id, uint8 level)
 {
     kart_event_id = event_id;
     kart_event_level = level;
-    kart_event_tick = g_kart_tick_5ms;
+    kart_event_tick = g_tick_5ms;
 }
 
 #define KART_LOG_FLAG_PLAYBACK      (1U << 0)
@@ -130,7 +134,7 @@ static float kart_log_update_unwrapped_yaw(float yaw_deg)
 }
 
 /* VOFA JustFloat：N 个小端 float32 + 帧尾 00 00 80 7F。
- * TC387 为小端，float 内存布局与 JustFloat 一致，直接按字节入环形缓冲。
+ * Kart_TC387 为小端，float 内存布局与 JustFloat 一致，直接按字节入环形缓冲。
  * 整帧原子:先查空间够 payload+4 帧尾才写,否则整帧丢弃(丢帧计数),
  * 绝不写半帧——半帧会让 VOFA 后续所有帧错位。 */
 static void kart_log_send_justfloat(const float *ch, uint32 count)
@@ -267,9 +271,9 @@ void kart_debug_uart_poll(void)
 
     {
         float ch[KART_LOG_CHANNELS];
-#if KART_LOG_PROFILE_S3
+#if LOG_PROFILE_S3
         {
-            const kart_vision_result_t *v = kart_multicore_vision_get();
+            const kart_vision_result_t *v = multicore_vision_get();
             const kart_follow_out_t    *f = kart_follow_get();
 
             ch[0]  = (float)kart_mission_get_mode();
@@ -277,8 +281,8 @@ void kart_debug_uart_poll(void)
             ch[2]  = (float)flags;
             ch[3]  = (float)kart_mission_get_s3_vision_seq();         /* 不涨=没出帧 */
             ch[4]  = (float)kart_mission_get_s3_vision_age() * 10.0f; /* 快照年龄 ms */
-            ch[5]  = (float)kart_multicore_vision_last_us() * 0.001f; /* core3 单帧耗时 ms */
-            ch[6]  = (float)kart_multicore_vision_reject();
+            ch[5]  = (float)multicore_vision_last_us() * 0.001f; /* core3 单帧耗时 ms */
+            ch[6]  = (float)multicore_vision_reject();
             ch[7]  = (float)g_sched_overrun_count;                    /* 搬核后应压平 */
             ch[8]  = (float)g_sched_max_exec_us;
             ch[9]  = (float)v->valid;
@@ -296,11 +300,34 @@ void kart_debug_uart_poll(void)
             ch[21] = (float)v->hue_pct;
             ch[22] = (float)v->dark_pct;
             ch[23] = (float)v->over_pct;
-            ch[24] = (float)g_kart_cam_wb_ret;                        /* 0=白平衡已锁 */
-            ch[25] = (float)g_kart_cam_fps;
+            ch[24] = (float)g_cam_wb_ret;                        /* 0=白平衡已锁 */
+            ch[25] = (float)g_cam_fps;
+
+            /* ---- 逆光诊断四路。这四个数是现场分开"三种失败"的唯一依据 ---- */
+            /* CH26 回退级别:0=绝对门够用(光照正常) / 1=绝对门失守、相对种子救回
+             *              / 2=连亮度饱和度门都过不了、靠宽松重建救回 / 3=两级全败。
+             * 逆光跑一趟看这一路的分布，就知道现在到底吃力在哪一层。 */
+            ch[26] = (float)v->adapt_level;
+            /* CH27 全图最小色相偏差(127=没有任何像素算出过色相)。
+             * 板子明明在画面里而这一路长期 >20 → HUE_CENTER 该重标了，不是算法的问题。 */
+            ch[27] = (float)v->min_dev;
+            /* CH28 连续性门累计拒绝数(看差分)。涨得快=真有第二个同色物体在抢，
+             * 或者 MAX_JUMP_PX 太紧;恒不涨而现场明显跟错了=这道门没生效。 */
+            ch[28] = (float)v->cont_reject;
+            /* CH29 core3 单帧最坏耗时 ms。回退是只在失败帧才付的额外开销，
+             * 中位耗时看不出来，必须看峰值。这一路是"改识别别把控制搞坏"的看门狗。 */
+            ch[29] = (float)multicore_vision_max_us() * 0.001f;
+            /* CH30 min_dev 那个像素的 d=max-min(255=全图无有效色相)。
+             * 这一路是"逆光到底还剩不剩信息"的判据:>=12 位数够、5~10 临界、<=4 没救。
+             * CH27 说色相算出来是多少，这一路说那个数还可不可信。 */
+            ch[30] = (float)v->min_dev_d;
+            /* CH31 全图 (R5+G5+B5) 均值。AE 的行为探针 —— AE 就是把它稳在目标上，
+             * 所以"CH31 基本不动而 CH30 塌了"就是背光欠曝:AE 保背景、牺牲前景。
+             * 【不读相机曝光值】那要借 UART1 9600，链路 init 后已还给灯板，会阻塞。 */
+            ch[31] = (float)v->mean_sum;
         }
 #else
-        ch[0]  = (float)kart_mission_get_mode();          /* 0 mission模式 */
+        ch[0]  = (float)kart_mission_get_mode();          /* 0 kart_mission模式 */
         ch[1]  = (float)kart_mission_get_subject1_stage(); /* 1 科目一阶段 */
         ch[2]  = (float)flags;                             /* 2 状态标志位 */
         ch[3]  = (float)kart_playback_get_index();         /* 3 播放索引 */
@@ -315,12 +342,12 @@ void kart_debug_uart_poll(void)
         /* 【CH12 换过】原 yaw 零偏:标定完就是常数,一整条日志同一个值,占一路没意义。
          * 现改成图传占用标志 —— 它是漏拍的直接嫌疑人:阻塞整帧写发生在 exec_us
          * 计时窗之外,CH25/26 看不见,只能靠这一路和 CH27 对齐时间轴才能定位。
-         * KART_AIMG_ENABLE=0 时恒 0(变量本体在 #if 之外定义,取值安全)。 */
-        ch[12] = (float)g_kart_aimg_busy;                  /* 12 图传正在阻塞发送:跟随段应恒0 */
+         * AIMG_ENABLE=0 时恒 0(变量本体在 #if 之外定义,取值安全)。 */
+        ch[12] = (float)g_aimg_busy;                  /* 12 图传正在阻塞发送:跟随段应恒0 */
         ch[13] = kart_steer_get_target_yaw();              /* 13 目标航向 */
         /* 【CH14 换过】原转向 raw:CH16(角度)和 CH28(实测转角)已覆盖同一路信息。
          * 现改成视觉快照年龄(ms)。上一版日志缺这一路,导致无法区分
-         * "识别不到目标" 和 "视觉根本没在更新、follow 一直吃旧快照" ——
+         * "识别不到目标" 和 "视觉根本没在更新、kart_follow 一直吃旧快照" ——
          * 判读:相机 30FPS,正常应在 0~33ms 抖动;贴着 100ms 上限说明采集链断了。 */
         ch[14] = (float)kart_mission_get_s3_vision_age() * 10.0f; /* 14 视觉快照年龄(ms):>100=采集链断 */
         ch[15] = kart_steer_get_target_delta();            /* 15 目标转角 */
@@ -333,9 +360,9 @@ void kart_debug_uart_poll(void)
          *   ② 跑完一套随机动作后 CH17/18 与卷尺真值之差 → 位置误差总预算。
          *     <0.25m 稳;0.25~0.6m 靠加长门洞前直线引入段救;>1m 现有传感器救不回来
          *     (全车只有 IMU+编码器,没有任何能看见门洞的传感器)。 */
-        ch[17] = kart_odom_get_x();                        /* 17 odom x(发车区系,米) */
-        ch[18] = kart_odom_get_y();                        /* 18 odom y(发车区系,米) */
-        ch[19] = kart_odom_get_dist();                     /* 19 odom 里程(标量,倒车也增) */
+        ch[17] = kart_odom_get_x();                        /* 17 kart_odom x(发车区系,米) */
+        ch[18] = kart_odom_get_y();                        /* 18 kart_odom y(发车区系,米) */
+        ch[19] = kart_odom_get_dist();                     /* 19 kart_odom 里程(标量,倒车也增) */
         /* CH20~23 是复用通道,含义随当前跑的分支变(省 4 个通道,不新增协议字段):
          *   方案B正向复现     : 20/21=投影当前x/y      22/23=瞄准点x/y
          *   科目三倒车 OLMode=0: 20=航向误差(度) 21=纠偏量(计数) 22=索引k 23=最终打角
@@ -362,8 +389,8 @@ void kart_debug_uart_poll(void)
         if((MISSION_SUBJECT_3 == kart_mission_get_mode())
            && (S3_PHASE1_FOLLOW == kart_mission_get_subject3_stage()))
         {
-            ch[22] = (float)kart_multicore_vision_last_us() * 0.001f; /* 22 core3 识别耗时(ms) */
-            ch[23] = (float)kart_multicore_vision_reject();  /* 23 投递被拒累计 */
+            ch[22] = (float)multicore_vision_last_us() * 0.001f; /* 22 core3 识别耗时(ms) */
+            ch[23] = (float)multicore_vision_reject();  /* 23 投递被拒累计 */
         }
         else
         {
@@ -391,7 +418,7 @@ void kart_debug_uart_poll(void)
         }
         ch[33] = kart_control_get_target_cmd();            /* 33 斜坡前的请求目标(上层写入):与CH4(斜坡后)对比即斜坡曲线,CH4追不上CH33就是在爬坡 */
 
-        /* 34-38 摄像头采集链路(KART_CAMERA_ENABLE=0 时恒为 0/OFF)。
+        /* 34-38 摄像头采集链路(CAMERA_ENABLE=0 时恒为 0/OFF)。
          * 判读方法:
          *   CH34 实测帧率:应≈配置的 FPS(默认60)。明显偏低=PCLK分频或曝光时间问题。
          *   CH35 状态:0=未启用 1=init失败 2=有init无VSYNC(查DVP排线/走线长度) 3=正常出帧。
@@ -399,35 +426,35 @@ void kart_debug_uart_poll(void)
          *   CH37 丢帧累计:上层处理来不及。只要不是持续暴涨就可接受,阶段0无消费者应为0。
          *   CH38 摄像头中断最长耗时(us):关键指标。DMA中断优先级70、VSYNC 62 都高于5ms控制PIT的50,
          *        会抢占控制环。此值 + CH26(调度最大耗时) 若逼近5000us,就必须调优先级或降分辨率/帧率。 */
-        ch[34] = (float)g_kart_cam_fps;
+        ch[34] = (float)g_cam_fps;
         ch[35] = (float)kart_camera_state();
         /* 【CH36 换过】原错位帧累计:那是走线/电源的硬件指标,不随这次调参变。
          * 现改成固定白平衡下发结果。原因:kart_camera.c 在 init 后下发
          * scc8660_set_white_balance(),失败时【静默】沿用基础初始化 —— 也就是
          * 退回自动白平衡。而白平衡一动,黄色就会漂出色相窗口,整条识别链全废,
          * 表现和 "认不到板子" 完全一样。这一路必须能看见:0=已锁定,0xFF=没执行。 */
-        ch[36] = (float)g_kart_cam_wb_ret;                 /* 36 白平衡锁定结果:0成功,255未执行 */
-        ch[37] = (float)g_kart_cam_drop_count;
-        ch[38] = (float)g_kart_cam_isr_max_us;
+        ch[36] = (float)g_cam_wb_ret;                 /* 36 白平衡锁定结果:0成功,255未执行 */
+        ch[37] = (float)g_cam_drop_count;
+        ch[38] = (float)g_cam_isr_max_us;
 
-        /* 39-44 科目三跟随。两套语义二选一，由 KART_PERSON_LINK_ENABLE 切，
+        /* 39-44 科目三跟随。两套语义二选一，由 PERSON_LINK_ENABLE 切，
          * 这6路的分支切换不改变当前50通道总数。
          * 2026-08-12 新增第二套：TC4D7 人体视觉链路诊断。
          * 为何共用这6个通道：两套不可能同时在跑
-         * （387 本地视觉靠 KART_VISION_ENABLE，它和 4D7 链路是两条路），
+         * （387 本地视觉靠 VISION_ENABLE，它和 4D7 链路是两条路），
          * 而每加一通道都要改 VOFA 配置 + 帧长，上车时极容易忘。 */
-#if KART_WIFI_ENABLE
+#if WIFI_ENABLE
         /* WiFi 联调临时诊断：不改菜单，直接用 VOFA CH39-CH44
          * 分开 SPI 版本读取、热点入网和 TCP 建链三层。
          * CH39 link:0未启用 1=SPI失败 2=WiFi失败 3=TCP失败 4=全通
          * CH40 init_ret；CH41 version_ok；CH42 INT高；CH43 IP字符串非空；CH44重试数。 */
-        ch[39] = (float)g_kart_wifi_link;
-        ch[40] = (float)g_kart_wifi_init_ret;
+        ch[39] = (float)g_wifi_link;
+        ch[40] = (float)g_wifi_init_ret;
         ch[41] = ('\0' != wifi_spi_version[0]) ? 1.0f : 0.0f;
         ch[42] = (0 != gpio_get_level(WIFI_SPI_INT_PIN)) ? 1.0f : 0.0f;
         ch[43] = ('\0' != wifi_spi_ip_addr_port[0]) ? 1.0f : 0.0f;
-        ch[44] = (float)g_kart_wifi_reconnect_cnt;
-#elif KART_PERSON_LINK_ENABLE
+        ch[44] = (float)g_wifi_reconnect_cnt;
+#elif PERSON_LINK_ENABLE
         /* 【人体视觉链路诊断。上车先看 CH39，它能一下子分开四种毛病】
          *   CH39 link 0=一个字节都没收到(接线/共地/4D7 未发/中断未使能)
          *             1=有字节但从未成帧(波特率不对 / 帧头或 CRC 与对端不一致)
@@ -439,11 +466,11 @@ void kart_debug_uart_poll(void)
          *        (上电时刻可能切到帧中间)，持续涨就是真有问题。
          *        为何求和不分开：6 个通道不够，而定位时先只需知道"脏不脏"；
          *        真要细分拿调试器 watch kart_person_link_get_stat() 的七个字段
-         *   CH42 height_norm 目标框高/图高 (0..1)。【用它标 KART_PLINK_NEAR_HEIGHT_STOP】
+         *   CH42 height_norm 目标框高/图高 (0..1)。【用它标 PLINK_NEAR_HEIGHT_STOP】
          *        把人站到想让车停住的距离，读此值，减 0.05 当 STOP，再减 0.07 当 RESUME
          *   CH43 bearing_deg >0=人在车右。【符号看它，但别用它标 HALF_FOV】
          *        符号：人站车右前方 → 此值应为正。反了就是人往右、车往左。
-         *        【为何不能拿它标 KART_PLINK_HALF_FOV_DEG】本值 = err_norm × HALF_FOV，
+         *        【为何不能拿它标 PLINK_HALF_FOV_DEG】本值 = err_norm × HALF_FOV，
          *        人走到画面边缘时 err_norm 恒为 1，所以 CH43 恒等于当前假设值
          *        —— 拿它标自己是个恒等式，标不出东西。
          *        正确做法是拿几何真值比：人站车前 X 米、横偏 Y 米，
@@ -477,13 +504,13 @@ void kart_debug_uart_poll(void)
 #else
         /* 2026-08-11 从 WiFi 图传诊断切回来:图传方案暂停(CH39 恒为 1 = SPI 读不到
          * 模块固件版本号,数据通路不通),改回屏 + 菜单。WiFi 那 6 行赋值原样注释在
-         * 下面,KART_WIFI_ENABLE 改回1时把两段对调即可,通道总数仍是50。
+         * 下面,WIFI_ENABLE 改回1时把两段对调即可,通道总数仍是50。
          *
          *   CH39 valid  1=本帧认到引导板      CH40 reject 0通过 1面积不足 2太窄 3宽高比 4填充率
          *   CH41 width_px 标定 f_px 用          CH42 dist_m 视觉反算距离
-         *   CH43 bearing_deg >0=目标在右      CH44 follow state 0=IDLE 1=TRACKING 2=HOLD 3=LOST
+         *   CH43 bearing_deg >0=目标在右      CH44 kart_follow state 0=IDLE 1=TRACKING 2=HOLD 3=LOST
          *
-         * 【KART_VISION_ENABLE / KART_FOLLOW_ENABLE 都是 0 时这 6 条恒为 0】
+         * 【VISION_ENABLE / FOLLOW_ENABLE 都是 0 时这 6 条恒为 0】
          * 两个 get() 返回的是模块内部静态快照,禁用时也有定义、可安全取,只是不更新。 */
         {
             const kart_vision_result_t *v = kart_vision_get();

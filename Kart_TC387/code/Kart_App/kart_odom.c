@@ -91,8 +91,8 @@ float    kart_odom_get_yaw(void)  { return kart_odom.yaw_now; }
 float    kart_odom_get_dist(void) { return kart_odom.dist_sum; }
 
 /* 一致位姿快照:x/y/yaw/路程一次性打包取出。
- * kart_odom_update() 跑在 5ms 中断(cc60_pit_ch0_isr),消费者(playback_poll/
- * steer_ctrl)跑在主循环,同核。分开 get 会被中断插到半路取到撕裂值(旧 x+新 yaw)。
+ * kart_odom_update() 跑在 5ms 中断(cc60_pit_ch0_isr),消费者(kart_playback_poll/
+ * kart_steer_ctrl)跑在主循环,同核。分开 get 会被中断插到半路取到撕裂值(旧 x+新 yaw)。
  * 关中断复制四字段 → 拿到整帧一致位姿,再恢复。复制只几条指令,关中断窗口极短。 */
 void kart_odom_get_snapshot(kart_odom_snapshot_t *snap)
 {

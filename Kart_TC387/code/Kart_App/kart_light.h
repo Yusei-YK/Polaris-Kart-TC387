@@ -1,6 +1,5 @@
 #ifndef KART_LIGHT_H_
 #define KART_LIGHT_H_
-
 #include "zf_common_headfile.h"
 
 /*

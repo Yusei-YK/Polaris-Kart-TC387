@@ -46,13 +46,11 @@
 *                  GND                 电源地
 *                  ------------------------------------
 ********************************************************************************************************************/
-
 #include "zf_common_fifo.h"
 #include "zf_driver_delay.h"
 #include "zf_driver_gpio.h"
 #include "zf_driver_uart.h"
 #include "TLD7002FuncLayer.h"
-
 #include "zf_device_tld7002.h"
 
 TLD7002_NetworkInstance_t tld7002_device;

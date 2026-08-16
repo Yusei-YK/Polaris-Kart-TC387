@@ -1,10 +1,10 @@
 /*********************************************************************************************************************
-* TC387 Opensourec Library 即（TC387 开源库）是一个基于官方 SDK 接口的第三方开源库
+* Kart_TC387 Opensourec Library 即（Kart_TC387 开源库）是一个基于官方 SDK 接口的第三方开源库
 * Copyright (c) 2022 SEEKFREE 逐飞科技
 *
-* 本文件是 TC387 开源库的一部分
+* 本文件是 Kart_TC387 开源库的一部分
 *
-* TC387 开源库 是免费软件
+* Kart_TC387 开源库 是免费软件
 * 您可以根据自由软件基金会发布的 GPL（GNU General Public License，即 GNU通用公共许可证）的条款
 * 即 GPL 的第3版（即 GPL3.0）或（您选择的）任何后来的版本，重新发布和/或修改它
 *
@@ -36,12 +36,11 @@
 
 #ifndef _isr_h
 #define _isr_h
-
 #include "zf_common_headfile.h"
 
 /* 5ms PIT 节拍计数器:cc60_pit_ch0_isr 每拍 +1,主循环协作式调度靠它对齐周期。
  * volatile:中断改、主循环读,禁编译器缓存。uint32 差分天然处理回绕。 */
-extern volatile uint32 g_kart_tick_5ms;
+extern volatile uint32 g_tick_5ms;
 
 /* 协作式调度器运行时监测(cpu0_main.c 定义,VOFA 读):
  *   last_exec_us  —— 上一轮任务分发耗时(微秒)

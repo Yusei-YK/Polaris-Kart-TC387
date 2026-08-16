@@ -32,7 +32,7 @@ char gBuffTxRx [sizeof (TLD7002_READ_OST_FRAME_t) +5];
 
 #define max(a, b)               ((a)>(b)?a:b)
 
-#define TLD7002_HSLI_SPEED_BPS  (1000000)  /* acceptable down to 20kbps, even if datasheet states 200kbps, when setting very low speed
+#define TLD7002_HSLI_SPEED_BPS  (1000000)  /* acceptable down to 20kbps, even if datasheet states 200kbps, when setting very low kart_speed
                                           interframe delay has to be extended (or all bit = 1 will be read as an interframe delay)*/
 #define TLD7002_BYTE_TIME_uS    (((8 + 2) * 1000000) / TLD7002_HSLI_SPEED_BPS)
 
@@ -50,7 +50,7 @@ extern void    tld7002_gpin0_set_level         (uint8 state);
  */
 void TLD7002initDrivers(TLD7002_NetworkInstance_t *HSLInetwork)
 {
-    /* initialize serial pin and speed that will be used for TLD7002-16 control */
+    /* initialize serial pin and kart_speed that will be used for TLD7002-16 kart_control */
     HSLInetwork->trx_function = tld7002_send_buffer;
     HSLInetwork->rcv_function = tld7002_read_buffer;
     HSLInetwork->rcv_empty_buffer = tld7002_clean_buffer;
@@ -303,7 +303,7 @@ boolean OTPemuComplete(uint16 *otp_cfg, TLD7002_NetworkInstance_t *HSLInetwork, 
     TLD7002_TRX_PM_CHANGE(HSLInetwork, gBuffTxRx, BROADCAST_ADDRESS, TLD7002_FRAME_PM_INIT_MODE);
     system_delay_us_register(1005); /* delay counted starting from the last bit transmitted */
 
-    /* case Step2: Sent twice the INIT mode request to sync MRC and RC of the Device Driver and TLD7002-16 device */
+    /* case Step2: Sent twice the INIT mode request to sync MRC and RC of the Device Kart_Driver and TLD7002-16 device */
     TLD7002_TRX_PM_CHANGE(HSLInetwork, gBuffTxRx, BROADCAST_ADDRESS, TLD7002_FRAME_PM_INIT_MODE);
     system_delay_us_register(7000); /* If the device/devices under programming never reaches/reach the failsafe state the delay*/
     /* can be reduced to 1005us, delay counted starting from the last bit transmitted          */
@@ -429,7 +429,7 @@ enum TLDerr TLD7002readExtNTC(float *tempNTC, TLD7002_NetworkInstance_t *HSLInet
             GPIN_mV = ((uint32)ADCvalue * 5496) / 1023; /* calculate ADC value in mV.  GPINx has 5496mV full scale 1023 value */
             GPIN_v = (float)GPIN_mV / 1000;
             *tempNTC = (1.8928 * GPIN_v * GPIN_v * GPIN_v * GPIN_v) - (23.013 * GPIN_v * GPIN_v * GPIN_v) +
-                       (95.833 * GPIN_v * GPIN_v) - 181.98 * (GPIN_v) + 169.94 ; /* fourth order aproximation formula for temp calc
+                       (95.833 * GPIN_v * GPIN_v) - 181.98 * (GPIN_v) + 169.94 ; /* fourth order aproximation formula for temp kart_calc
                                                         = 1.8928x4 - 23.013x3 + 95.833x2 - 181.98x + 169.94 */
         }
         else

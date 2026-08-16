@@ -1,6 +1,5 @@
 #ifndef KART_PARAMS_H_
 #define KART_PARAMS_H_
-
 #include "zf_common_headfile.h"
 
 /*
@@ -17,75 +16,79 @@
  * 【Flash 页】占 DFlash 页 127（路径槽位用页 0~126，不冲突）。
  * ------------------------------------------------------------------
  * 存储布局(uint32 word):
- *   word[0] = MAGIC, word[1] = KART_PARAM_MAX, word[2..] = 各参数 float 位模式
+ *   word[0] = MAGIC, word[1] = PARAM_MAX, word[2..] = 各参数 float 位模式
  * 读回时 count 不符即整表判废用默认,避免加参数后读到错位的旧数据。
  * ------------------------------------------------------------------
  */
 
-#define KART_PARAMS_MAGIC       (0x4B505241u)   /* 'KPRA' */
-#define KART_PARAMS_PAGE        (127)           /* DFlash 页号（路径用 0~126） */
+#define PARAMS_MAGIC       (0x4B505241u)   /* 'KPRA' */
+#define PARAMS_PAGE        (127)           /* DFlash 页号（路径用 0~126） */
 
 typedef enum
 {
-    KART_PARAM_RAMP = 0,        /* 速度斜坡步长(脉冲/5ms 每拍),0=关 —— 治起步顿挫 */
-    KART_PARAM_PB_PROF,         /* 1=用几何速度剖面(出厂,配 Vmax=30 保守钳位),0=照抄录制速度 */
-    KART_PARAM_PB_SCALE,        /* 剖面整体倍率 —— 提速就调它(仅 PB Prof=1 时有效) */
-    KART_PARAM_PB_VMAX,         /* 复现速度上限(脉冲/5ms) */
-    KART_PARAM_PB_VMIN,         /* 复现速度地板(脉冲/5ms) —— 防低速录制段爬行 */
-    KART_PARAM_PB_ALAT,         /* 弯道横向加速度上限(m/s²) —— 越小过弯越慢越稳 */
-    KART_PARAM_PB_LDGAIN,       /* 前视距离速度增益(m per 脉冲/5ms) */
+    PARAM_RAMP = 0,        /* 速度斜坡步长(脉冲/5ms 每拍),0=关 —— 治起步顿挫 */
+    PARAM_PB_PROF,         /* 1=用几何速度剖面(出厂,配 Vmax=30 保守钳位),0=照抄录制速度 */
+    PARAM_PB_SCALE,        /* 剖面整体倍率 —— 提速就调它(仅 PB Prof=1 时有效) */
+    PARAM_PB_VMAX,         /* 复现速度上限(脉冲/5ms) */
+    PARAM_PB_VMIN,         /* 复现速度地板(脉冲/5ms) —— 防低速录制段爬行 */
+    PARAM_PB_ALAT,         /* 弯道横向加速度上限(m/s²) —— 越小过弯越慢越稳 */
+    PARAM_PB_LDGAIN,       /* 前视距离速度增益(m per 脉冲/5ms) */
     /* ---- 2026-07-28 赛前:三个原先只能改宏的量搬进菜单 ----
      * 现场调参的实际顺序是"先看跑得住不住,再决定钳多少/刹多早/看多远",
      * 这三个正是需要一趟一趟试的量,留在宏里等于现场不可调。 */
-    KART_PARAM_PB_CLAMP,        /* 复现速度总钳位(脉冲/5ms) —— 原 KART_PLAYBACK_SPEED_MAX 宏。
+    PARAM_PB_CLAMP,        /* 复现速度总钳位(脉冲/5ms) —— 原 KART_PLAYBACK_SPEED_MAX 宏。
                                  * 与 PB Vmax 的区别:Vmax 只管剖面算出来的目标,
                                  * 本项是下发给速度环之前的最后一道闸,录制速度回放也走它 */
-    KART_PARAM_PB_ABRAKE,       /* 剖面反向传播减速度(m/s²) —— 原 KART_PLAYBACK_ABRAKE 宏。
+    PARAM_PB_ABRAKE,       /* 剖面反向传播减速度(m/s²) —— 原 PLAYBACK_ABRAKE 宏。
                                  * 终点冲出去/倒车段前没减速就加大它 */
-    KART_PARAM_PB_LDMAX,        /* 前视距离上限(m) —— 原 KART_PLAYBACK_LD_MAX 宏。
+    PARAM_PB_LDMAX,        /* 前视距离上限(m) —— 原 KART_PLAYBACK_LD_MAX 宏。
                                  * 绕桩削顶(切内侧锥桶)就调小,高速画龙就调大 */
-    KART_PARAM_RC_VMAX,         /* 遥控满油门速度(脉冲/5ms) —— 录制手感,调低防打滑 */
-    KART_PARAM_HEAD_KP,         /* 航向外环 Kp —— 提速后走线画龙/发飘调它 */
+    PARAM_RC_VMAX,         /* 遥控满油门速度(脉冲/5ms) —— 录制手感,调低防打滑 */
+    PARAM_HEAD_KP,         /* 航向外环 Kp —— 提速后走线画龙/发飘调它 */
     /* 保留这两个下标只为不改变现有 Flash 参数表的后续序号；旧倒库逻辑已删除，菜单不再显示。 */
-    KART_PARAM_S1_REV_SPD,
-    KART_PARAM_S1_REV_STOP,
-    KART_PARAM_S3_OL_SPD,       /* 科目三倒车速度(脉冲/5ms,负) */
+    PARAM_S1_REV_SPD,
+    PARAM_S1_REV_STOP,
+    PARAM_S3_OL_SPD,       /* 科目三倒车速度(脉冲/5ms,负) */
     /* ---- 科目三倒车方案切换(2026-07-28)。出厂 0 = 已实车验证能完赛的老路径 ----
      * 老方案(0):里程查表索引 + 航向 P 纠偏。实车结论:不撞筒,15m 走完终点横向
      *   偏 0.5~1m。误差有界线性累积,不发散 —— 这是能完赛的方案,故设为默认。
      * 新方案(1):最近点索引 + 航向 P + 横向位置 P。老路径代码一行不删,
      *   现场发现新方案不行,菜单打回 0 即恢复,不必重新烧写。 */
-    KART_PARAM_S3_OL_MODE,      /* 0=里程查表(默认,已验证) 1=位置闭环 */
-    KART_PARAM_S3_OL_KE,        /* 横向偏差 P 增益(编码器计数/米)。0=退化成纯航向纠偏;
+    PARAM_S3_OL_MODE,      /* 0=里程查表(默认,已验证) 1=位置闭环 */
+    PARAM_S3_OL_KE,        /* 横向偏差 P 增益(编码器计数/米)。0=退化成纯航向纠偏;
                                  * 越纠越歪就取负(倒车横向反馈符号只有两种可能) */
-    KART_PARAM_S3_OL_KH,        /* 倒车航向 P 增益(编码器计数/度)。原为宏,现场不可调,
+    PARAM_S3_OL_KH,        /* 倒车航向 P 增益(编码器计数/度)。原为宏,现场不可调,
                                  * 搬进菜单。两方案共用,老方案也跟着可调 */
     /* ---- 2026-07-28 第二批:把"限制项"本身搬进菜单 ----
      * 起因:科一复刻日志前进段 493 帧目标恒定 60.00(一帧不差),说明剖面整段顶穿了
      * 钳位,PB Scale 再往上加数值上是空的。真正卡住车速的是下面这些限幅本身 ——
      * 它们过去只能改宏,现场等于不可调。要把车逼到极限就得能动它们。 */
-    KART_PARAM_SPD_IMAX,        /* 速度环积分限幅(duty)。日志实测 duty 全程没超过
+    PARAM_SPD_IMAX,        /* 速度环积分限幅(duty)。日志实测 duty 全程没超过
                                  * 7300/10000:稳态 = Kp*e + I = 200*19.4 + 3000 = 6876,
                                  * 剩下 27% 量程被 i_max=3000 锁死 —— 提速第一道墙 */
-    KART_PARAM_SPD_KP,          /* 速度环 Kp。与 Imax 共同决定稳态误差:目标 60
+    PARAM_SPD_KP,          /* 速度环 Kp。与 Imax 共同决定稳态误差:目标 60
                                  * 实测只有 40.9,差的 19 脉冲就是这里来的 */
-    KART_PARAM_STR_OUTMAX,      /* 转角内环输出限幅(duty)。提速后转向速率是硬瓶颈
+    PARAM_STR_OUTMAX,      /* 转角内环输出限幅(duty)。提速后转向速率是硬瓶颈
                                  * (实测 1800 计数/s),放大它直接提高可用角速度 */
-    KART_PARAM_PB_REVSCL,       /* 倒车段速度倍率。倒车段照抄的是【录制实测速度】,
+    PARAM_PB_REVSCL,       /* 倒车段速度倍率。倒车段照抄的是【录制实测速度】,
                                  * 而录制指令 -28 实测只有 -16.4(59%),回放再拿 -16.4
                                  * 当目标 → 每过一代掉一档,过去没有旋钮能补 */
-    KART_PARAM_SLEW_REAR,       /* 后轮 duty 每拍升幅上限。400 = 0→满约 125ms,
+    PARAM_SLEW_REAR,       /* 后轮 duty 每拍升幅上限。400 = 0→满约 125ms,
                                  * 起步/出弯加速被它限速 */
-    KART_PARAM_PB_REVCORR,      /* 倒车段航向纠偏钳位(计数)。倒车打角 =
+    PARAM_PB_REVCORR,      /* 倒车段航向纠偏钳位(计数)。倒车打角 =
                                  * 录制打角 + clamp(纠偏, ±本值)。
                                  * 【只管一处】前进复现里【夹着的】倒车段
                                  * (kart_playback.c:477,靠录制速度符号判段)。
                                  * 科目三那种"整段独立开环倒车"不看它 ——
                                  * 两条倒车路径(里程查表 / 位置闭环)都用死宏
-                                 * KART_PLAYBACK_OL_CORR_MAX=400,菜单调不动。
+                                 * PLAYBACK_OL_CORR_MAX=400,菜单调不动。
                                  * 所以科四倒车拐不进去,调本项【没用】。 */
-    KART_PARAM_MAX
-} kart_param_id_t;
+    PARAM_FLW_CRUZ,        /* 科目三跟随巡航速度(m/s)。原 FOLLOW_V_CRUISE_MS 死宏。
+                                 * 【下限 0.65 不能再低】约束是
+                                 * V_CRUISE x SLOW_MIN_RATIO(0.40) > V_MIN_MS(0.25),
+                                 * 反解 0.63 —— 再低则大方位角转弯时速度被压进堵转区。 */
+    PARAM_MAX
+} param_id_t;
 
 /* 每个参数的元数据:菜单靠它通用渲染+步进,不必为每个参数写一遍界面代码。 */
 typedef struct

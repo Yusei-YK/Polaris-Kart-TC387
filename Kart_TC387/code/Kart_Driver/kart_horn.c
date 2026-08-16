@@ -84,7 +84,7 @@ static const uint16 *horn_select_pattern(uint8 cmd)
 }
 
 /* 停止并静音。 */
-static void horn_stop(void)
+static void horn_stop_internal(void)
 {
     horn_pattern  = NULL;
     horn_step     = 0;
@@ -98,7 +98,7 @@ void kart_horn_init(void)
 {
     gpio_init(KART_HORN_GPIO_PIN, GPO, GPIO_LOW, GPO_PUSH_PULL);
     pit_ms_init(CCU60_CH1, 1);
-    horn_stop();
+    horn_stop_internal();
 }
 
 void kart_horn_start(uint8 cmd)
@@ -146,13 +146,13 @@ void kart_horn_isr(void)
                 horn_step++;
                 if(horn_step >= KART_HORN_MAX_STEPS || horn_pattern[horn_step] == 0)
                 {
-                    horn_stop();
+                    horn_stop_internal();
                     return;
                 }
             }
             else
             {
-                horn_stop();
+                horn_stop_internal();
                 return;
             }
         }
@@ -187,7 +187,7 @@ void kart_horn_isr(void)
 
 void kart_horn_stop(void)
 {
-    horn_stop();
+    horn_stop_internal();
 }
 
 uint8 kart_horn_is_busy(void)

@@ -3,7 +3,7 @@
  *  @author Infineon
  *  @date 17.06.2022
  *	@brief TLD7002 specific device driver implementation from Infineon Technologies AG.
- *	@note  This file includes the implementation for the TLD7002 control layer.
+ *	@note  This file includes the implementation for the TLD7002 kart_control layer.
  *
  ***********************************************************************************************************************
  *
@@ -613,7 +613,7 @@ void TLD7002_pm_change_fin(TLD7002_PM_CHANGE_FRAME_t *frm)
     TLD7002_generate_master_request_header(&(frm->w_power_mode_change.frame_header),
                                            &(frm->write_array[TLD7002_POS_PM_CHANGE_SYNC]));
 
-    /* set power mode and reserved byte */
+    /* set kart_power mode and reserved byte */
     frm->write_array[TLD7002_POS_PM_CHANGE_POWER_MODE] = (uint8)(frm->w_power_mode_change.PM_CHANGE);
     frm->write_array[TLD7002_POS_PM_CHANGE_RES] = TLD7002_FRAME_RES_BYTE;
 
@@ -2616,10 +2616,10 @@ uint8 TLD7002_read_reg_dlc7_val_resp(TLD7002_NetworkInstance_t *inst, TLD7002_RE
 /* Auxiliary function implementation	 									  */
 /******************************************************************************/
 
-/** @brief TLD7002 Device Driver initialization function
+/** @brief TLD7002 Device Kart_Driver initialization function
  *
  * This functions performs the required initialization tasks for the TLD7002
- * Device Driver network and has to be executed only one time.
+ * Device Kart_Driver network and has to be executed only one time.
  * Tasks:
  *   - reset master rolling counter
  *   - reset slave rolling counters

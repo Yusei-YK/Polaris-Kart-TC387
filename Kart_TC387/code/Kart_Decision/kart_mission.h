@@ -1,8 +1,7 @@
 #ifndef KART_MISSION_H_
 #define KART_MISSION_H_
-
 #include "zf_common_headfile.h"
-#include "board_pins.h"   /* KART_PERSON_LINK_ENABLE：下面 KART_S3_FOLLOW_SRC 的默认值要用 */
+#include "board_pins.h"   /* PERSON_LINK_ENABLE：下面 S3_FOLLOW_SRC 的默认值要用 */
 
 /*
  * 科目状态机(最小骨架)
@@ -23,8 +22,8 @@
  * 再 enter 新模式。保证互切无后轮/转向/蜂鸣器残留输出。
  *
  * 调用位置:
- *   kart_mission_init()  —— cpu0_main.c 初始化段(voice/horn init 之后)
- *   kart_mission_poll()  —— 主循环每拍(替代原先直接调 voice/horn)
+ *   kart_mission_init()  —— cpu0_main.c 初始化段(kart_voice/kart_horn init 之后)
+ *   kart_mission_poll()  —— 主循环每拍(替代原先直接调 kart_voice/kart_horn)
  *   kart_mission_set_mode() —— VOFA m 命令 / 后续菜单
  * ------------------------------------------------------------------
  */
@@ -67,7 +66,7 @@ typedef enum
  * 故整体改名 S3_*。改名是纯标识符替换,没动任何控制逻辑/参数值/Flash 布局
  * (kart_params 按下标存,标签串改了但索引没动,老参数照样读得回来)。
  *
- * 阶段1 有两个可选的控制源,由 KART_S3_FOLLOW_SRC 编译期选:
+ * 阶段1 有两个可选的控制源,由 S3_FOLLOW_SRC 编译期选:
  *   0 = 遥控(REMOTE):省赛已实车验证的老路子。人用遥控开一段,同时录轨。
  *   1 = 视觉跟随(VISION):摄像头认黄色引导板,kart_follow 出速度+打角,同时录轨。
  * 阶段2 两者完全相同 —— 都是 kart_playback 的开环反向复现,车头不掉转直接倒回。
@@ -84,39 +83,39 @@ typedef enum
 
 /* 阶段1 控制源。0=遥控(已验证) 1=视觉跟随(新增,待实车)。
  * 现场出问题改这里重烧即可整段退回省赛行为,不用动状态机。 */
-#define KART_S3_FOLLOW_SRC_REMOTE   (0)
-#define KART_S3_FOLLOW_SRC_VISION   (1)
+#define S3_FOLLOW_SRC_REMOTE   (0)
+#define S3_FOLLOW_SRC_VISION   (1)
 /* 2 = TC4D7 人体视觉链路（PLINK）。387 不做检测，只收 4D7 送来的 25 字节帧。
  * 与 VISION 的区别只在“目标从哪来”：VISION 是本地摄像头认黄色引导板，
  * PLINK 是 4D7 认人。后面的 kart_follow、录轨、倒车返程三段完全复用。
  * 为何新增一个枚举而不直接把 VISION 分支改成读 4D7：
  * 摄像头那条路是现成的退路，改掉就没了；三个值并存，
  * 现场哪条不灵改一个宏重烧就能切。 */
-#define KART_S3_FOLLOW_SRC_PLINK    (2)
+#define S3_FOLLOW_SRC_PLINK    (2)
 /* 用 #ifndef 包起来是为了能从编译选项 -D 覆盖(离线验证三条分支都要能编)。
- * 2026-08-12：默认跟着 KART_PERSON_LINK_ENABLE 走。
+ * 2026-08-12：默认跟着 PERSON_LINK_ENABLE 走。
  * 为何要联动而不写死：两个宏各自手改就有四种组合，其中两种是陷阱 ——
  *   链路开了但 SRC 还是 VISION：车拿没启用的摄像头结果跟随，永远丢目标；
- *   SRC 选了 PLINK 但链路没开：vtrack 永远 valid=0，车原地不动。
+ *   SRC 选了 PLINK 但链路没开：kart_vtrack 永远 valid=0，车原地不动。
  * 两种都能编过、都不报错，只表现为“车不跟人”，现场很难往宏上想。
- * 要手动覆盖仍然可以：在本文件前面或 -D 定义 KART_S3_FOLLOW_SRC 即可。 */
-#ifndef KART_S3_FOLLOW_SRC
-#if KART_PERSON_LINK_ENABLE
-#define KART_S3_FOLLOW_SRC          (KART_S3_FOLLOW_SRC_PLINK)
+ * 要手动覆盖仍然可以：在本文件前面或 -D 定义 S3_FOLLOW_SRC 即可。 */
+#ifndef S3_FOLLOW_SRC
+#if PERSON_LINK_ENABLE
+#define S3_FOLLOW_SRC          (S3_FOLLOW_SRC_PLINK)
 #else
-#define KART_S3_FOLLOW_SRC          (KART_S3_FOLLOW_SRC_VISION)
+#define S3_FOLLOW_SRC          (S3_FOLLOW_SRC_VISION)
 #endif
 #endif
 
 /* “阶段1 是自动跟随”的统一判据。VISION 与 PLINK 只差在目标从哪来，
- * 后续那一堆共有逻辑（deadman 急停、进倒车前清打角、进模式时 follow_reset）
+ * 后续那一堆共有逻辑（deadman 急停、进倒车前清打角、进模式时 kart_follow_reset）
  * 对两者完全一样。没有它就要把每个 #if 写成两个比较的或，
  * 漏一处就是少一道急停 —— 那是会出事的那种漏。 */
-#define KART_S3_FOLLOW_IS_AUTO      ((KART_S3_FOLLOW_SRC == KART_S3_FOLLOW_SRC_VISION) || (KART_S3_FOLLOW_SRC == KART_S3_FOLLOW_SRC_PLINK))
+#define S3_FOLLOW_IS_AUTO      ((S3_FOLLOW_SRC == S3_FOLLOW_SRC_VISION) || (S3_FOLLOW_SRC == S3_FOLLOW_SRC_PLINK))
 
 /* 语音信号阶段超时(10ms/拍 → 6000 拍 = 60s)。
  * 超时不算故障:直接进 S3_FINISHED 收车,不让车/灯无限等下去。 */
-#define KART_S3_SIGNAL_TIMEOUT_TICKS (6000U)
+#define S3_SIGNAL_TIMEOUT_TICKS (6000U)
 
 /* 视觉结果最大可复用拍数(10ms/拍)。兜底目标是采集链断了还拿旧方位
  * 角打方向 —— 相机状态不能代替它,RUNNING 判据来自 VSYNC,DMA 停了仍是 RUNNING。
@@ -124,12 +123,12 @@ typedef enum
  * 【100 → 100U 的原因（2026-08-15 搬核后必须改）】
  * 旧值 10U(100ms) 是按“视觉同步跑、相机 30FPS 约 3.3 拍一帧”定的。
  * 现在识别搬到 core3,单帧要 ~360ms = ~36 拍,而年龄是按【结果帧】计的,
- * 再给 10U 就是每一帧都必定超龄 → vis 恰好在大部分拍变 NULL → follow
+ * 再给 10U 就是每一帧都必定超龄 → vis 恰好在大部分拍变 NULL → kart_follow
  * 每帧掉一次 LOST,转向反而比搬核前更乱。
  * 100U = 1s 约为单帧耗时的 3 倍,既能容下 core3 正常节奇,又能在采集链
  * 真断时 1s 内兜底。【若日后把单帧耗时降下来,这个值要跟着降】——
  * 判据看 VOFA CH5(core3 单帧 ms),本值取它的 3 倍除以 10。 */
-#define KART_S3_VISION_MAX_AGE_TICKS (100U)
+#define S3_VISION_MAX_AGE_TICKS (100U)
 
 /* 语音返回 GOTO 段的【第二道】超时闸(10ms/拍 → 3500 拍 = 35s)。
  * GOTO 自己已经有超距(25m)+ 超时(3000 拍)兜底,这里再加一层是因为:
@@ -137,7 +136,7 @@ typedef enum
  * 某段不推进(状态既不是 DONE 也不是 FAULT),kart_mission 会永远停在
  * S2_RETURN_GOTO 等一个不会来的结果 —— 车在场地里一直开。
  * 取 3500 > 3000:正常情况永远由 GOTO 自己的闸先响,这一道只在"GOTO 失灵"时生效。 */
-#define KART_S2_RETURN_GOTO_TICKS   (3500U)
+#define S2_RETURN_GOTO_TICKS   (3500U)
 
 /* 初始化:模式置 IDLE,并执行一次统一停机(保证上电无残留输出)。 */
 void kart_mission_init(void);
@@ -189,7 +188,7 @@ uint8 kart_mission_subject2_start_return(uint8 slot_index);
  * slot_index = 0~4。返回 1=已受理,0=拒绝(槽空/参数越界/正忙)。
  *
  * 【为什么它比方案A 更可靠】摆位由人眼完成,精度好于 GOTO,而且一眼看得出摆没摆正;
- * 按当前位姿启动等于把 odom 的累计漂移一次性归零。代价是要人动手、慢。
+ * 按当前位姿启动等于把 kart_odom 的累计漂移一次性归零。代价是要人动手、慢。
  * 【前提】车必须真的摆正 —— 摆位误差会原样变成整条路径的平移误差。 */
 uint8 kart_mission_subject2_start_return_here(uint8 slot_index);
 

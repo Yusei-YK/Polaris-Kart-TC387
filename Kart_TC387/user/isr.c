@@ -1,10 +1,10 @@
 /*********************************************************************************************************************
-* TC387 Opensourec Library ����TC387 ��Դ�⣩��һ�����ڹٷ� SDK �ӿڵĵ�������Դ��
+* Kart_TC387 Opensourec Library ����Kart_TC387 ��Դ�⣩��һ�����ڹٷ� SDK �ӿڵĵ�������Դ��
 * Copyright (c) 2022 SEEKFREE ��ɿƼ�
 *
-* ���ļ��� TC387 ��Դ���һ����
+* ���ļ��� Kart_TC387 ��Դ���һ����
 *
-* TC387 ��Դ�� ���������
+* Kart_TC387 ��Դ�� ���������
 * �����Ը���������������ᷢ���� GPL��GNU General Public License���� GNUͨ�ù�������֤��������
 * �� GPL �ĵ�3�棨�� GPL3.0������ѡ��ģ��κκ����İ汾�����·�����/���޸���
 *
@@ -32,7 +32,6 @@
 * ����              ����                ��ע
 * 2022-11-04       pudding            first version
 ********************************************************************************************************************/
-
 #include "isr_config.h"
 #include "isr.h"
 #include "kart_imu.h"
@@ -51,7 +50,7 @@
  * 之后 UART1 静态归灯板，见 kart_camera.h 文件头说明。 */
 
 /* 5ms PIT 节拍计数器:主循环协作式调度的时基,每个 5ms 中断 +1。 */
-volatile uint32 g_kart_tick_5ms = 0;
+volatile uint32 g_tick_5ms = 0;
 
 /* 点阵屏 SYNC(P15.8)下降沿累计:诊断用,VOFA/主循环每秒读一次清零 → SYNC_Hz。
  * 因扫描为 14 边沿/帧,帧率 = SYNC_Hz / 14。计数低/忽高忽低 → SYNC 整形链或 EXTI 丢中断。 */
@@ -78,7 +77,7 @@ IFX_INTERRUPT(cc60_pit_ch0_isr, CCU6_0_CH0_INT_VECTAB_NUM, CCU6_0_CH0_ISR_PRIORI
 
     /* 末尾递增 5ms 节拍:主循环协作式调度的时基。放最后,保证本拍传感器/控制
      * 已更新完再放行主循环任务。 */
-    g_kart_tick_5ms++;
+    g_tick_5ms++;
 
 }
 
@@ -246,7 +245,7 @@ IFX_INTERRUPT(uart1_rx_isr, UART1_INT_VECTAB_NUM, UART1_RX_INT_PRIO)
 {
     interrupt_global_enable(0);                     // 开启中断嵌套
 
-#if KART_DOT_MATRIX_MUTED
+#if DOT_MATRIX_MUTED
     /* 2026-08-12 UART1 已改归 TC4D7 人体视觉链路（灯板拔了，4D7 插在那个坐子）。
      * 必须二选一、不能两个都调：两边都从同一个 1 字节深的 RX FIFO 取字节，
      * 谁先取走另一方就永远收不到；而且 tld7002_callback() 用的是阻塞式
@@ -389,7 +388,7 @@ IFX_INTERRUPT(uart10_rx_isr, UART10_INT_VECTAB_NUM, UART10_RX_INT_PRIO)
      * 它的帧很稀疏（人说一句才来一帧），轮询足够。
      * 人体视觉链路不同：115200 下背靠背连发，25 字节一帧只需 ~2.2ms，
      * 放到 10ms 任务里轮询必丢字节，所以这里必须用中断。 */
-#if (KART_PERSON_LINK_ENABLE && (KART_PERSON_LINK_PORT == KART_PERSON_LINK_PORT_VOFA))
+#if (PERSON_LINK_ENABLE && (PERSON_LINK_PORT == PERSON_LINK_PORT_VOFA))
     kart_person_link_rx_callback();
 #endif
 

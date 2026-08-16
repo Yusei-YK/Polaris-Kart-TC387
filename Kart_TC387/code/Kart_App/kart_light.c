@@ -1,5 +1,4 @@
 #include "kart_light.h"
-
 #include <string.h>
 
 typedef struct

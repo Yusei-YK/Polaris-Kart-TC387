@@ -2,7 +2,7 @@
  *  @file TLD7002_ServiceLayer.h
  *  @author Infineon
  *  @date 17.06.2022
- *	@brief TLD7002 specific Device Driver implementation from Infineon Technologies AG.
+ *	@brief TLD7002 specific Device Kart_Driver implementation from Infineon Technologies AG.
  *	@note  This file includes the definitions for the TLD7002 service layer
  *
  ***********************************************************************************************************************

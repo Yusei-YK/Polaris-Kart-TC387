@@ -1,6 +1,5 @@
 #ifndef KART_POWER_H_
 #define KART_POWER_H_
-
 #include "zf_common_headfile.h"
 #include "board_pins.h"
 

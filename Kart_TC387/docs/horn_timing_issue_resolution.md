@@ -4,7 +4,7 @@
 
 **需求：** 科目二语音控制蜂鸣器，需要精确时序控制（鸣笛1秒、2秒、警报双频交替等）
 
-**初始方案：** 主循环轮询 `kart_horn_poll()` 每5ms推进节拍
+**初始方案：** 主循环轮询 `horn_poll()` 每5ms推进节拍
 
 **遇到的问题：**
 1. 鸣笛1秒实测8.28秒（时长偏差8倍）
@@ -50,7 +50,7 @@ void cpu0_main(void) {
 ```c
 // 尝试1：每次都调pwm_init()
 static void horn_pwm_on(uint32 freq) {
-    pwm_init(KART_HORN_PWM_CH, freq, KART_HORN_PWM_DUTY);
+    pwm_init(HORN_PWM_CH, freq, HORN_PWM_DUTY);
 }
 
 // 节拍切换时
@@ -203,7 +203,7 @@ if(horn_is_alarm) {
 1. **精确时序任务必须用硬件定时器中断**
    - 不依赖主循环周期
    - 不受其他任务（如屏幕刷新）干扰
-   - TC387有多个独立PIT通道（CCU60/61 CH0~CH1），充分利用
+   - Kart_TC387有多个独立PIT通道（CCU60/61 CH0~CH1），充分利用
 
 2. **GPIO软件翻转 > 硬件PWM（对于频繁切换场景）**
    - 避免PWM重初始化开销
@@ -275,8 +275,8 @@ if(horn_is_alarm) {
 
 ## 参考资料
 
-- TC387官方例程：`E01_02_buzzer_demo` (GPIO驱动示例)
-- TC387官方例程：`E06_04_ips200_display_demo` (屏幕刷新示例)
+- Kart_TC387官方例程：`E01_02_buzzer_demo` (GPIO驱动示例)
+- Kart_TC387官方例程：`E06_04_ips200_display_demo` (屏幕刷新示例)
 - zf_driver源码：`zf_driver_pwm.c` (PWM初始化分析)
 - 项目文件：`user/kart_horn.c` (最终实现)
 

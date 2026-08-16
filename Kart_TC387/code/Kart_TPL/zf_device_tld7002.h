@@ -46,8 +46,6 @@
 
 #ifndef _zf_device_tld7002_h_
 #define _zf_device_tld7002_h_
-
-
 #include "zf_common_typedef.h"
 
 

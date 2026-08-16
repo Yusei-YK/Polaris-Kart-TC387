@@ -1,13 +1,12 @@
 #ifndef KART_FLASH_H_
 #define KART_FLASH_H_
-
 #include "zf_common_headfile.h"
 #include "kart_record.h"        /* kart_waypoint_t */
 
 /*
  * 路径 Flash 存储层（DFlash 槽位持久化）
  * ------------------------------------------------------------------
- * 把 kart_record 的 RAM 路径点数组存进 TC387 片内 DFlash,断电保留;
+ * 把 kart_record 的 RAM 路径点数组存进 Kart_TC387 片内 DFlash,断电保留;
  * 上电用 kart_flash_load_path() 读回给 kart_playback 复现。
  *
  * 【为什么要它】比赛现场无上位机,发车排队 + 天气原因需一次性把三科目
@@ -17,10 +16,10 @@
  *   起因(实车):科目一从槽位载入路径后倒车入库半径明显比手动大、倒不进库。
  *   原因:v1 只存 x/y/yaw/v_left/v_right 五个字段,而倒车段的打角是开环回放
  *   steer_buf[] 的,dist_buf[] 同理 —— 这两个数组过去是 RAM only。载入后它们
- *   还是上一次录制的残留(冷启动即全 0),playback 倒车段拿到 delta=0,
+ *   还是上一次录制的残留(冷启动即全 0),kart_playback 倒车段拿到 delta=0,
  *   整段打角只剩航向纠偏那一项,而纠偏被 REV_CORR_MAX=400 计数钳住 →
  *   R = 1480/400 ≈ 3.7m,而手动满锁 R=1.32m。这就是"半径很大"的来源。
- *   故 v2 把 steer/dist 一起入 Flash,并在页头存录制起点位姿(倒车纠偏的参考系)。
+ *   故 v2 把 kart_steer/dist 一起入 Flash,并在页头存录制起点位姿(倒车纠偏的参考系)。
  *   MAGIC 同步升版,老槽位数据判为无效(布局不兼容,必须重录)。
  *
  * 【槽位规划】v2 每点变宽,页数同步放大,保证点数上限不缩水
@@ -58,44 +57,44 @@
 
 /* 页头字数。前 5 个用了:magic/count/origin_yaw/origin_x/origin_y,
  * 后 3 个留白 —— 下次要加全局量(如录制时的 PB 参数快照)不必再动布局/换 MAGIC。 */
-#define KART_FLASH_HDR_WORDS        (8)
-/* 每点字数:x/y/yaw/v_left/v_right/steer/dist。 */
-#define KART_FLASH_FIELDS_PER_PT    (7)
+#define FLASH_HDR_WORDS        (8)
+/* 每点字数:x/y/yaw/v_left/v_right/kart_steer/dist。 */
+#define FLASH_FIELDS_PER_PT    (7)
 
 /* 科目一槽位(槽0) */
 #define KART_FLASH_S1_SLOT_NUM      (1)             /* 科目一槽位数 */
 #define KART_FLASH_S1_PAGES_PER_SLOT (21)           /* 科目一每槽页数(21*512-8 = 10744 word = 1534 点) */
-#define KART_FLASH_S1_SLOT_CAPACITY  ((KART_FLASH_S1_PAGES_PER_SLOT * EEPROM_PAGE_LENGTH - KART_FLASH_HDR_WORDS) / KART_FLASH_FIELDS_PER_PT)
+#define KART_FLASH_S1_SLOT_CAPACITY  ((KART_FLASH_S1_PAGES_PER_SLOT * EEPROM_PAGE_LENGTH - FLASH_HDR_WORDS) / FLASH_FIELDS_PER_PT)
 
 /* 科目二去程槽位(槽1~5) */
 #define KART_FLASH_S2_SLOT_NUM      (5)             /* 科目二去程槽位数(5个门洞) */
 #define KART_FLASH_S2_PAGES_PER_SLOT (14)           /* 科目二每槽页数(14*512-8 = 7160 word = 1022 点) */
-#define KART_FLASH_S2_SLOT_CAPACITY  ((KART_FLASH_S2_PAGES_PER_SLOT * EEPROM_PAGE_LENGTH - KART_FLASH_HDR_WORDS) / KART_FLASH_FIELDS_PER_PT)
+#define KART_FLASH_S2_SLOT_CAPACITY  ((KART_FLASH_S2_PAGES_PER_SLOT * EEPROM_PAGE_LENGTH - FLASH_HDR_WORDS) / FLASH_FIELDS_PER_PT)
 
 /* 科目二返程槽位(槽6~10,2026-07-29 加,语音返回用)
  * 每槽只 7 页 = 510 点:DFlash 去掉槽0~5 的 91 页、参数页 127,只剩 36 页可分,
  * 5 个槽均分最多 7 页/槽(35 页,落 91~125)。返程只跑"集结点→门洞→发车区"
  * 一段(10~15m),0.05m/点约 200~300 点,余量 ×1.7,不必与去程等宽。 */
-#define KART_FLASH_S2R_SLOT_NUM      (5)            /* 返程槽位数(与去程一一对应) */
-#define KART_FLASH_S2R_PAGES_PER_SLOT (7)           /* 返程每槽页数(7*512-8 = 3576 word = 510 点) */
-#define KART_FLASH_S2R_SLOT_CAPACITY  ((KART_FLASH_S2R_PAGES_PER_SLOT * EEPROM_PAGE_LENGTH - KART_FLASH_HDR_WORDS) / KART_FLASH_FIELDS_PER_PT)
+#define FLASH_S2R_SLOT_NUM      (5)            /* 返程槽位数(与去程一一对应) */
+#define FLASH_S2R_PAGES_PER_SLOT (7)           /* 返程每槽页数(7*512-8 = 3576 word = 510 点) */
+#define FLASH_S2R_SLOT_CAPACITY  ((FLASH_S2R_PAGES_PER_SLOT * EEPROM_PAGE_LENGTH - FLASH_HDR_WORDS) / FLASH_FIELDS_PER_PT)
 /* 返程首槽(槽6)的起始页,= 槽0~5 用完之后的第一页 = 91。 */
-#define KART_FLASH_S2R_BASE_PAGE     (KART_FLASH_BASE_PAGE + KART_FLASH_S1_PAGES_PER_SLOT + \
+#define FLASH_S2R_BASE_PAGE     (KART_FLASH_BASE_PAGE + KART_FLASH_S1_PAGES_PER_SLOT + \
                                       KART_FLASH_S2_SLOT_NUM * KART_FLASH_S2_PAGES_PER_SLOT)
 /* 槽号 → 返程槽的起始槽号(槽6)。slot >= 这个值就是返程槽。 */
-#define KART_FLASH_S2R_FIRST_SLOT    (KART_FLASH_S1_SLOT_NUM + KART_FLASH_S2_SLOT_NUM)
+#define FLASH_S2R_FIRST_SLOT    (KART_FLASH_S1_SLOT_NUM + KART_FLASH_S2_SLOT_NUM)
 
 /* 页数放大后必须复核不越界:最后一页要落在参数页(kart_params.h 的 127)之前,
  * 否则存路径会把整张参数表擦掉。
  * 0 + 21 + 5*14 + 5*7 = 126 页 → 用到页 0~125,页 126 空余,页 127 是参数表。 */
-#if ((KART_FLASH_S2R_BASE_PAGE + \
-      KART_FLASH_S2R_SLOT_NUM * KART_FLASH_S2R_PAGES_PER_SLOT) > 127)
+#if ((FLASH_S2R_BASE_PAGE + \
+      FLASH_S2R_SLOT_NUM * FLASH_S2R_PAGES_PER_SLOT) > 127)
     #error "kart_flash: path slots overlap the param page (127)"
 #endif
 
 /* 总槽位数(1 科目一 + 5 去程 + 5 返程 = 11) */
 #define KART_FLASH_SLOT_NUM         (KART_FLASH_S1_SLOT_NUM + KART_FLASH_S2_SLOT_NUM + \
-                                     KART_FLASH_S2R_SLOT_NUM)
+                                     FLASH_S2R_SLOT_NUM)
 
 /* 兼容旧代码:科目一使用槽0,按 S1 槽页数/容量(v2 = 21 页) */
 #define KART_FLASH_PAGES_PER_SLOT   KART_FLASH_S1_PAGES_PER_SLOT
@@ -119,12 +118,12 @@ typedef struct
     float origin_y;         /* 录制起点世界坐标 Y(米) */
 } kart_flash_meta_t;
 
-/* 把 count 个路径点 + 并行的 steer/dist 数组 + 页头 meta 写入 slot 槽位
+/* 把 count 个路径点 + 并行的 kart_steer/dist 数组 + 页头 meta 写入 slot 槽位
  * (阻塞擦写,只能停车时调)。
- * steer/dist/meta 允许传 NULL:缺的按 0 存,读回来就是 0(老行为)。
+ * kart_steer/dist/meta 允许传 NULL:缺的按 0 存,读回来就是 0(老行为)。
  * 返回 0=成功,1=slot 越界,2=count 为 0/wp 无效。 */
 uint8  kart_flash_save_path(uint8 slot, const kart_waypoint_t *wp,
-                            const int16 *steer, const float *dist,
+                            const int16 *kart_steer, const float *dist,
                             const kart_flash_meta_t *meta, uint16 count);
 
 /* 从 slot 槽位读回路径点到 wp_out(最多 max_count 个)。

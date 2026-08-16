@@ -1,6 +1,5 @@
 #ifndef KART_PLAYBACK_H_
 #define KART_PLAYBACK_H_
-
 #include "zf_common_headfile.h"
 #include "kart_calib.h"     /* 倒车纠偏符号、脉冲↔m/s 换算 */
 
@@ -12,12 +11,12 @@
  * 外环目标 → 串级转向自动打角；速度取录制点速度喂速度环。
  * ------------------------------------------------------------------
  * 坐标系：录制与播放都以各自起点车体坐标系表示，x向右、y向前。
- * playback_start 保存本次起点位置和航向，并把当前世界坐标旋转到该局部坐标系。
+ * kart_playback_start 保存本次起点位置和航向，并把当前世界坐标旋转到该局部坐标系。
  * ------------------------------------------------------------------
  * 调用位置：
  *   kart_playback_start()  —— VOFA 命令 b1(先 z 清零、摆正车)
- *   kart_playback_poll()   —— 主循环(在 steer_abs_update 之后、
- *                             steer_ctrl_update 之前，好覆写目标航向)
+ *   kart_playback_poll()   —— 主循环(在 kart_steer_abs_update 之后、
+ *                             kart_steer_ctrl_update 之前，好覆写目标航向)
  *   kart_playback_stop()   —— b0 或跑完自动停
  */
 
@@ -42,7 +41,7 @@
  * 【为什么需要】原先复现速度 = 录制速度(逐点回放),于是"录多快就复多快"。
  *   但高速录制轮胎打滑、路径录歪;低速录制路径好,速度剖面却被压平(全程慢),
  *   直接乘倍率则直道弯道同比放大 → 弯道冲出去。
- * 【做法】速度不再取自录制,而是在 playback_start 时按【路径几何】现场算:
+ * 【做法】速度不再取自录制,而是在 kart_playback_start 时按【路径几何】现场算:
  *   ① 曲率限速:v_curve = sqrt(a_lat / |kappa|),kappa 由 wp[].yaw 沿弧长中心差分得到;
  *   ② 反向传播:v[i] = min(v[i], sqrt(v[i+1]² + 2*a_brake*ds)) —— 把弯心低速往前传,
  *      实现"入弯前提前减速"。这是倍率/斜坡都做不到的(刹车必须前瞻);
@@ -53,9 +52,9 @@
 /* Alat 4.0 m/s² = 0.41g。整车实测:轮距 0.60m(半轮距 0.30m)、除方向盘外几乎全部
  * 贴底盘 → 重心高约 0.25m,侧翻门槛约 0.30/0.25 = 1.2g。EVA 硬轮抓地系数 0.5~0.7g,
  * 所以真正的约束是抓地不是侧翻,0.41g 对 EVA 留了约 30% 余量,不动。 */
-#define KART_PLAYBACK_ALAT_DEFAULT  (4.0f)      /* 弯道横向加速度上限(m/s²),越小过弯越慢越稳 */
+#define PLAYBACK_ALAT_DEFAULT  (4.0f)      /* 弯道横向加速度上限(m/s²),越小过弯越慢越稳 */
 /* 本值现已可现场调:菜单 PB ABrake,本宏只是出厂默认。终点冲出去就加大。 */
-#define KART_PLAYBACK_ABRAKE        (2.5f)      /* 反向传播减速度(m/s²),越小刹车提前量越大 */
+#define PLAYBACK_ABRAKE        (2.5f)      /* 反向传播减速度(m/s²),越小刹车提前量越大 */
 /* 2026-07-28: 3 → 8。这是【半】窗,实际差分跨度 = 2*WIN 点 × 0.05m 录制间距。
  * 原值 3 → 跨度 0.30m,录制的 2° 偏航量化(0.035rad)直接除以 0.30 就是
  * ±0.12/m 曲率噪声,而满舵曲率只有 0.76/m —— 噪声占满量程 15%,
@@ -63,12 +62,12 @@
  * 8 → 跨度 0.80m,噪声降到 ±0.044/m(满量程 6%)。
  * 平滑代价可算:锥距 >3m → 绕桩曲率空间波长约 6m,0.80m 跨度的均值滤波
  * 对 6m 波长的衰减 sinc(0.8/6) ≈ 0.97,只损失 3%,弯道形状基本不失真。 */
-#define KART_PLAYBACK_KAPPA_WIN     (8)         /* 曲率中心差分半窗(点):太小会被 2°量化噪声打乱 */
+#define PLAYBACK_KAPPA_WIN     (8)         /* 曲率中心差分半窗(点):太小会被 2°量化噪声打乱 */
 /* 脉冲/5ms ↔ m/s 换算。剖面内部用 m/s 算(a_lat/a_brake 才有物理意义),
  * 存表前换回脉冲/5ms。改为引用 kart_calib.h 的派生值:
  * 换轮子重标脉冲当量后自动跟随,不用再手算这两个常数(以前是硬编码 0.0736322)。 */
-#define KART_PLAYBACK_V_TO_MS       (KART_PULSE_V_TO_MS)
-#define KART_PLAYBACK_MS_TO_V       (KART_PULSE_MS_TO_V)
+#define PLAYBACK_V_TO_MS       (KART_PULSE_V_TO_MS)
+#define PLAYBACK_MS_TO_V       (KART_PULSE_MS_TO_V)
 /* 复现速度总钳位(脉冲/5ms):下发给速度环之前的最后一道闸,剖面速度和录制速度都过它。
  * 【本值现已可现场调】菜单 PB Clamp,本宏只是出厂默认。
  * 60 脉冲 = 4.42 m/s = 15.9 km/h,只用到整车能力(25 km/h = 94 脉冲)的 64%,
@@ -94,8 +93,8 @@
 #define KART_PLAYBACK_REV_HEAD_SIGN (KART_REV_HEAD_SIGN)
 /* 纠偏量钳位(计数):防坏参考点猛打方向。出厂 400,现已搬进菜单(PB RevCorr)。
  * 【为什么这项要能调】它是倒车段打角能偏离录制值的全部余量:
- *   delta = steer[nearest] + clamp(corr, ±本值)
- * steer[] 正常时 400 只是"纠偏够不够"的问题;steer[] 若为 0(v1 老格式载入),
+ *   delta = kart_steer[nearest] + clamp(corr, ±本值)
+ * kart_steer[] 正常时 400 只是"纠偏够不够"的问题;kart_steer[] 若为 0(v1 老格式载入),
  * 整段打角就只有这一项 → 最小半径 = 1480/400 ≈ 3.7m,倒不进库。
  * 满锁约 1100 计数,给到 800 意味着允许纠偏打到七成舵。 */
 #define KART_PLAYBACK_REV_CORR_MAX  (400.0f)
@@ -113,7 +112,7 @@
  * 比开环倒车自身漂移小一个量级。
  * 【卡在换向点不动就加大它】静摩擦死区约 950 duty,本值对应速度环 Kp 输出
  * 约 680 duty,靠积分补齐才能起步,偏marginal;起不来先调到 0.4~0.5。 */
-#define KART_PLAYBACK_REV_CREEP     (0.25f)
+#define PLAYBACK_REV_CREEP     (0.25f)
 
 /* ===== 科目三反向复现参数(方案 0/1 共用)===== */
 /* 2026-07-28: -12 → -20。-12 = 0.88 m/s,15m 迷宫倒回要 17.0s;-20 = 1.47 m/s 要 10.2s,
@@ -128,7 +127,7 @@
  * 现象:纯回放打角倒车(那时确实是全开环),前两个桩正常,第三个桩起开始飘。
  * 原因:没有任何航向反馈,单拍的小误差(内环死区约 63 计数、左右轮不对称、
  *       地面侧滑、里程标量 dist_sum 把打滑也算成前进)逐点累积,越走越偏。
- * 做法:与方案B倒车段同构 —— 在"录制打角 steer[k]"基准上叠加航向 P 纠偏:
+ * 做法:与方案B倒车段同构 —— 在"录制打角 kart_steer[k]"基准上叠加航向 P 纠偏:
  *       参考航向 = 录制起点航向 + wp[k].yaw(该点录制时的航向,转回世界系)
  *       误差     = wrap180(参考 - IMU 实测 yaw)
  *       修正量   = SIGN * KP * 误差,钳位后加到打角上。
@@ -139,12 +138,12 @@
  *       纠得太慢降不下误差就加大 KP;打角来回抖就加大 DB 或减小 KP。 */
 /* 加上本段后系统已不是全开环:【航向闭环 + 横向位置开环】。位置误差仍没进反馈环,
  * 所以航向纠准了照样能带着 0.5~1m 横向偏移到终点 —— 补这一环的是下方方案 1。 */
-#define KART_PLAYBACK_OL_HEAD_EN    (1)         /* 1=开航向P纠偏 0=退回纯开环(对比用) */
-#define KART_PLAYBACK_OL_HEAD_KP    (20.0f)     /* 纠偏 P 增益(编码器计数/度)的【出厂默认】,运行时读菜单 S3 OL Kh */
+#define PLAYBACK_OL_HEAD_EN    (1)         /* 1=开航向P纠偏 0=退回纯开环(对比用) */
+#define PLAYBACK_OL_HEAD_KP    (20.0f)     /* 纠偏 P 增益(编码器计数/度)的【出厂默认】,运行时读菜单 S3 OL Kh */
 /* 符号与上面倒车段共用 kart_calib.h 的 KART_REV_HEAD_SIGN */
-#define KART_PLAYBACK_OL_HEAD_SIGN  (KART_REV_HEAD_SIGN)
-#define KART_PLAYBACK_OL_CORR_MAX   (400.0f)    /* 纠偏量钳位(计数):防坏参考点猛打方向 */
-#define KART_PLAYBACK_OL_HEAD_DB    (1.5f)      /* 误差死区(度):内环有约63计数死区,小误差别抖 */
+#define PLAYBACK_OL_HEAD_SIGN  (KART_REV_HEAD_SIGN)
+#define PLAYBACK_OL_CORR_MAX   (400.0f)    /* 纠偏量钳位(计数):防坏参考点猛打方向 */
+#define PLAYBACK_OL_HEAD_DB    (1.5f)      /* 误差死区(度):内环有约63计数死区,小误差别抖 */
 
 /* ===== 科目三倒车方案 1:位置闭环(2026-07-28 新增,菜单 S3 OLMode=1 才走)=====
  * 【方案 0 的实测结论】里程查表 + 航向纠偏:不撞筒,15m 走完终点横向偏 0.5~1m。
@@ -163,9 +162,9 @@
  *   ① 索引改最近点搜索(照搬正向复现的做法):按当前位置在 wp[] 里找最近点,
  *      进度单调递减 + 搜索窗限制。彻底不依赖 dist_sum,缺陷①消失。
  *   ② 打角 = 录制打角(前馈) + 航向 P + 横向位置 P:
- *        delta = steer[k] + SIGN*Kh*head_err + SIGN*Ke*e_lat
+ *        delta = kart_steer[k] + SIGN*Kh*head_err + SIGN*Ke*e_lat
  *      e_lat = 当前位置到路径的带符号垂距(米),缺陷②消失。
- *      前馈项 steer[k] 保留 —— 它是已验证有效的基准,两个 P 只做修正。
+ *      前馈项 kart_steer[k] 保留 —— 它是已验证有效的基准,两个 P 只做修正。
  *
  * 【符号】倒车横向反馈的符号只有 ±1 两种可能,共用航向那个 SIGN(同一套倒车
  *   阿克曼动力学)。若实车发现横向越纠越歪,把菜单 S3 OL Ke 调成负值即可,
@@ -176,12 +175,12 @@
  *   2. OLMode=1、Ke=0 → 只验证"最近点索引"比"里程查表"好不好;
  *   3. Ke 从 100 往上加,看 CH21(e_lat) 有没有被压向 0,变大就取负;
  *   4. e_lat 稳定收敛后,再用 S3 OLSpd 提速。 */
-#define KART_PLAYBACK_OL_NEAR_WIN   (40)        /* 最近点搜索窗(点):与正向 NEAREST_FORWARD 同量级 */
-#define KART_PLAYBACK_OL_ELAT_MAX   (400.0f)    /* 横向修正量单独钳位(计数):与航向项各自限幅再合并 */
-#define KART_PLAYBACK_OL_ELAT_DB    (0.02f)     /* 横向误差死区(m):2cm 内不纠,防内环死区上抖动 */
+#define PLAYBACK_OL_NEAR_WIN   (40)        /* 最近点搜索窗(点):与正向 NEAREST_FORWARD 同量级 */
+#define PLAYBACK_OL_ELAT_MAX   (400.0f)    /* 横向修正量单独钳位(计数):与航向项各自限幅再合并 */
+#define PLAYBACK_OL_ELAT_DB    (0.02f)     /* 横向误差死区(m):2cm 内不纠,防内环死区上抖动 */
 /* 位置闭环下的完成判据:进度点到起点(索引见底)或离录制起点足够近即停。
  * 不能再用"剩余里程 < OL_FINISH",那是里程方案的判据。 */
-#define KART_PLAYBACK_OL_FIN_DIST   (0.15f)     /* 距录制起点(m)判返回发车区 */
+#define PLAYBACK_OL_FIN_DIST   (0.15f)     /* 距录制起点(m)判返回发车区 */
 
 void   kart_playback_init(void);
 
@@ -206,7 +205,7 @@ uint8  kart_playback_start(void);       /* 1=成功启动，0=路径无效 */
  *   门洞前留 ≥3m 直线引入段就能把它压掉(Ld=1.5m → 3m 把 0.5m 压到 0.07m,
  *   门洞每侧余量 0.40m),于是摆位精度要求松到 ±0.5m/±10°。
  *
- * 【前提】odom 世界系必须与录制那次同源 —— 即整个科目二只清零一次
+ * 【前提】kart_odom 世界系必须与录制那次同源 —— 即整个科目二只清零一次
  *   (mission_enter(MISSION_SUBJECT_2)),且中途没有重启/重新标定 IMU。
  *   科目二全程满足;跨上电复现请仍用 kart_playback_start()。 */
 uint8  kart_playback_start_at_recorded_origin(void);

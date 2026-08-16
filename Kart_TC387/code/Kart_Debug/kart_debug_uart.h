@@ -1,12 +1,11 @@
 #ifndef KART_DEBUG_UART_H_
 #define KART_DEBUG_UART_H_
-
 #include "zf_common_headfile.h"
 #include "board_pins.h"
 
 /*
  * 科目一串口日志。
- * 串口由 BOARD_AUX_UART_*(board_pins.h 的 KART_LOG_ON_UART0)选:
+ * 串口由 BOARD_AUX_UART_*(board_pins.h 的 LOG_ON_UART0)选:
  *   =0 → UART_10/P13.0 TX(无线模块排针)  ← 当前
  *   =1 → UART_0 /P14.0 TX(USB-TTL 直插)
  * 460800 baud，VOFA JustFloat(51通道float32+帧尾,共208字节)。
@@ -26,27 +25,27 @@ void kart_debug_uart_poll(void);              /* 采样组帧入环形缓冲(放
 void kart_debug_uart_background_poll(void);   /* 后台分块非阻塞发送(放主循环每 spin) */
 
 /* 科目三关键事件：CH45编号、CH46级别、CH47发生时的5ms节拍。 */
-#define KART_EVENT_LEVEL_INFO           (0U)
-#define KART_EVENT_LEVEL_WARNING        (1U)
-#define KART_EVENT_LEVEL_ERROR          (2U)
-#define KART_EVENT_S3_ENTER             (301U)
-#define KART_EVENT_S3_REVERSE_START     (302U)
-#define KART_EVENT_S3_DONE              (303U)
-#define KART_EVENT_S3_ABORT             (309U)
-#define KART_EVENT_VISION_ACQUIRED      (311U)
-#define KART_EVENT_VISION_NO_TARGET     (312U)
-#define KART_EVENT_CAMERA_FAULT         (313U)
-#define KART_EVENT_VISION_REJ_AREA      (314U)
-#define KART_EVENT_VISION_REJ_WIDTH     (315U)
-#define KART_EVENT_VISION_REJ_ASPECT    (316U)
-#define KART_EVENT_VISION_REJ_FILL      (317U)
-#define KART_EVENT_FOLLOW_NEAR_STOP     (318U)
-#define KART_EVENT_FOLLOW_STEER_SAT     (319U)
-#define KART_EVENT_FOLLOW_LOST_STOP     (320U)
-#define KART_EVENT_FOLLOW_TOO_FAR       (321U)
-#define KART_EVENT_FOLLOW_RECOVERED     (322U)
-#define KART_EVENT_CAMERA_RECOVERED     (323U)
-#define KART_EVENT_STEER_RECOVERED      (324U)
+#define EVENT_LEVEL_INFO           (0U)
+#define EVENT_LEVEL_WARNING        (1U)
+#define EVENT_LEVEL_ERROR          (2U)
+#define EVENT_S3_ENTER             (301U)
+#define EVENT_S3_REVERSE_START     (302U)
+#define EVENT_S3_DONE              (303U)
+#define EVENT_S3_ABORT             (309U)
+#define EVENT_VISION_ACQUIRED      (311U)
+#define EVENT_VISION_NO_TARGET     (312U)
+#define EVENT_CAMERA_FAULT         (313U)
+#define EVENT_VISION_REJ_AREA      (314U)
+#define EVENT_VISION_REJ_WIDTH     (315U)
+#define EVENT_VISION_REJ_ASPECT    (316U)
+#define EVENT_VISION_REJ_FILL      (317U)
+#define EVENT_FOLLOW_NEAR_STOP     (318U)
+#define EVENT_FOLLOW_STEER_SAT     (319U)
+#define EVENT_FOLLOW_LOST_STOP     (320U)
+#define EVENT_FOLLOW_TOO_FAR       (321U)
+#define EVENT_FOLLOW_RECOVERED     (322U)
+#define EVENT_CAMERA_RECOVERED     (323U)
+#define EVENT_STEER_RECOVERED      (324U)
 void kart_debug_uart_set_event(uint16 event_id, uint8 level);
 
 #endif

@@ -152,13 +152,13 @@ void kart_steer_set_head_pid(float kp, float ki, float kd)
     kart_pid_reset(&kart_steer.head_pid);
 }
 
-/* 内环增益组切换 —— 见 kart_steer_ctrl.h 里 KART_STEER_KP_BACK 的说明。
+/* 内环增益组切换 —— 见 kart_steer_ctrl.h 里 STEER_KP_BACK 的说明。
  * 复用 set_angle_pid(),所以清记忆的行为完全一致,不引入新路径。 */
 void kart_steer_use_back_gains(void)
 {
-    kart_steer_set_angle_pid(KART_STEER_KP_BACK,
-                             KART_STEER_KI_BACK,
-                             KART_STEER_KD_BACK);
+    kart_steer_set_angle_pid(STEER_KP_BACK,
+                             STEER_KI_BACK,
+                             STEER_KD_BACK);
 }
 
 void kart_steer_use_fwd_gains(void)

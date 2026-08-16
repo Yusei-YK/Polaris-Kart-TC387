@@ -47,7 +47,6 @@
 *                  GND                 ��Դ��
 *                  ------------------------------------
 ********************************************************************************************************************/
-
 #include "zf_common_interrupt.h"
 #include "zf_driver_delay.h"
 #include "zf_driver_gpio.h"
@@ -68,7 +67,6 @@
 #if defined(__TASKING__)
 #pragma section all "cpu3_dsram"
 #endif
-
 #include "zf_device_dot_matrix_screen.h"
 
 
@@ -209,7 +207,7 @@ void dot_matrix_screen_scan(void)
     static uint8 entry_num = 0;     /* 本函数被调次数:2 个 entry = 1 行,7 行共 14 entry/帧 */
     uint8 display_row_now;          /* 当前处理第几行 = entry_num/2 */
 
-#if KART_DOT_MATRIX_MUTED
+#if DOT_MATRIX_MUTED
     /* UART1 已归 TC4D7 人体视觉链路：本函数内的 tld7002_set_duty() 会往 UART_1
      * 发 23 字节，一旦跑起来就把 4D7 的帧流打碎。
      * 在这里集中拦而不是在每个调用处拦：调用点有四处
@@ -630,7 +628,7 @@ void dot_matrix_screen_test_rows_static(void)
 //                  屏黑 + ch4==0    → UART1 收发链断:查 P11.12/P11.10 复用与飞线
 //                本车实测结论:屏亮、ch0==0、ch4≈2300 → SYNC 整形链不振荡,
 //                故已改 1ms PIT 软扫(DOT_MATRIX_SCREEN_USE_PIT_SCAN=1),SYNC 只留作诊断。
-//                测完必须把 KART_DOT_ALLON_TEST 改回 0,否则死循环进不了主循环。
+//                测完必须把 DOT_ALLON_TEST 改回 0,否则死循环进不了主循环。
 //-------------------------------------------------------------------------------------------------------------------
 void dot_matrix_screen_test_all_on_sync(void)
 {
@@ -729,7 +727,7 @@ void dot_matrix_screen_init(void)
     gpio_init(DOT_MATRIX_SCREEN_ROW_EN_PIN, GPO, GPIO_LOW, GPO_PUSH_PULL);  /* EN 高有效,初值拉低=禁用 */
 
     /* 2. 初始化 TLD7002(列驱动) */
-    /* 2026-08-12 UART1 归 TC4D7 人体视觉链路时（KART_DOT_MATRIX_MUTED），下面整段全不能跑：
+    /* 2026-08-12 UART1 归 TC4D7 人体视觉链路时（DOT_MATRIX_MUTED），下面整段全不能跑：
      *   tld7002_init()   会 uart_init(UART_1, 2000000) 把链路的 115200 抢掉
      *   tld7002_set_duty() 会往 UART_1 发 23 字节，直接打进 4D7 的 RX
      *   exti_init(P15.8) 与 pit_ms_init(CCU61_CH0,1) 会把 1ms 扇描跟着跑起来，
@@ -738,7 +736,7 @@ void dot_matrix_screen_init(void)
      * 而且拉低比悬空安全（灯板拔了也不会浮空误使能）。
      * 本函数仍然可以被调，只是变成“只初始化行译码引脚”——
      * 这样 cpu0_main 不必在调用处再包一层 #if。 */
-#if !KART_DOT_MATRIX_MUTED
+#if !DOT_MATRIX_MUTED
     tld7002_init();
 
     /* 3. 第 15 通道给个占空比让 TLD7002 起振输出 → SYNC 脚才有周期性下降沿驱动 EXTI */
@@ -763,7 +761,7 @@ void dot_matrix_screen_init(void)
 
     dot_matrix_screen_set_brightness(dot_matrix_screen_brightness);
     dot_matrix_screen_show_string("   ");
-#endif  /* !KART_DOT_MATRIX_MUTED */
+#endif  /* !DOT_MATRIX_MUTED */
 }
 
 #if defined(__TASKING__)

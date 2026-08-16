@@ -1,6 +1,5 @@
 #ifndef KART_STEER_ABS_H_
 #define KART_STEER_ABS_H_
-
 #include "zf_common_headfile.h"
 #include "board_pins.h"
 

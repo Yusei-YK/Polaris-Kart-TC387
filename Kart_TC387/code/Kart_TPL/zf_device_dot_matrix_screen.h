@@ -50,8 +50,6 @@
 
 #ifndef _zf_device_dot_matrix_screen_h_
 #define _zf_device_dot_matrix_screen_h_
-
-
 #include "zf_common_typedef.h"
 #include "zf_driver_exti.h"
 #include "zf_driver_pit.h"

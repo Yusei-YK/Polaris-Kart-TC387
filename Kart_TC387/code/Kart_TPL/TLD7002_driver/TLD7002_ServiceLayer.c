@@ -2,7 +2,7 @@
  *  @file TLD7002_ServiceLayer.c
  *  @author Infineon
  *  @date 17.06.2022
- *	@brief TLD7002 specific Device Driver implementation from Infineon Technologies AG.
+ *	@brief TLD7002 specific Device Kart_Driver implementation from Infineon Technologies AG.
  *	@note  This file includes the implementation for the TLD7002 service layer.
  *
  ***********************************************************************************************************************
@@ -36,7 +36,7 @@
  * the frame is transmitted via the configured transmit function.
  * The purpose of that frame is to trigger a synchronous sampling event at
  * multiple slaves.This means, the duty cycle data from the shadow register is
- * transferred to the hardware control register synchronized to the start of
+ * transferred to the hardware kart_control register synchronized to the start of
  * the next PWM period. An updated output channel completes the actual PWM pulse
  * before changing to the new duty cycle configuration to avoid glitches on the
  * output.
@@ -175,8 +175,8 @@ boolean TLD7002_TX_DC_UPDATE_14BIT_FRAME(TLD7002_NetworkInstance_t *inst, TLD700
  * is prepared by generating the header as well as by adding the payload (if
  * applicable) and finalized by generating checksums (if applicable). Afterwards
  * the frame is transmitted via the configured transmit function.
- * The purpose of the master request frame power mode change is to initiated a
- * transition to the commanded power state.
+ * The purpose of the master request frame kart_power mode change is to initiated a
+ * transition to the commanded kart_power state.
  *
  * @param[in] TLD7002_NetworkInstance_t* Reference to TLD7002 network instance
  * @param[in] TLD7002_PM_CHANGE_FRAME_t* Reference to PM_CHANGE frame instance
@@ -194,7 +194,7 @@ boolean TLD7002_TX_PM_CHANGE_FRAME(TLD7002_NetworkInstance_t *inst, TLD7002_PM_C
     /* if frame preparation is successful, insert data and transfer frame */
     if(TLD7002_pm_change_prep(inst, frm, add))
     {
-        frm->w_power_mode_change.PM_CHANGE = mode;												/*< set power mode from parameter */
+        frm->w_power_mode_change.PM_CHANGE = mode;												/*< set kart_power mode from parameter */
         TLD7002_pm_change_fin(frm);																/*< Finalize frame before transferring */
         inst->trx_function(frm->write_array, TLD7002_LEN_PM_CHANGE_WRITE);						/* polyspace MISRA-C3:D4.14 [Justified:Low] "The validity of this pointer cannot be checked because the memory layout is not known. The user of the API has to ensure that the correct pointer to the transmit function is configured." */
         return TRUE;																			/*< generating and transmitting of frame successful */
@@ -210,7 +210,7 @@ boolean TLD7002_TX_PM_CHANGE_FRAME(TLD7002_NetworkInstance_t *inst, TLD7002_PM_C
  * is prepared by generating the header as well as by adding the payload (if
  * applicable) and finalized by generating checksums (if applicable). Afterwards
  * the frame is transmitted via the configured transmit function.
- * The purpose of this frame is to retrieve the output power stage status within
+ * The purpose of this frame is to retrieve the output kart_power stage status within
  * one master request.
  *
  * @param[in] TLD7002_NetworkInstance_t* Reference to TLD7002 network instance
@@ -240,7 +240,7 @@ boolean TLD7002_TX_READ_OST_FRAME(TLD7002_NetworkInstance_t *inst, TLD7002_READ_
  * is prepared by generating the header as well as by adding the payload (if
  * applicable) and finalized by generating checksums (if applicable). Afterwards
  * the frame is transmitted via the configured transmit function.
- * The purpose of the hardware control frame is to reset the diagnostic flags.
+ * The purpose of the hardware kart_control frame is to reset the diagnostic flags.
  *
  * @param[in] TLD7002_NetworkInstance_t* Reference to TLD7002 network instance
  * @param[in] TLD7002_HWCR_FRAME_t* Reference to HWCR frame instance
@@ -279,7 +279,7 @@ boolean TLD7002_TX_HWCR_FRAME(TLD7002_NetworkInstance_t *inst, TLD7002_HWCR_FRAM
  * is prepared by generating the header as well as by adding the payload (if
  * applicable) and finalized by generating checksums (if applicable). Afterwards
  * the frame is transmitted via the configured transmit function.
- * The purpose of the hardware control frame is to reset the diagnostic flags.
+ * The purpose of the hardware kart_control frame is to reset the diagnostic flags.
  *
  * @param[in] TLD7002_NetworkInstance_t* Reference to TLD7002 network instance
  * @param[in] TLD7002_HWCR_FRAME_t* Reference to HWCR frame instance
@@ -1001,8 +1001,8 @@ uint8 TLD7002_RX_DC_UPDATE_14BIT_FRAME(TLD7002_NetworkInstance_t *inst, TLD7002_
  * frame is received via the configured UART receive function.
  * The received data is stored into the frame instance. Here also the received
  * payload is handed (if applicable) and some basic frame validations are done.
- * The purpose of the master request frame power mode change is to initiated a
- * transition to the commanded power state.
+ * The purpose of the master request frame kart_power mode change is to initiated a
+ * transition to the commanded kart_power state.
  *
  * @param[in] TLD7002_NetworkInstance_t* Reference to TLD7002 network instance
  * @param[in] TLD7002_PM_CHANGE_FRAME_t* Reference to PM_CHANGE frame instance
@@ -1048,7 +1048,7 @@ uint8 TLD7002_RX_PM_CHANGE_FRAME(TLD7002_NetworkInstance_t *inst, TLD7002_PM_CHA
  * frame is received via the configured UART receive function.
  * The received data is stored into the frame instance. Here also the received 
  * payload is handed (if applicable) and some basic frame validations are done.
- * The purpose of this frame is to retrieve the output power stage status within
+ * The purpose of this frame is to retrieve the output kart_power stage status within
  * one master request.
  *
  * @param[in] TLD7002_NetworkInstance_t* Reference to TLD7002 network instance
@@ -1113,7 +1113,7 @@ uint8 TLD7002_RX_READ_OST_FRAME(TLD7002_NetworkInstance_t *inst, TLD7002_READ_OS
  * frame is received via the configured UART receive function.
  * The received data is stored into the frame instance. Here also the received 
  * payload is handed (if applicable) and some basic frame validations are done.
- * The purpose of the hardware control frame is to reset the diagnostic flags.
+ * The purpose of the hardware kart_control frame is to reset the diagnostic flags.
  *
  * @param[in] TLD7002_NetworkInstance_t* Reference to TLD7002 network instance
  * @param[in] TLD7002_HWCR_FRAME_t* Reference to HWCR frame instance
@@ -1870,7 +1870,7 @@ uint8 TLD7002_RX_READ_REG_DLC7_FRAME(TLD7002_NetworkInstance_t *inst, TLD7002_RE
 /** @brief TLD7002 device driver initialization function.
  *
  * This function needs to be called at first, before using any other function of
- * the Device Driver. Inside this function the init function of the control
+ * the Device Kart_Driver. Inside this function the init function of the kart_control
  * layer is executed in order to initialize the network instance.
  *
  * @param[in] TLD7002_NetworkInstance_t* pointer to instance of TLD7002 network

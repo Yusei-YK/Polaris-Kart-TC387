@@ -1,6 +1,5 @@
 #ifndef KART_HORN_H_
 #define KART_HORN_H_
-
 #include "zf_common_headfile.h"
 #include "board_pins.h"
 #include "kart_voice.h"

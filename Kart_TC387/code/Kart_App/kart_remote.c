@@ -31,7 +31,7 @@ static volatile uint32 remote_frame_count  = 0;    /* 合法帧累计 */
 static volatile uint32 remote_idle_ms = KART_REMOTE_LOST_TIMEOUT_MS + 1; /* 上电即视为未在线 */
 static uint8  remote_online = 0;                   /* poll 更新的综合在线态 */
 
-/* 三段挡位:由 poll 每拍解码,保证全模式实时(供 VOFA ch33 显示 + playback deadman 判据)。
+/* 三段挡位:由 poll 每拍解码,保证全模式实时(供 VOFA ch33 显示 + kart_playback deadman 判据)。
  * 前置声明解码函数(定义在下方接管层),因 poll 在其之前。 */
 static kart_remote_sw3_t remote_sw3 = KART_REMOTE_SW3_L;
 static kart_remote_sw3_t remote_decode_sw3(uint16 raw);
@@ -137,7 +137,7 @@ void kart_remote_poll(uint16 period_ms)
     /* 综合在线:未超时 且 接收机未报失控 */
     remote_online = (idle <= KART_REMOTE_LOST_TIMEOUT_MS && remote_signal_state) ? 1 : 0;
 
-    /* 每拍解码三段挡位:全模式实时(VOFA ch33 + playback deadman 判据都读它)。
+    /* 每拍解码三段挡位:全模式实时(VOFA ch33 + kart_playback deadman 判据都读它)。
      * 失联时钳到低挡 L(等同急停语义)。原来只在遥控模式解码,导致 IDLE 下 sw3
      * 冻结在上电默认 L,拨挡无变化且 b1 被 deadman 恒判急停。
      * 增加滤波:连续 N 次读到同一挡位才切换,防止信号抖动误触发急停。 */
@@ -270,7 +270,7 @@ static float remote_map_steer(uint16 raw)
 static float remote_map_throttle(uint16 raw)
 {
     int diff = (int)raw - KART_REMOTE_THR_CENTER;
-    float vmax = kart_params_get(KART_PARAM_RC_VMAX);
+    float vmax = kart_params_get(PARAM_RC_VMAX);
     float spd;
 
     if(diff > -KART_REMOTE_DEADZONE && diff < KART_REMOTE_DEADZONE)
@@ -307,7 +307,7 @@ static void remote_emergency_stop(void)
     kart_control_set_enable(0);
     kart_steer_set_target_delta(0.0f);      /* 方向盘回中 */
     /* 转向内环是否使能由挡位决定;急停不主动关内环,让方向盘被按在中位更安全。
-     * 若要彻底断转向电机,由 mission 切出模式时的 stop_all 统一关。 */
+     * 若要彻底断转向电机,由 kart_mission 切出模式时的 stop_all 统一关。 */
 }
 
 void kart_remote_control_update(void)
