@@ -29,6 +29,9 @@ typedef enum
     MOTION_GOTO_TURN,       /* 摆位②:前进打死,把前置点转到车前方 */
     MOTION_GOTO_DRIVE,      /* 摆位③:追前置点 */
     MOTION_GOTO_AXIS,       /* 摆位④:沿目标轴线纯跟踪,横向+航向同时收敛 */
+    MOTION_S3_OUT,          /* 科目三盲盒任务①:出库直行前进(航向环保向) */
+    MOTION_S3_PAUSE,        /* 科目三盲盒任务②:停稳(硬换向会冲过头,详见 .h) */
+    MOTION_S3_IN,           /* 科目三盲盒任务③:倒车回库(同 MOTION_BACK 那套修正) */
     MOTION_CENTER,          /* 收车:后轮已停,原地把方向盘拉回中位再关内环 */
 } motion_phase_t;
 
@@ -49,6 +52,10 @@ static float motion_snake_sign    = 1.0f;/* 蛇形当前摆向:+1=打左、-1=�
 static float motion_snake_half_d0 = 0.0f;/* 本摆起始路程(米),保底翻转用 */
 
 static uint16 motion_center_ticks = 0;   /* 回正段已等拍数(超时兜底) */
+
+/* 科目三盲盒任务段间停车:pause 已等拍数(超时兜底)与"速度已进 EPS"的连续拍数。 */
+static uint16 motion_s3_pause_ticks = 0;
+static uint16 motion_s3_hold_ticks  = 0;
 
 /* -------------------- GOTO 摆位状态 --------------------
  * 目标位姿 + 前置点(目标沿 tyaw 反方向退 LEAD 米)在 start 时算一次就固定,
@@ -550,6 +557,38 @@ static void motion_goto_update(float dist)
     }
 }
 
+/* 科目三盲盒任务入口:出库 2.8m → 停稳 → 倒回 2.8m → 回正。
+ * 前半段和 kart_motion_start 的公共基准完全一样(路程/航向基准 + 作废 GOTO 结果),
+ * 后半段等于 KART_VOICE_CMD_FWD_10M 那条,只把结束判据换成 S3 的距离宏。
+ * 【不做成语音命令码】它不由语音触发,挂进 kart_motion_start 的 switch 只会
+ * 让语音有机会误触发这条动作。 */
+uint8 kart_motion_start_s3_fixed(void)
+{
+    if(kart_motion_is_busy())
+    {
+        return 0;
+    }
+
+    motion_dist0     = kart_odom_get_dist();
+    motion_yaw0      = kart_imu_get_yaw();
+    motion_yaw_prev  = motion_yaw0;
+    motion_yaw_accum = 0.0f;
+    motion_goto_state = KART_MOTION_GOTO_NONE;
+
+    motion_speed = +KART_MOTION_SPEED;
+    kart_steer_use_fwd_gains();
+    kart_steer_set_head_enable(0);
+    kart_steer_set_angle_enable(1);
+    motion_reverse = 0;
+    motion_set_delta(motion_yaw_corr_delta(0));
+    motion_set_rear(MOTION_DUTY_FWD, motion_speed);
+
+    motion_s3_pause_ticks = 0;
+    motion_s3_hold_ticks  = 0;
+    motion_phase = MOTION_S3_OUT;
+    return 1;
+}
+
 uint8 kart_motion_start(uint8 voice_cmd)
 {
     if(kart_motion_is_busy())
@@ -722,6 +761,63 @@ void kart_motion_update(void)
              * 现在:中位偏置由 motion_set_delta 统一补,再叠倒车航向比例修正。 */
             motion_set_delta(motion_yaw_corr_delta(1));
             if(dist >= KART_MOTION_BACK_DIST)
+            {
+                motion_finish();
+            }
+            break;
+
+        case MOTION_S3_OUT:
+            /* 出库段:与 MOTION_FWD 同一套本地保向修正。 */
+            motion_set_delta(motion_yaw_corr_delta(0));
+            if(dist >= KART_MOTION_S3_OUT_DIST)
+            {
+                /* 只断后轮出力,转向内环留着(下一拍就要把轮子往倒车修正位摆)。
+                 * 不走 motion_finish():那会进 MOTION_CENTER 结束整条动作。 */
+                kart_control_set_target(0.0f);
+                kart_control_set_enable(0);
+                kart_control_clear_open_loop();
+                motion_s3_pause_ticks = 0;
+                motion_s3_hold_ticks  = 0;
+                motion_phase = MOTION_S3_PAUSE;
+            }
+            break;
+
+        case MOTION_S3_PAUSE:
+            /* 后轮已断出力,车靠惯性滑停。这一段【提前】按倒车符号摆方向盘:
+             * 方向盘是有刷电机,从出库修正位摆到倒车修正位要百毫秒级,
+             * 借滑停这段时间摆完,倒车一起步就是对的角度。 */
+            motion_set_delta(motion_yaw_corr_delta(1));
+            motion_s3_pause_ticks++;
+            if(fabsf(kart_control_get_meas()) <= MOTION_S3_PAUSE_EPS)
+            {
+                motion_s3_hold_ticks++;
+            }
+            else
+            {
+                motion_s3_hold_ticks = 0;
+            }
+            if(motion_s3_hold_ticks >= MOTION_S3_PAUSE_TICKS ||
+               motion_s3_pause_ticks >= MOTION_S3_PAUSE_MAX_TICKS)
+            {
+                /* 回库距离从"停稳这一刻"重新起算:里程是单调路程,
+                 * 滑停多走的那几十厘米不能算进回库的 2.8m,否则回不到库里。
+                 * motion_yaw0 【不重新 latch】:要回的是出发时的车头方向。 */
+                motion_dist0 = kart_odom_get_dist();
+                motion_speed = -KART_MOTION_SPEED;
+                kart_steer_use_back_gains();
+                kart_steer_set_head_enable(0);
+                kart_steer_set_angle_enable(1);
+                motion_reverse = 1;
+                motion_set_delta(motion_yaw_corr_delta(1));
+                motion_set_rear(MOTION_DUTY_BACK, motion_speed);
+                motion_phase = MOTION_S3_IN;
+            }
+            break;
+
+        case MOTION_S3_IN:
+            /* 回库段:与 MOTION_BACK 同一套倒车保向修正。 */
+            motion_set_delta(motion_yaw_corr_delta(1));
+            if(dist >= KART_MOTION_S3_IN_DIST)
             {
                 motion_finish();
             }

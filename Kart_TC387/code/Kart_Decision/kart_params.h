@@ -45,9 +45,15 @@ typedef enum
                                  * 绕桩削顶(切内侧锥桶)就调小,高速画龙就调大 */
     PARAM_RC_VMAX,         /* 遥控满油门速度(脉冲/5ms) —— 录制手感,调低防打滑 */
     PARAM_HEAD_KP,         /* 航向外环 Kp —— 提速后走线画龙/发飘调它 */
-    /* 保留这两个下标只为不改变现有 Flash 参数表的后续序号；旧倒库逻辑已删除，菜单不再显示。 */
+    /* 保留 PARAM_S1_REV_SPD 这个下标只为不改变现有 Flash 参数表的后续序号；它仍然没人用,菜单也不显示。 */
     PARAM_S1_REV_SPD,
-    PARAM_S1_REV_STOP,
+    /* 【2026-08-22 复用占位槽】原 S1 倒库停车距离(早已废弃)-> 科目三倒车提前完成量。
+     * 只改枚举名和菜单显示名:槽位序号、量程 0.05..5.00、步长 0.05、小数位 2
+     * 全都不动,PARAM_MAX 也不变 —— Flash 里的旧存档照样读得回来(读回来是
+     * 旧值 1.40,落在量程内不会被夹取,上车手动拨到 1.00)。
+     * 含义与出厂值来历见 kart_playback.h 的 PLAYBACK_OL_LEAD_DEFAULT。 */
+    PARAM_S3_LEAD,         /* 科目三倒车提前完成量(m):沿录制路径还剩这么多就刹停。
+                                 * 仅方案1(S3 OLMode=1)有效,方案0 走里程查表判据 */
     PARAM_S3_OL_SPD,       /* 科目三倒车速度(脉冲/5ms,负) */
     /* ---- 科目三倒车方案切换(2026-07-28)。出厂 0 = 已实车验证能完赛的老路径 ----
      * 老方案(0):里程查表索引 + 航向 P 纠偏。实车结论:不撞筒,15m 走完终点横向
@@ -106,6 +112,10 @@ typedef struct
 void  kart_params_init(void);
 
 float kart_params_get(uint8 id);
+/* 菜单显示用:对"由别的参数反解出来"的项返回【算出来的值】,其余项等同 kart_params_get。
+ * 为什么不把算出来的值写回 param_val:那会置脏 -> 擦 DFlash,而且把推导结果固化成
+ * 存储值,以后改速度就不会自动跟着变了。反解量永远只在读的时候算。 */
+float kart_params_derived(uint8 id);
 /* 设值(内部钳到 [min,max])并立即 apply 到对应模块。只写 RAM,不写 Flash。 */
 void  kart_params_set(uint8 id, float v);
 /* 按 step 增减(dir=+1/-1),内部钳位 + apply。菜单 UP/DOWN 用。 */

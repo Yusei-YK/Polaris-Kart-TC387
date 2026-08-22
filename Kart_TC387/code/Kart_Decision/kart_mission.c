@@ -67,6 +67,11 @@ static uint32 s3_vision_frames_seen = 0;
 /* 科目三语音信号阶段是否已经至少执行过一条口令(菜单显示用)。 */
 static uint8  subject3_signal_done = 0;
 
+/* 科目三盲盒任务阶段:整段计时(超时兜底)、起步前"已停稳"的连续拍数、是否已启动。 */
+static uint16 subject3_fixed_ticks   = 0;
+static uint16 subject3_fixed_settle  = 0;
+static uint8  subject3_fixed_started = 0;
+
 /* ============ 统一停机:任意模式退出/进 IDLE/FAULT 都调 ============ */
 /* 覆盖交接文档指出的"b0 不关内环"的完整停机缺口。 */
 static void mission_stop_all(void)
@@ -651,11 +656,29 @@ static void subject3_plink_follow_tick(void)
 }
 #endif
 
+#if !S3_FIXED_ACT_ENABLE
+/* 进语音信号阶段。【顺序是 先停日志、再抢波特率】,写歪就是把 JustFloat 字节
+ * 以 115200 喷到语音模块 RX 上。
+ * 只在 S3_FIXED_ACT_ENABLE=0(退回旧流程)时编译:ENABLE=1 时科目三不碰语音,
+ * 留着会是个没人调的 static 函数。 */
+static void subject3_enter_signal(void)
+{
+#if BOARD_VOICE_SHARES_AUX_UART
+    kart_debug_uart_set_enabled(0);
+#endif
+    kart_voice_uart_acquire();
+    subject3_signal_ticks = 0;
+    subject3_signal_done  = 0;
+    subject3_stage = S3_SIGNAL;
+}
+#endif
+
 static void subject3_loop(void)
 {
     /* 倒车阶段接受遥控急停:命中即完整停机回 IDLE(全程 deadman 保护)。
      * 遥控源的录制阶段,急停由 kart_remote_control_update 内部处理(遥控本身即 deadman)。 */
-    if(subject3_stage == S3_PHASE2_REVERSE && subject1_estop_requested())
+    if((subject3_stage == S3_PHASE2_REVERSE || subject3_stage == S3_FIXED_ACT) &&
+       subject1_estop_requested())
     {
         kart_mission_set_mode(MISSION_IDLE);
         return;
@@ -806,14 +829,65 @@ static void subject3_loop(void)
                  * 进信号阶段要把语音串口抢过来(与 VOFA 日志共用 UART10),
                  * 顺序必须"先停日志、再切波特率"(理由见 mission_enter 科目二段)。
                  * 代价:这一段没有 VOFA 日志。车已经停稳,没有控制过程要看。 */
-                mission_stop_all();         /* 车/转向彻底断输出,信号阶段只动灯和喇叭 */
-#if BOARD_VOICE_SHARES_AUX_UART
-                kart_debug_uart_set_enabled(0);
+                mission_stop_all();         /* 车/转向彻底断输出 */
+#if S3_FIXED_ACT_ENABLE
+                /* 先做固定动作(出库→倒回)。这里【故意不关日志、不抢语音串口】:
+                 * 这一段要留 VOFA 看走得直不直,抢串口推迟到 subject3_enter_signal()。 */
+                subject3_fixed_ticks   = 0;
+                subject3_fixed_settle  = 0;
+                subject3_fixed_started = 0;
+                subject3_stage = S3_FIXED_ACT;
+#else
+                subject3_enter_signal();
 #endif
-                kart_voice_uart_acquire();
-                subject3_signal_ticks = 0;
-                subject3_signal_done  = 0;
-                subject3_stage = S3_SIGNAL;
+            }
+            break;
+
+        case S3_FIXED_ACT:
+            /* 固定动作:等车停稳 → kart_motion_start_s3_fixed() → 每拍推进 → 做完进信号阶段。
+             * 【这里必须自己调 kart_motion_update()】全工程原来只有 subject2_loop 调它,
+             * 科目三不调就等于动作永远停在第一拍(deadman 也不会被判)。 */
+            subject3_fixed_ticks++;
+            if(subject3_fixed_ticks >= S3_FIXED_TICKS)
+            {
+                /* 动作没跑完就超时:停机收车。不进 S3_FAULT —— 车已经在库附近,
+                 * 报故障对现场没有额外信息,反而多一个要复位的状态。 */
+                kart_motion_stop();
+                kart_debug_uart_set_event(EVENT_S3_ABORT, EVENT_LEVEL_WARNING);
+                subject3_stage = S3_FINISHED;
+                break;
+            }
+
+            if(!subject3_fixed_started)
+            {
+                if(fabsf(kart_control_get_meas()) <= S3_FIXED_SETTLE_EPS)
+                {
+                    subject3_fixed_settle++;
+                }
+                else
+                {
+                    subject3_fixed_settle = 0;
+                }
+                if(subject3_fixed_settle >= S3_FIXED_SETTLE_TICKS ||
+                   subject3_fixed_ticks  >= S3_FIXED_SETTLE_MAX_TICKS)
+                {
+                    /* 启动失败(理论上不会:上面刚 mission_stop_all)也不能卡死,
+                     * 靠 S3_FIXED_TICKS 超时放行。 */
+                    if(kart_motion_start_s3_fixed())
+                    {
+                        subject3_fixed_started = 1;
+                    }
+                }
+                break;
+            }
+
+            kart_motion_update();
+            if(!kart_motion_is_busy())
+            {
+                /* 方向盘已回中位、后轮已断出力(motion_finish → MOTION_CENTER 走完)。
+                 * 直接结束,日志继续开着,现场靠 KART_LEFT 退出。 */
+                kart_debug_uart_set_event(EVENT_S3_DONE, EVENT_LEVEL_INFO);
+                subject3_stage = S3_FINISHED;
             }
             break;
 
@@ -860,7 +934,8 @@ static void subject3_loop(void)
             break;
 
         case S3_FINISHED:
-            /* 全流程结束:保持无输出。停机已在进 S3_SIGNAL 时做过。 */
+            /* 全流程结束:保持无输出。停机已在盲盒任务收尾时做过
+             * (motion_finish 断后轮 + 回中位;超时那条走 kart_motion_stop)。 */
             break;
 
         case S3_FAULT:
@@ -919,7 +994,7 @@ void kart_mission_set_mode(kart_mission_mode_t mode)
      * 切成还没被改过的样子(实际是同一个 460800,行为无害但语义是错的),
      * 更要紧的是 kart_debug_uart_set_enabled(1) 会把本来关着的日志闸打开。 */
     if((MISSION_SUBJECT_2 == mission_mode)
-       || (MISSION_SUBJECT_3 == mission_mode && subject3_stage >= S3_SIGNAL))
+       || (MISSION_SUBJECT_3 == mission_mode && S3_HOLDS_VOICE_UART(subject3_stage)))
     {
         kart_light_set_command(KART_LIGHT_CMD_OFF);   /* 灯板图案归零,屏幕交回模式号显示 */
         kart_voice_uart_release();

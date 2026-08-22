@@ -232,8 +232,19 @@
  * 【联动第三处】kart_person_link.h 的 SCALE_R_STOP 必须跟着抬到 2.19，
  * 否则灯板那条 height 刹车路径推不动 scale_r 过停车线，整条路径失效。 */
 #define FOLLOW_NEAR_STOP_ENABLE    (1)
-#define FOLLOW_NEAR_STOP_R         (2.14f)
-#define FOLLOW_NEAR_RESUME_R       (1.76f)
+/* 【2026-08-22 跟随停车线从 0.70m 推到 0.90m】上面那段推导按 0.70/0.85 写的，现值为:
+ *   STOP   0.90m -> 1.50/0.90 = 1.667 -> 1.67
+ *   RESUME 1.10m -> 1.50/1.10 = 1.364 -> 1.36
+ * 回差 1.67-1.36 = 0.31。scale_r 与框高像素是线性的(f=83.5px、板高 0.45m，
+ * 即 scale_r 约等于 0.04 乘框高px)，所以 1px 量化噪声恒为 0.04 的 scale_r，
+ * 与距离无关；回差 0.31 约合 7.8px，与原来 0.38(9.5px) 同量级，抗抖没变差。
+ * 【本次没动的两处】FOLLOW_NEAR_STOP_FRAMES 仍为 2，单帧约 360ms 时闭锁延迟
+ * 约 0.7s，巡航 1.70m/s 期间车先走约 1.19m —— 按速度算 0.90m 这条线仍偏晚，
+ * 要真解决得降 FRAMES 或按接近速度预测，本次只按要求改距离。
+ * kart_person_link.h 的 SCALE_R_STOP 未动，PLINK 那条 height 刹车路径的停车
+ * 线仍按它自己的值走，两条路径的停车距离目前并不一致。 */
+#define FOLLOW_NEAR_STOP_R         (1.67f)
+#define FOLLOW_NEAR_RESUME_R       (1.36f)
 
 /* 联锁触发需要连续多少拍。单帧尺度尖峰不该导致刹车。
  * 3 拍 = 30ms，仍远快于人走 0.03m 的时间，安全性不受影响。 */

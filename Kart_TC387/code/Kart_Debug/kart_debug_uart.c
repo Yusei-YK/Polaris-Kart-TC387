@@ -40,14 +40,32 @@
 #define LOG_PROFILE_S3         (1)
 
 #if LOG_PROFILE_S3
-#define KART_LOG_CHANNELS           (32U)  /* VOFA 通道数:帧长 32*4+4=132B。
+#define KART_LOG_CHANNELS           (43U)  /* VOFA 通道数:帧长 43*4+4=176B。
+                                            * 2026-08 由 32 加到 39:新增 CH32-CH38(录盲盒任务轨迹)。
+                                            * 2026-08 由 39 加到 43:新增 CH39-CH42(倒车复现横向环诊断)。
+                                            * 【VOFA 端通道数必须同步改成 43】否则帧长不匹配、波形全体错位。
                                             * 【改这个宏必须同步补 ch[] 赋值】ch[] 是按宏开维的栈数组，
                                             * 手写索引只到 25 时 ch[26..29] 是未初始化栈内存，
                                             * 编译不报错，VOFA 上是随机跳变的四路 —— 比没有这几路更坏。
-                                            * 132B @460800(12bit/B) = 3.4ms，周期 20ms，余量够。 */
+                                            * 176B @460800(12bit/B) = 4.6ms，周期 20ms，余量够。 */
 #else
 #define KART_LOG_CHANNELS           (51U)  /* 帧长 51*4+4=208B */
 #endif
+
+/* 录固定动作轨迹用的分段打点计数(CH38)。
+ * 手推车时在【出库结束 / 绕完圈 / 入库结束】各敲一下 START(P20.7),
+ * 这一路就变成阶梯,事后不用从 yaw 曲线上猜段边界。
+ * 这里只【读】引脚电平(gpio 已在 kart_mission_init 里 init 成 GPI),
+ * 不消耗任何人的边沿,kart_mission / kart_menu 的 START 逻辑不受影响。 */
+static uint16 kart_log_mark = 0U;
+#if LOG_PROFILE_S3
+static uint8  kart_log_mark_key_last = 1U;
+#endif
+
+void kart_debug_uart_bump_mark(void)
+{
+    kart_log_mark++;
+}
 
 static volatile uint16 kart_event_id = 0U;
 static volatile uint8  kart_event_level = EVENT_LEVEL_INFO;
@@ -325,6 +343,50 @@ void kart_debug_uart_poll(void)
              * 所以"CH31 基本不动而 CH30 塌了"就是背光欠曝:AE 保背景、牺牲前景。
              * 【不读相机曝光值】那要借 UART1 9600，链路 init 后已还给灯板，会阻塞。 */
             ch[31] = (float)v->mean_sum;
+
+            /* ---- CH32-CH38:手推录固定动作轨迹(出库 → 绕圈 → 回库)---- */
+            /* 打角序列只能从 CH15(meas_delta)读:手推时转角内环不使能,
+             * CH14(target_delta)恒为 0;航向用 CH17(展开 yaw),绕圈会跨 ±180。 */
+            ch[32] = kart_odom_get_x();          /* 世界系 x(m) */
+            ch[33] = kart_odom_get_y();          /* 世界系 y(m) */
+            ch[34] = kart_odom_get_dist();       /* 累计里程(m),分段主依据 */
+            /* 左右轮分开才能反解转弯半径(差速),也看得出单侧打滑。 */
+            ch[35] = (float)kart_encoder_get_left_delta();
+            ch[36] = (float)kart_encoder_get_right_delta();
+            /* CH37 环形缓冲丢帧计数。帧长从 132B 加到 160B(一帧要 10 次
+             * background_poll),这一路是"日志本身可不可信"的唯一判据:
+             * 只要它在涨,采样就是不连续的,轨迹不能直接拿去反解。
+             * 真丢帧就把 KART_LOG_PERIOD_TICKS 从 4 改 8(25Hz,手推车够)。 */
+            ch[37] = (float)kart_log_ring_drop;
+            /* CH38 分段打点:START 下降沿计数(单调增)。 */
+            {
+                uint8 mk_now = gpio_get_level(BOARD_START_KEY_PIN);
+                if(kart_log_mark_key_last == 1U && mk_now == 0U)
+                {
+                    kart_log_mark++;
+                }
+                kart_log_mark_key_last = mk_now;
+            }
+            ch[38] = (float)kart_log_mark;
+
+            /* ---- CH39-CH42:倒车复现(OLMode=1)横向位置环诊断 ----
+             * 【为什么另开四路而不用 CH20-CH23】kart_debug_uart.c 里那套
+             * "倒车时把 CH20-23 换成 playback 诊断量"的分支在本 profile 下没生效
+             * (2026-08 实测:整条回溯里 CH21/22/23 钉在 92/7/0 不动),
+             * 于是横向环是瞎的 —— 41cm 的横向偏差查不出是它没看见还是没输出。
+             * 这四路直接取 kart_playback 的诊断快照,不经过任何分支。
+             *
+             * 【停机时是陈旧值】这四个 get 返回模块内静态量,倒车复现不跑时不更新。
+             * 判读只看 CH1(阶段)==1 的那一段。
+             *
+             * 判读方法(对应 kart_playback.c:748-772):
+             *   CH39 e_lat 应被压向 0。持续单向增大 = Ke 符号反了,菜单 Ke 取负。
+             *   CH39 一直不为 0 而 CH41 不动 = Ke 太小,修正量没过转向内环 63 计数死区。
+             *   CH40 索引必须单调递减到 0。卡住不降 = 最近点搜索脱线。 */
+            ch[39] = kart_playback_get_cur_y();   /* e_lat 横向偏差(m),>0/<0 见 cross_track 定义 */
+            ch[40] = kart_playback_get_aim_x();   /* 进度索引 k,倒车时单调递减 */
+            ch[41] = kart_playback_get_aim_y();   /* 最终下发打角(计数,前馈+航向P+横向P后) */
+            ch[42] = kart_playback_get_cur_x();   /* head_err 航向误差(度) */
         }
 #else
         ch[0]  = (float)kart_mission_get_mode();          /* 0 kart_mission模式 */

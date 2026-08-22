@@ -76,6 +76,7 @@ typedef enum
 {
     S3_PHASE1_FOLLOW = 0,   /* 第一阶段:跟随(遥控或视觉)+录轨，等 START 键收尾 */
     S3_PHASE2_REVERSE,      /* 第二阶段:按 START 后倒车原路返回 */
+    S3_FIXED_ACT,           /* 第三阶段:自动执行固定动作(出库→倒回),不等 START */
     S3_SIGNAL,              /* 第三阶段:已回发车区,等语音口令做灯光/鸣笛 */
     S3_FINISHED,            /* 全流程结束 */
     S3_FAULT,
@@ -116,6 +117,43 @@ typedef enum
 /* 语音信号阶段超时(10ms/拍 → 6000 拍 = 60s)。
  * 超时不算故障:直接进 S3_FINISHED 收车,不让车/灯无限等下去。 */
 #define S3_SIGNAL_TIMEOUT_TICKS (6000U)
+
+/* -------------------- 科目三盲盒任务阶段(S3_FIXED_ACT)--------------------
+ * 倒车复现完成后【不等 START、不等语音】自动执行:出库前进 2.8m → 倒回 2.8m,
+ * 距离与形状在 kart_motion.h 的 KART_MOTION_S3_OUT_DIST / IN_DIST。
+ *
+ * 【这一段做完直接进 S3_FINISHED,不碰语音串口】用户确认:科目三【没有】语音
+ * 环节,语音任务是走菜单进科目二做的。所以原来"倒车完成 → S3_SIGNAL 等口令"
+ * 这条路对科目三是纯负担 —— 进 S3_SIGNAL 会把 UART10 从 460800 切到 115200
+ * 让给语音模块,VOFA 日志当场断掉,而盲盒任务恰恰是最需要日志的一段。
+ * S3_SIGNAL 那个 case 保留但已不可达(ENABLE=0 时才走回去)。
+ *
+ * ENABLE 置 0 即退回改动前的行为(倒车完成进 S3_SIGNAL 抢语音串口)。 */
+#define S3_FIXED_ACT_ENABLE      (1)
+
+/* 科目三到底有没有持有语音串口 —— kart_mission_set_mode 退出时据此决定要不要
+ * kart_voice_uart_release() + 重开日志闸。
+ * ENABLE=1 的流程里【从来没有 acquire 过】,所以恒为假:无条件 release 会去
+ * 重新初始化一个本来就是 460800 的串口,还会把日志闸再"打开"一次,
+ * 都是没必要的动作,而且正好落在退模式这一拍上。 */
+#if S3_FIXED_ACT_ENABLE
+#define S3_HOLDS_VOICE_UART(stage)   (0)
+#else
+#define S3_HOLDS_VOICE_UART(stage)   ((stage) >= S3_SIGNAL)
+#endif
+
+/* 起步前等车停稳:滤波实测速度(脉冲/5ms)进 EPS 且连续保持 TICKS 拍。
+ * 倒车复现 stop 后车不是立刻静止,带着残速起步会多冲出去一截。
+ * MAX 是保底,等不到停稳也要往下走 —— 灯光/鸣笛那一段还得做。 */
+#define S3_FIXED_SETTLE_EPS      (4.0f)
+#define S3_FIXED_SETTLE_TICKS    (30U)
+#define S3_FIXED_SETTLE_MAX_TICKS (300U)
+
+/* 整段固定动作的超时(10ms/拍 → 3000 拍 = 30s)。
+ * 2.8m 来回 @0.9m/s 约 7s,含停稳和回正给到 30s。
+ * 【超时不进 S3_FAULT】动作没做完也要放行到 S3_SIGNAL:
+ * 灯光/鸣笛是规则要分的项,不能被这一段拖没。 */
+#define S3_FIXED_TICKS           (3000U)
 
 /* 视觉结果最大可复用拍数(10ms/拍)。兜底目标是采集链断了还拿旧方位
  * 角打方向 —— 相机状态不能代替它,RUNNING 判据来自 VSYNC,DMA 停了仍是 RUNNING。

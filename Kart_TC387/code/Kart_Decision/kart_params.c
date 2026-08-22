@@ -40,7 +40,11 @@ static const kart_param_meta_t param_meta[PARAM_MAX] =
     { "Head Kp",     0.0f,  400.0f,   1.0f,  KART_HEAD_KP_DEFAULT,              0 },
     /* 保留两个占位项，避免后续参数的 Flash 下标整体移动。运行时和菜单均不使用。 */
     { "Reserved 1", -95.0f,  -1.0f,   1.0f, -25.0f,                             0 },
-    { "Reserved 2",  0.05f,   5.00f,  0.05f,  1.40f,                            2 },
+    /* 【2026-08-22】原 "Reserved 2" 占位槽改作科目三倒车提前完成量。量程 0.05..5.00 /
+     * 步长 0.05 / 小数位 2 一个字没动 —— 它本来就是米量纲,正好合用;槽位序号和
+     * PARAM_MAX 也没动,所以 Flash 旧存档照样读得回来。出厂值从 1.40 改成 1.00
+     * (= 实测过线 1.5m 减去可接受的 0.5m),来历见 kart_playback.h。 */
+    { "S3 Lead",     0.05f,   5.00f,  0.05f,  PLAYBACK_OL_LEAD_DEFAULT,         2 },
     { "S3 OLSpd",   -95.0f,  -1.0f,   1.0f,  KART_PLAYBACK_OL_SPEED,            0 },
     /* 倒车方案:出厂 0 = 已实车验证能完赛的里程查表方案。1 = 位置闭环(待验证)。
      * step=1 → 一下按键就切换,不用连点。 */
@@ -94,6 +98,80 @@ static uint32 page_buf[EEPROM_PAGE_LENGTH];
 static uint32 f2u(float f)  { flash_data_union u; u.float_type  = f; return u.uint32_type; }
 static float  u2f(uint32 v) { flash_data_union u; u.uint32_type = v; return u.float_type;  }
 
+/* ==================== 速度联动量自动解算 ====================
+ * 【为什么要它】Spd Imax / Str OutMax 不是独立自由度,它们是"你设的速度"的函数。
+ * 过去必须手动联调:改了速度不跟着改这两个,速度就上不去(环饱和)或走线画龙。
+ * 现在只留速度当旋钮,这两个自己算,菜单里转灰。
+ *
+ * Imax:速度环稳态 duty = Kp*e + I,想让 e -> 0 就得让积分器供得上整份 duty。
+ *   后轮实测拟合 v(m/s) = 0.00046*duty - 0.10,反解目标速度需要的 duty,留 1.3 倍余量。
+ *   代入现场值(Flw 1.70 / OLSpd -33 即 2.43m/s):1.3*(2.43+0.10)/0.00046 = 7150,
+ *   与本文件下方原注释里手试出来的"3000 -> 5000 -> 7000"终点吻合 —— 互为验证。
+ *   【放大它为什么安全】Imax 是天花板不是油门:变大不会让车超过命令速度,只是拆掉
+ *   那道拿不到 31% duty 的人为限制。电流/温度由速度目标决定,那个还在人手里。
+ *   代价是瞬态积分能积更多,起步/出弯可能有点速度超调,有 Ramp Step 兜着。
+ *   下限锁在出厂 3000:只许往上,绝不因为反解把车调得比现在慢。
+ *
+ * OutMax:转角内环输出限幅决定转向速率(出厂 6000 实测 1800 计数/s)。按本文件
+ *   PB Prof 注释里的绕桩推导,6000 支撑到约 1.7m/s;速度再上去必须同比放大,
+ *   否则转向跟不上就画龙。只跟【跟随速度】挂钩:倒车沿录制轨迹回溯,弯没那么急。
+ *
+ * 【生效范围】只在 S3 OLMode == 1 时反解。打回 0 一次性恢复全套手调行为(手调
+ * Imax/OutMax + 手调 Kh + 里程查表倒车) —— 沿用既有逃生开关,不再另加开关行。
+ * 【不碰存储】Spd Imax / Str OutMax 存在 DFlash 的值原样保留,只是运行时不读。 */
+#define SPD_DERIVE_DUTY_PER_MS   (0.00046f)   /* v(m/s) = 本值*duty - OFFSET,后轮实测拟合 */
+#define SPD_DERIVE_DUTY_OFFSET   (0.10f)
+#define SPD_DERIVE_IMAX_MARGIN   (1.30f)      /* 余量:拟合偏小才有害,这就是为它留的 */
+#define SPD_DERIVE_IMAX_FLOOR    (3000.0f)    /* = 出厂 Imax,反解只许往上 */
+#define SPD_DERIVE_IMAX_CEIL     (10000.0f)   /* = duty 满量程 = 菜单量程上限 */
+#define SPD_DERIVE_STR_BASE      (6000.0f)    /* 出厂 OutMax */
+#define SPD_DERIVE_STR_BASE_V    (1.70f)      /* 该 OutMax 支撑的速度(绕桩推导) */
+#define SPD_DERIVE_STR_CEIL      (10000.0f)
+
+static uint8 param_spd_derive_on(void)
+{
+    return (uint8)(param_val[PARAM_S3_OL_MODE] > 0.5f);
+}
+
+static float param_derive_imax(void)
+{
+    float v_flw = param_val[PARAM_FLW_CRUZ];                        /* m/s */
+    float v_rev = -param_val[PARAM_S3_OL_SPD] * PLAYBACK_V_TO_MS;   /* 脉冲/5ms(负) -> m/s(正) */
+    float v_top = (v_flw > v_rev) ? v_flw : v_rev;
+    float imax  = SPD_DERIVE_IMAX_MARGIN
+                  * (v_top + SPD_DERIVE_DUTY_OFFSET) / SPD_DERIVE_DUTY_PER_MS;
+
+    if(imax < SPD_DERIVE_IMAX_FLOOR) imax = SPD_DERIVE_IMAX_FLOOR;
+    if(imax > SPD_DERIVE_IMAX_CEIL)  imax = SPD_DERIVE_IMAX_CEIL;
+    return imax;
+}
+
+static float param_derive_outmax(void)
+{
+    float outmax = SPD_DERIVE_STR_BASE
+                   * param_val[PARAM_FLW_CRUZ] / SPD_DERIVE_STR_BASE_V;
+
+    if(outmax < SPD_DERIVE_STR_BASE) outmax = SPD_DERIVE_STR_BASE;
+    if(outmax > SPD_DERIVE_STR_CEIL) outmax = SPD_DERIVE_STR_CEIL;
+    return outmax;
+}
+
+/* 四个速度旋钮任意一个变了都走这里重算并下推,不依赖 param_apply 的调用顺序
+ * (kart_params_init 里 param_apply_all 是按下标循环的,顺序不能当依赖)。 */
+static void param_apply_derived_speed(void)
+{
+    if(param_spd_derive_on())
+    {
+        kart_control_set_speed_imax(param_derive_imax());
+        kart_steer_set_angle_outmax(param_derive_outmax());
+    }
+    else
+    {
+        kart_control_set_speed_imax(param_val[PARAM_SPD_IMAX]);
+        kart_steer_set_angle_outmax(param_val[PARAM_STR_OUTMAX]);
+    }
+}
+
 /* 把参数推给对应模块。只有"模块内部存了副本"的参数需要 apply;
  * 其余(复现倍率/地板/Alat/倒库里程等)由使用方每次直接 kart_params_get 读,
  * 故 apply 里没有它们 —— 少一次同步就少一处不一致。 */
@@ -112,16 +190,18 @@ static void param_apply(uint8 id)
                                     KART_HEAD_KD_DEFAULT);
             break;
 
+        /* 这五项任意一个变化都要重算 Imax/OutMax:前两个是被反解的量本身(手调模式
+         * 下才直接生效),中间两个是反解的输入,最后一个是反解的总开关。 */
         case PARAM_SPD_IMAX:
-            kart_control_set_speed_imax(param_val[id]);
+        case PARAM_STR_OUTMAX:
+        case PARAM_FLW_CRUZ:
+        case PARAM_S3_OL_SPD:
+        case PARAM_S3_OL_MODE:
+            param_apply_derived_speed();
             break;
 
         case PARAM_SPD_KP:
             kart_control_set_speed_kp(param_val[id]);
-            break;
-
-        case PARAM_STR_OUTMAX:
-            kart_steer_set_angle_outmax(param_val[id]);
             break;
 
         case PARAM_SLEW_REAR:
@@ -175,6 +255,18 @@ void kart_params_init(void)
 float kart_params_get(uint8 id)
 {
     if(id >= PARAM_MAX) return 0.0f;
+    return param_val[id];
+}
+
+/* 见 kart_params.h。只有被反解的两项返回算出来的值,其余原样透传。 */
+float kart_params_derived(uint8 id)
+{
+    if(id >= PARAM_MAX) return 0.0f;
+    if(param_spd_derive_on())
+    {
+        if(id == PARAM_SPD_IMAX)   return param_derive_imax();
+        if(id == PARAM_STR_OUTMAX) return param_derive_outmax();
+    }
     return param_val[id];
 }
 

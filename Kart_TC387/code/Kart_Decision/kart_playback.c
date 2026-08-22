@@ -51,6 +51,13 @@ static float playback_prof[KART_RECORD_MAX_WAYPOINTS];
 
 static uint16 playback_prof_n = 0;      /* 剖面有效点数,0=未生成(退回录制速度) */
 
+/* 倒车复现结束的主动刹停状态(见 kart_playback.h 的 PLAYBACK_BRAKE_* 注释)。
+ * playback_braking=1 期间 playback_running 保持 1,所以任务层等的 is_running
+ * 会自动把刹停等完 —— kart_mission.c 一行不用改。 */
+static uint8  playback_braking    = 0;
+static uint16 playback_brake_tick = 0;
+static uint16 playback_brake_hold = 0;
+
 static float kart_playback_wrap180(float angle)
 {
     while(angle > 180.0f) angle -= 360.0f;
@@ -60,11 +67,42 @@ static float kart_playback_wrap180(float angle)
 
 static void kart_playback_poll_openloop(void);      /* 科目三倒车方案0:里程查表(下方实现) */
 static void kart_playback_poll_closedloop(void);    /* 科目三倒车方案1:位置闭环(下方实现) */
+static void kart_playback_poll_brake(void);         /* 倒车结束主动刹停(下方实现) */
 
 static void kart_playback_complete(void)
 {
+    /* 开环倒车(科目三)单独走刹停:直接 stop() 是断电滑行,见 PLAYBACK_BRAKE_* 注释。
+     * 其余科目(正向复现)行为完全不变,仍是原来的 stop() + 置完成。 */
+    if(playback_openloop_mode)
+    {
+        playback_braking    = 1;
+        playback_brake_tick = 0;
+        playback_brake_hold = 0;
+        kart_control_set_target(0.0f);
+        return;                     /* 保持 playback_running=1,下一拍进刹停分支 */
+    }
     kart_playback_stop();
     playback_result = KART_PLAYBACK_RESULT_COMPLETED;
+}
+
+/* 刹停一拍:持续命令 0 速,等实测进死区并连续保持,或超时兜底,然后才真正关环。
+ * 转向故意不动:保持最后一拍的 delta 和已使能的内环,让车刹直线;
+ * 回中/切回正向增益统一由最后那声 kart_playback_stop() 做。 */
+static void kart_playback_poll_brake(void)
+{
+    kart_control_set_target(0.0f);
+
+    playback_brake_tick++;
+    if(fabsf(kart_control_get_meas()) <= PLAYBACK_BRAKE_EPS) playback_brake_hold++;
+    else                                                     playback_brake_hold = 0;
+
+    if(playback_brake_hold >= PLAYBACK_BRAKE_HOLD ||
+       playback_brake_tick >= PLAYBACK_BRAKE_MAX_TICKS)
+    {
+        playback_braking = 0;
+        kart_playback_stop();                       /* 到这里才断电 + 回默认状态 */
+        playback_result = KART_PLAYBACK_RESULT_COMPLETED;
+    }
 }
 
 /* 该点录制速度(脉冲/5ms):左右取平均。只用于判前进/倒车段,不决定快慢。 */
@@ -289,6 +327,7 @@ void kart_playback_stop(void)
     }
     playback_running = 0;
     playback_openloop_mode = 0;
+    playback_braking = 0;       /* 刹停态一并清:急停/中途 abort 不能把它漏给下一次 start */
     /* 剖面判废:下次 start 会重算(可能改了 Vmax/Alat),不让旧剖面漏用。 */
     playback_prof_n = 0;
     kart_control_set_enable(0);
@@ -395,6 +434,12 @@ void kart_playback_poll(void)
      * 两条路径完全独立,方案 1 出问题现场把 OLMode 打回 0 即恢复已验证行为。 */
     if(playback_openloop_mode)
     {
+        /* 刹停优先:完成判据已经触发,这一拍只做刹车,不再跑纠偏。 */
+        if(playback_braking)
+        {
+            kart_playback_poll_brake();
+            return;
+        }
         if(kart_params_get(PARAM_S3_OL_MODE) > 0.5f)
             kart_playback_poll_closedloop();
         else
@@ -702,7 +747,8 @@ static void kart_playback_poll_closedloop(void)
     kart_odom_snapshot_t kart_odom;
     Point_2D cur, start;
     uint16 k;
-    float delta, head_err, e_lat, corr_h, corr_e, sign, kh, ke;
+    const float *kart_dist = kart_record_get_dist();  /* 各点到起点的路径里程(m) */
+    float delta, head_err, e_lat, corr_h, corr_e, sign, kh, ke, lead;
 
     kart_odom_get_snapshot(&kart_odom);
     cur = kart_playback_project_to_record(&kart_odom);
@@ -715,7 +761,20 @@ static void kart_playback_poll_closedloop(void)
      * 前者是主判据(路径走完了),后者兜住"起点附近点密、索引降不到 0"的情况。 */
     start.x = wp[0].x;
     start.y = wp[0].y;
-    if(k == 0 || get_distance(cur, start) < PLAYBACK_OL_FIN_DIST)
+    /* 【2026-08-22 新增第三条:提前量 S3 Lead】上面两条都挂在 cur 上,而 cur 是 odom
+     * 的 x/y 积分转到录制坐标系来的 —— 跟随 65m + 倒车 75m 之后累积误差是米级。
+     * 实车现象:车已经压在发车线上了,程序还以为差 1.5m,于是继续往后倒,过线约
+     * 1.5m 才刹(刹车本身不滑,实车确认过,纯粹是喊停喊晚了)。
+     * 第三条改用录制里程表 dist[k]:该表只由 dist_sum 积分而来(kart_record.c:
+     * 128/183),不含航向,实测 1% 内;且它沿路径度量 —— 蛇行不会像编码器总里程
+     * 那样把它撑大,车横向偏多少也不影响它。于是"还剩 lead 米就喊停"等于把停车
+     * 点整体往前挪 lead 米,正好抵掉那段滞后。挪多少现场量出来填多少。
+     * 三条是 OR,谁先满足都算完成;本条写在最前只是因为它才是主判据。
+     * 总里程不足 lead + MIN_MARGIN 时本条不启用,防短路径一发车就判完成。 */
+    lead = kart_params_get(PARAM_S3_LEAD);
+    if((playback_ol_total > lead + PLAYBACK_OL_LEAD_MIN_MARGIN
+        && kart_dist[k] <= lead)
+       || k == 0 || get_distance(cur, start) < PLAYBACK_OL_FIN_DIST)
     {
         kart_playback_complete();
         return;
@@ -725,8 +784,18 @@ static void kart_playback_poll_closedloop(void)
     delta = (float)kart_steer[k];
 
     sign = PLAYBACK_OL_HEAD_SIGN;
-    kh   = kart_params_get(PARAM_S3_OL_KH);
     ke   = kart_params_get(PARAM_S3_OL_KE);
+    /* Kh 不再单独调,由 Ke 反解(推导与系数来源见 kart_playback.h 的 PLAYBACK_OL_KH_FROM_KE)。
+     * 用 |Ke|:Ke 的符号只决定横向纠偏方向,航向增益永远是正的。
+     * Ke==0 → 退回读菜单 S3 OL Kh,与老固件逐位一致;菜单里那一行此时仍然是亮的。 */
+    if(ke > PLAYBACK_OL_KE_EPS || ke < -PLAYBACK_OL_KE_EPS)
+    {
+        kh = PLAYBACK_OL_KH_FROM_KE * sqrtf((ke < 0.0f) ? -ke : ke);
+    }
+    else
+    {
+        kh = kart_params_get(PARAM_S3_OL_KH);
+    }
 
     /* ---- 反馈项①:航向 P(与方案 0 同构,只是 Kp 改从菜单取)---- */
     {

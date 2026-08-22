@@ -95,6 +95,7 @@ static const menu_set_row_t set_rows[] =
     { PARAM_S3_OL_MODE,    NULL              },
     { PARAM_S3_OL_KH,      NULL              },
     { PARAM_S3_OL_KE,      NULL              },
+    { PARAM_S3_LEAD,       NULL              },
     { PARAM_PB_REVSCL,     NULL              },
     { PARAM_PB_REVCORR,    NULL              },
 
@@ -416,7 +417,21 @@ static uint8 menu_param_is_active(uint8 id)
             return (uint8)(kart_params_get(PARAM_PB_PROF) > 0.5f);
 
         case PARAM_S3_OL_KE:
+        case PARAM_S3_LEAD:        /* 提前完成量只有方案1 的完成判据读它 */
             return (uint8)(kart_params_get(PARAM_S3_OL_MODE) > 0.5f);
+
+        case PARAM_S3_OL_KH:
+            /* 方案1 且 Ke!=0 时 Kh 由 Ke 反解(见 kart_playback.h),这一行调了没用 → 转灰。
+             * Ke==0 或 OLMode=0 时 Kh 仍是真旋钮(方案0 只有航向环),保持亮。 */
+            if(kart_params_get(PARAM_S3_OL_MODE) <= 0.5f) return 1;
+            return (uint8)(!(kart_params_get(PARAM_S3_OL_KE) >  PLAYBACK_OL_KE_EPS ||
+                             kart_params_get(PARAM_S3_OL_KE) < -PLAYBACK_OL_KE_EPS));
+
+        case PARAM_SPD_IMAX:
+        case PARAM_STR_OUTMAX:
+            /* OLMode=1 时这两项由 Flw Cruise / S3 OLSpd 反解(见 kart_params.c),
+             * 菜单存的值运行时不再被读 -> 转灰。灰行显示的是算出来的值。 */
+            return (uint8)(kart_params_get(PARAM_S3_OL_MODE) <= 0.5f);
 
         case PARAM_PB_CLAMP:
             /* 剖面关着时录制速度回放照样过这道闸 → 有效。开着时才比大小。 */
@@ -446,7 +461,10 @@ static uint8 menu_param_gates_others(uint8 id)
     switch(id)
     {
         case PARAM_PB_PROF:        /* 管 Scale/Vmax/Vmin/Alat/ABrake/RevScl/Clamp */
-        case PARAM_S3_OL_MODE:     /* 管 S3 OL Ke */
+        case PARAM_S3_OL_MODE:     /* 管 S3 OL Ke / S3 Lead / S3 OL Kh / Spd Imax / Str OutMax */
+        case PARAM_S3_OL_KE:       /* 管 S3 OL Kh:Ke 一旦非 0,Kh 那行要转灰 */
+        case PARAM_FLW_CRUZ:       /* 管 Spd Imax + Str OutMax 的显示值 */
+        case PARAM_S3_OL_SPD:      /* 管 Spd Imax 的显示值 */
         case PARAM_PB_VMAX:        /* 参与 PB Clamp 的判据 */
         case PARAM_PB_CLAMP:       /* 参与 PB LdMax 的判据 */
         case PARAM_PB_LDGAIN:      /* 参与 PB LdMax 的判据 */
@@ -464,7 +482,7 @@ static uint8 menu_param_gates_others(uint8 id)
 static void menu_draw_param_row(uint8 id, uint16 y, uint8 selected)
 {
     const kart_param_meta_t *m = kart_params_meta(id);
-    float v = kart_params_get(id);
+    float v = kart_params_derived(id);   /* 反解量显示算出来的值,不是存的值 */
     uint8 active = menu_param_is_active(id);
     char buf[64];
 
@@ -1079,6 +1097,17 @@ static void menu_draw_s3_run(void)
             ui_bar(UI_Y_HEAD,        " Reversing...",      UI_WARN, UI_BG);
             ui_bar(UI_Y_ROW0,        " Retrace + heading corr", UI_FG, UI_BG);
             ui_bar(UI_Y_ROW0 + UI_ROW_H, "",                   UI_FG,   UI_BG);
+            ui_hint("");
+            break;
+        case S3_FIXED_ACT:
+            /* 倒车复现完成后自动跑的固定动作(出库 2.8m → 倒回 2.8m)。
+             * 【不进 menu_poll 的重绘例外名单】这一段车正在动,整屏 SPI 写会挤掉
+             * 控制拍;所以这一页只在换页/手动重绘时画得出来,正常跑动时屏上
+             * 停留的还是 BACK 那页。这是故意的,别为了"屏上好看"去加重绘。 */
+            ui_title("Subject 3", "AUTO");
+            ui_bar(UI_Y_HEAD,        " Fixed action",      UI_WARN, UI_BG);
+            ui_bar(UI_Y_ROW0,        " Out 2.8m / back 2.8m", UI_FG, UI_BG);
+            ui_bar(UI_Y_ROW0 + UI_ROW_H, " no START needed",   UI_FG,   UI_BG);
             ui_hint("");
             break;
         case S3_SIGNAL:

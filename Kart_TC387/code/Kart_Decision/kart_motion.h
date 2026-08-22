@@ -146,6 +146,36 @@
 #define KART_MOTION_FWD_DIST        (10.0f)
 #define KART_MOTION_BACK_DIST       (10.0f)
 
+/* -------------------- 科目三盲盒任务:出库 → 倒回 --------------------
+ * 倒车复现做完、车停稳后自动执行,不等 START、不等语音。
+ * 形状就是"直行前进 D_OUT 米 → 停稳 → 倒车 D_IN 米 → 回正方向盘",
+ * 所以不新造控制律:两段各自复用 MOTION_FWD / MOTION_BACK 那套
+ * 本地保向修正(motion_yaw_corr_delta)+ 中位偏置(motion_set_delta)。
+ *
+ * 【为什么不直接借用 KART_MOTION_FWD_DIST / BACK_DIST】那两个是 10m,
+ * 是科目二语音"前行十米/后退十米"的语义,给科目三改小会波及语音动作。
+ *
+ * 【为什么两段之间必须插一段停车(MOTION_S3_PAUSE)】出库段结束那一拍车还在
+ * 以约 0.91 m/s(实测 v≈0.00046*duty-0.10,duty=2200)前进,直接下发
+ * MOTION_DUTY_BACK 是 H 桥/齿轮的硬换向,而且车会先冲过去一段再倒,
+ * 出库距离和回库距离就不等了 —— 而"回到库里"靠的正是两段距离相等。
+ * 科目二从来不踩这个坑,是因为每条语音动作之间都有 motion_finish() 隔着。
+ *
+ * 【yaw0 不在段间重新 latch】两段共用出库起点的航向:倒车段要回到的是
+ * 出发时的车头方向,不是出库结束时歪掉的那个方向。重新 latch 就等于
+ * 把出库段积下来的航向误差认成新基准,回库只会更歪。 */
+#define KART_MOTION_S3_OUT_DIST     (2.8f)     /* 出库前进距离(米) */
+#define KART_MOTION_S3_IN_DIST      (2.8f)     /* 回库后退距离(米) */
+
+/* 段间停车判据:滤波实测速度(脉冲/5ms)进 EPS 且连续保持 HOLD 拍即算停稳。
+ * EPS 取 4.0 —— 沿用省赛时期自动判停用过的阈值(dd96d93 由 2.0 调到 4.0)。
+ * HOLD 30 拍 = 0.3s(kart_motion_update 挂 10ms 拍)。
+ * MAX 是保底:后轮已经断出力,车不可能一直不停,但万一速度反馈坏了
+ * 这一段不能变成没有终点的等待。0.91m/s 靠惯性滑停实测量级 <1s,给 3s。 */
+#define MOTION_S3_PAUSE_EPS         (4.0f)
+#define MOTION_S3_PAUSE_TICKS       (30u)
+#define MOTION_S3_PAUSE_MAX_TICKS   (300u)
+
 /* -------------------- 蛇形 --------------------
  * 总行进路程 / 翻转判据 / 打角幅度(编码器计数)。
  *
@@ -362,6 +392,13 @@ uint8 kart_motion_start(uint8 voice_cmd);
 
 /* 是否正在执行动作(dispatch 判串行用)。 */
 uint8 kart_motion_is_busy(void);
+
+/* 启动科目三盲盒任务(出库 → 停稳 → 倒回 → 回正方向盘)。
+ * 【与 kart_motion_start 的区别】不吃语音命令码,参数全写死在宏里,
+ * 由 kart_mission 的 S3_FIXED_ACT 阶段在倒车复现完成后直接调。
+ * 1=已启动;0=拒绝(正在跑别的动作),调用方必须据此判失败,别傻等 is_busy。
+ * 启动后每拍照样调 kart_motion_update() 推进(deadman 在它入口)。 */
+uint8 kart_motion_start_s3_fixed(void);
 
 /* 立即停止当前动作:速度清零关速度环、转向回中关内外环。 */
 void  kart_motion_stop(void);

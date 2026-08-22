@@ -8,7 +8,7 @@
  * 串口由 BOARD_AUX_UART_*(board_pins.h 的 LOG_ON_UART0)选:
  *   =0 → UART_10/P13.0 TX(无线模块排针)  ← 当前
  *   =1 → UART_0 /P14.0 TX(USB-TTL 直插)
- * 460800 baud，VOFA JustFloat(51通道float32+帧尾,共208字节)。
+ * 460800 baud，VOFA JustFloat(通道数看 kart_debug_uart.c 的 KART_LOG_CHANNELS)。
  * 5 ms中断只维护tick，组帧和发送全部放在CPU0主循环。
  */
 #define KART_LOG_PERIOD_TICKS           (4U)   /* 4 * 5 ms = 20 ms，50 Hz */
@@ -47,5 +47,10 @@ void kart_debug_uart_background_poll(void);   /* 后台分块非阻塞发送(放
 #define EVENT_CAMERA_RECOVERED     (323U)
 #define EVENT_STEER_RECOVERED      (324U)
 void kart_debug_uart_set_event(uint16 event_id, uint8 level);
+
+/* CH38 分段打点 +1。日志模块自己会数 START(P20.7) 下降沿,
+ * 这个接口是退路:若现场发现 START 在当前菜单页上有别的作用,
+ * 换一个键/菜单项调它即可。 */
+void kart_debug_uart_bump_mark(void);
 
 #endif
