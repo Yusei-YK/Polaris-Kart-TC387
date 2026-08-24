@@ -59,6 +59,8 @@ tools/__pycache__/
 *.tmp
 
 # ===== 本机 AI 助手配置 (2026-08-25) =====
-# 钩子和它的 settings.json 只对本机有意义,别人克隆下来用不上,
-# 还可能跟他自己的 .claude/ 撞。真在用的那份放在仓库外。
+# 钩子、settings.json、CLAUDE.md 都只对本机的 AI 助手有意义,
+# 别人克隆下来用不上,还可能跟他自己的 .claude/ 撞。
+# 真在用的那几份放在仓库外面。
 .claude/
+CLAUDE.md
