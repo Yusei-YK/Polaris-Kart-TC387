@@ -63,12 +63,12 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
 
 - [x] A1 `.gitignore` 已补。`*.launch`、`menudiff.txt`、两个 build 日志原本就在里面，
       真缺的是脚本改代码掉下来的渣：`*.new` `*.bak` `*.orig` `*.rej` `*.patch` `*.tmp`。
-      点名的 `build_log.txt`/`build_full.txt` 合成一条 `Kart_TC387/build_*.txt`。
+      点名的 `build_log.txt`/`build_full.txt` 合成一条 `build_*.txt`。
       没加 `*.txt` 这种大网——`code/本文件夹作用.txt` 是已入库的说明文件，会被吞掉。
 - [x] A2 确认 `release build/` 和 `.metadata` 未被跟踪 —— 已确认，`.gitignore` 已覆盖
 - [x] A3 `.gitattributes` 已建。故意不写 `* text=auto`、也不给厂商目录任何规则——
       没有 text 属性就等于 git 完全不做转换，第三方代码原样进原样出。
-      规则一律按路径点名，只管 `Kart_TC387/code` 和 `Kart_TC387/user` 下的 `.c`/`.h`；
+      规则一律按路径点名，只管 `code` 和 `user` 下的 `.c`/`.h`；
       第三方 `code/Kart_TPL` 再单独锁回 `eol=lf`（那整个目录本来就是纯 LF，零改动）。
 - [x] A4 行尾已规范化。实测自己的代码是 82 个文件 26849 行：42 个纯 LF、
       21 个纯 CRLF、19 个同一份里混着两种。全刷成纯 CRLF，动了 61 个文件、
@@ -178,7 +178,7 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
       再快进到 `6067bb3`；队友 main 上那 5 条分叉提交钉在标签
       `archive/teammate-main-20260722`（原来是分支，08-25 转成标签）。
       那 5 条提交里的灯板和 TLD7002 驱动 `main` 里都有、而且更新——只是目录重排过，
-      从平铺的 `Kart_TC387/user/` 挪进了 `code/Kart_App`、`code/Kart_TPL` 等。
+      从平铺的 `user/` 挪进了 `code/Kart_App`、`code/Kart_TPL` 等。
       真正只在那条线上的是 8 个文件，处置见 C6 和 C7。
 - [ ] E1b 决定要不要翻成 public（会连带公开队友的 14 条提交，先问他）
 - [ ] E2 从干净 clone 验证一次能编译过

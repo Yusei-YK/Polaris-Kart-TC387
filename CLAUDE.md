@@ -2,7 +2,7 @@
 
 ## 环境
 
-- 主力工程 `Kart_TC387/`,芯片 TC387QP,逐飞(SeekFree)库,TASKING 编译器
+- 主力工程就在仓库根目录(AURIX 工程名 Kart_TC387),芯片 TC387QP,逐飞(SeekFree)库,TASKING 编译器
 - **本地没有 TriCore 工具链**,不要尝试编译。编译烧录由用户在 AURIX Studio 完成
 - 唯一的本地验证手段:`python tools/check_subject2.py`(在 `SmartCar/` 下运行)
 - 真相优先级:**实车观测 > 源码 > 旧文档**

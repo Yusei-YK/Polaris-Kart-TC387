@@ -1,0 +1,10 @@
+开机动画的原始素材
+==================
+
+boot_anim/frame-*.jpg  开机动画的逐帧图，30 帧。
+                       用 ../generate_boot_anim.py 转成
+                       code/Kart_Debug/kart_boot_anim_data.h 里的 RLE 数据，
+                       开机时由 kart_boot_anim_play() 画在 IPS200 屏上。
+
+留着的原因：生成脚本在仓库里，素材不在脚本就跑不了，
+            以后想换动画得从头找素材。

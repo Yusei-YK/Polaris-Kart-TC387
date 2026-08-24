@@ -8,14 +8,14 @@
 # 所以下面的规则全部按路径点名，只管我们自己的东西。
 
 # 自己的 C 源码：库里 LF，工作区 CRLF（TASKING / AURIX Studio 用着顺手）
-Kart_TC387/code/**/*.c text eol=crlf
-Kart_TC387/code/**/*.h text eol=crlf
-Kart_TC387/user/**/*.c text eol=crlf
-Kart_TC387/user/**/*.h text eol=crlf
+code/**/*.c text eol=crlf
+code/**/*.h text eol=crlf
+user/**/*.c text eol=crlf
+user/**/*.h text eol=crlf
 
 # 第三方 TLD7002 / TPL 就在 code/ 底下，会被上面两条扫到。
 # 它整个目录现在是纯 LF，这里锁成 LF：零改动，diff 还能正常看。
-Kart_TC387/code/Kart_TPL/** text eol=lf
+code/Kart_TPL/** text eol=lf
 
 # 文档和脚本保持 LF，跨平台看着一致
 *.md           text eol=lf

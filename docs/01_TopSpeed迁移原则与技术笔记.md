@@ -1,14 +1,14 @@
 # TopSpeed 迁移原则与技术笔记
 
-> 历史参考，不是当前任务入口。当前状态以 `Kart_TC387/docs/会话交接主文档.md` 和当前代码为准。
+> 历史参考，不是当前任务入口。当前状态以 `docs/会话交接主文档.md` 和当前代码为准。
 
-本文档记录当前有效的 TopSpeed 迁移原则和技术笔记。旧文档里指向 `6.6_V1_TC264/`、`code/` 的落点已作废，当前落点统一为 `Kart_TC387/user/`。
+本文档记录当前有效的 TopSpeed 迁移原则和技术笔记。旧文档里指向 `6.6_V1_TC264/`、`code/` 的落点已作废，当前落点统一为 `user/` 和 `code/`。
 
 ## 当前边界
 
 - TopSpeed 参考工程：`G:\CODE\top speed\NEUQ_TopSpeed_CrossCountry_TC377-main`
-- SmartCar 主力工程：`G:\CODE\Smart car\SmartCar\Kart_TC387`
-- 当前用户代码：`Kart_TC387/user/`
+- SmartCar 主力工程：`G:\CODE\Smart car\SmartCar`
+- 当前用户代码：`user/` 和 `code/`
 - 编译依赖：`TC387_Library-master/` 和工程内逐飞库，不能删除，不能 ignore。
 - 不改写 TopSpeed 原工程，不改写历史提交。
 
@@ -25,8 +25,8 @@
 
 TopSpeed 的主循环不是主要控制节拍，真正的周期控制放在中断里。卡丁当前已经沿用这个思路：
 
-- `Kart_TC387/user/cpu0_main.c` 初始化后打开 `CCU60_CH0` 5ms 周期中断。
-- `Kart_TC387/user/isr.c` 的 `cc60_pit_ch0_isr()` 调用 `kart_imu_update()` 和 `kart_control_speed_update()`。
+- `user/cpu0_main.c` 初始化后打开 `CCU60_CH0` 5ms 周期中断。
+- `user/isr.c` 的 `cc60_pit_ch0_isr()` 调用 `kart_imu_update()` 和 `kart_control_speed_update()`。
 - 主循环负责低频轮询：转向绝对编码器刷新、后轮控制权仲裁、`power_sync()`、VOFA 调试输出。
 
 ### 统一动力输出
