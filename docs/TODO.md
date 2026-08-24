@@ -117,8 +117,8 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
       抓地悬崖 1.8 m/s、后轮 `v = 0.00046*duty - 0.10`、
       编码器 0.00036816 m/脉冲、满舵半径 1.32 m、后轮轮距 0.60 m、
       转向电机 1800 counts/s、静摩擦死区约 63 counts
-- [ ] C4 `docs/` 现有的 `会话交接主文档.md`、`倒车提速排查存档.md`、
-      `horn_timing_issue_resolution.md` 归位或合并进 devlog
+- [ ] C4 `docs/` 现有的 `会话交接主文档.md`、`倒车提速排查存档.md`
+      归位或合并进 devlog
 - [x] C5 队伍身份：哈尔滨理工大学 北极星队 / Team Polaris (HRBUST) /
       项目代号 Polaris Kart / 组别卡丁快跑组。
       英文缩写用 HRBUST，不要用 HUST——那个是华中科技大学的。
