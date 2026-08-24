@@ -81,9 +81,9 @@ static const kart_param_meta_t param_meta[PARAM_MAX] =
      * 【什么时候加】科一录制里带倒车段、该段拐不到位/半径偏大 → 加;左右摆头 → 减。 */
     { "PB RevCorr",  0.0f, 1133.0f, 25.0f,  KART_PLAYBACK_REV_CORR_MAX,        0 },
     /* 跟随巡航速度(m/s)。出厂 1.10 = 原 FOLLOW_V_CRUISE_MS。
-     * 下限 0.65:见 kart_params.h 的堵转区推导。上限 2.20（2026-08-17 从 1.80 提高，FIXED 分支不受 V_MAX_MS 钳位，那个宏只管 SCALE 分支）。
+     * 下限 0.65:见 kart_params.h 的堵转区推导。上限 3.00（2026-08-17 从 1.80 提到 2.20，2026-08-23 再提到 3.00，FIXED 分支不受 V_MAX_MS 钳位，那个宏只管 SCALE 分支）。【为什么还要放】科目三倒车段现在照抄录制速度再乘 PB RevScl，录制有多快倒车就有多快，跟随段的速度上限于是同时决定了倒车段的上限。实测跟随段中位只有 1.21~1.55 而峰值已到 2.25~2.34，说明直道上确实顶到过旧上限，放开有意义；弯里由方位角减速自己压住，不靠这个上限保护。
      * 【别一次跳过 1.5】速度上去后方位角环滞后会放大,先确认不振荡。 */
-    { "Flw Cruise",  0.65f,   2.20f,  0.05f, FOLLOW_V_CRUISE_MS,           2 },
+    { "Flw Cruise",  0.65f,   3.00f,  0.05f, FOLLOW_V_CRUISE_MS,           2 },
 };
 
 static float param_val[PARAM_MAX];

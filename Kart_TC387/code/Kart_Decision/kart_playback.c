@@ -737,6 +737,55 @@ static float kart_playback_ol_cross_track(Point_2D cur, const kart_waypoint_t *w
     return (tx * (cur.y - wp[k].y) - ty * (cur.x - wp[k].x)) / len;
 }
 
+/* ===== 倒车段每点目标速度:跟录制速度,S3 OLSpd 退化为"上限" =====
+ * 【原来是什么】倒车三处都下发恒定 kart_params_get(PARAM_S3_OL_SPD)。
+ * 【为什么要改】跟随段录制时车速是 Flw Cruise 叠方位角减速,实测 1.35~1.71 m/s,
+ * 在抓地上限(约 1.8 m/s)之内 —— 这条路本来就是以这个速度记下来的。而恒定 -33
+ * 配现在自动反解的 Spd Imax(积分不再饱和)实跑 2.43 m/s,弯里比录制快 43%:
+ * 轮胎侧滑,而里程计与 IMU 推出来的位置看不见侧滑 —— 日志实测弧长膨胀 17~22%、
+ * 终点横向偏 0.23~1.77m、进库歪 18~28°。降回录制速度就是降回抓地范围内。
+ * 【为什么不用 playback_prof[]】剖面只在 kart_playback_start 里生成,而科目三走的是
+ * kart_playback_start_openloop_reverse,它不建剖面(playback_prof_n 是上次残留或 0);
+ * 且科目三录制全程前进,剖面会走曲率公式(PB ALat / PB Scale)算出【正】速度,
+ * 符号和量级都不对。取录制速度还顺带绕开了 PB ALat 偏大这个问题。
+ * 【S3 OLSpd 语义变化】"恒定倒车速度" → "倒车速度上限"。名字/单位/符号/量程/槽位
+ * 顺序全不动,老 DFlash 里的值继续有效,只是从"就按这个跑"变成"最快不超过它"。
+ * 直道录得快就跑得快,弯里自动回落到录制速度。
+ * 【为什么还要乘 PB RevScl】只照抄录制速度的话倒车段必然比原来慢:日志实测跟随段
+ * 中位速度只有 1.21~1.55 m/s(瓶颈是引导员走多快,不是巡航上限 —— 实车把 Flw Cruise
+ * 推到 2.1 之后跟随段速度几乎没变),而原来的恒定 -33 实跑 2.43 m/s,
+ * 于是倒车段 40s 会涨到约 55s。倍率把"形状"和"快慢"拆成两件事:形状来自录制
+ * (弯里自动慢、直道自动快,不必信任 PB ALat 那个偏大的常数),快慢来自这一个旋钮,
+ * 而且是【按比例】整段放大 —— 不像一刀切的恒定速度那样弯里超抓地、直道又白慢。
+ * 复用已有菜单项 PB RevScl(出厂 1.00),不新增槽位、PARAM_MAX 不动;填 1.00 与
+ * 加倍率之前逐位一致。填约 1.35 可把倒车段拉回原来 2.09 m/s 的水平。
+ * 【代价】与 PB RevScl 自己的注释同一条:开环回放打角,提速会按比例放大里程与
+ * 横向漂移,所以只许一档一档往上加,每档都要看进库还准不准。
+ * 【顺序】先乘倍率,再夹上限(上限是硬天花板,倍率不许突破它),最后兜地板
+ * (地板是防死锁的,不参与缩放)。 */
+static float kart_playback_ol_target_v(uint16 k)
+{
+    const kart_waypoint_t *wp = kart_record_get_waypoints();
+    float mag     = kart_playback_rec_v(wp, k);        /* 该点录制速度(脉冲/5ms) */
+    float cap     = kart_params_get(PARAM_S3_OL_SPD);  /* 菜单值为负,取幅值当上限 */
+    float scl     = kart_params_get(PARAM_PB_REVSCL);  /* 倒车提速倍率,出厂 1.00 */
+    float floor_v = PLAYBACK_OL_SPD_MIN;
+
+    if(mag < 0.0f) mag = -mag;
+    if(cap < 0.0f) cap = -cap;
+    if(scl < 0.0f) scl = -scl;                         /* 量程本为正,防御性取幅值 */
+
+    mag *= scl;
+
+    /* 地板不许越过上限:上限被调得比地板还小时以上限为准,否则"上限"名不副实。 */
+    if(floor_v > cap) floor_v = cap;
+
+    if(mag > cap)     mag = cap;
+    if(mag < floor_v) mag = floor_v;
+
+    return -mag;                                       /* 倒车,取负 */
+}
+
 /* 位置闭环倒车一拍(菜单 S3 OLMode=1)。与方案 0 的差别只有两处:
  * 索引改最近点搜索、打角多一个横向 P 项。速度/软限幅/停机走同一套。
  * 推导与调参顺序见 kart_playback.h 的方案 1 注释块。 */
@@ -831,7 +880,8 @@ static void kart_playback_poll_closedloop(void)
     if(delta < KART_STEER_DELTA_LIMIT_R) delta = KART_STEER_DELTA_LIMIT_R;
     kart_steer_set_target_delta(delta);
 
-    kart_control_set_target(kart_params_get(PARAM_S3_OL_SPD));
+    /* 倒车速度:跟该点录制速度,S3 OLSpd 为上限。见 kart_playback_ol_target_v。 */
+    kart_control_set_target(kart_playback_ol_target_v(k));
 
     /* 诊断:CH20=航向误差(度) CH21=横向偏差(m) CH22=索引 k CH23=最终打角。
      * 判读:e_lat 应被压向 0;若持续单向增大就是 Ke 符号反了,菜单取负。 */
@@ -929,8 +979,9 @@ static void kart_playback_poll_openloop(void)
     if(delta < KART_STEER_DELTA_LIMIT_R) delta = KART_STEER_DELTA_LIMIT_R;
     kart_steer_set_target_delta(delta);
 
-    /* 固定负速倒车(菜单 S3 OLSpd 可调,不改这里的宏)。 */
-    kart_control_set_target(kart_params_get(PARAM_S3_OL_SPD));
+    /* 倒车速度:跟该点录制速度,S3 OLSpd 退化为上限。见 kart_playback_ol_target_v。
+     * 方案 0 与方案 1 共用同一个取速函数,两条路径的速度行为保持一致。 */
+    kart_control_set_target(kart_playback_ol_target_v(k));
 
     /* 诊断快照:开环无投影坐标,借 cur/aim 四通道。
      * 关纠偏:CH20=倒退里程 d、CH21=剩余弧长 s、CH22=索引 k、CH23=最终打角;

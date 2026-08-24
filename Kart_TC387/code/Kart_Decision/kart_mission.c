@@ -673,6 +673,95 @@ static void subject3_enter_signal(void)
 }
 #endif
 
+/* 遥控油门扳机【扳到底】= 启动科目三倒车复现。与按键板 START 键等效,
+ * 用来在跟随阶段不放下遥控就能发车倒车。
+ * 【为什么不用三段开关】原来用 H->M 边沿(2026-08-23 上午加的),现场反馈 M 挡
+ * 太容易推过头 —— 再多一格就是 L=急停,一失手整跑作废。油门扳机是弹簧自回中的,
+ * 在另一根手指上,物理上不可能"过头"变成急停,所以换成它,M 挡那套整块撤掉。
+ * 【为什么油门在这里是空的】遥控接管只在 MISSION_REMOTE 下跑(本文件
+ * case MISSION_REMOTE -> remote_loop()),科目三跟随阶段走的是 subject3_loop(),
+ * 那条路径从头到尾不读油门通道,拿它当触发不与任何现有行为冲突。
+ * 急停仍然只认三段开关 L 挡与掉线,见 subject1_estop_requested()。
+ * 【端点取标定表,不写死数字】kart_calib.h:165-167:中位 880 / 扳到底 579(前进满)
+ * / 前推 1180(倒车满)。扳到底方向是原始值【变小】,所以阈值 = 中位 - 行程*70%,
+ * 用宏算出来;将来重标遥控端点,这里跟着变,不用改代码。
+ * 【三道保险】
+ *   ① 只在遥控在线时认:掉线瞬间通道是残留值,而掉线本身要走急停,
+ *      绝不能顺手把倒车触发了。
+ *   ② 要连续稳定 S3_THR_CONFIRM 拍才算。本函数由 subject3_loop 每拍调,
+ *      kart_mission_poll 是 10ms/拍。
+ *   ③ 必须先见过中位(死区内)才武装:上电就扳着不会触发,避免开机即发车。
+ *      报过一次立即撤销武装,松回中位才重新武装,所以扳一次只触发一次。
+ *   另加一个下界 S3_THR_SANITY_MIN:通道值异常掉到 0 附近时不当成"扳到底",
+ *   防链路出怪值直接发车。
+ * 【现场纪律:扳完必须松手】倒车正常跑完会自动切到 MISSION_REMOTE(本文件
+ * EVENT_S3_DONE 那处),那一刻油门立即生效 —— 若三段开关还在 H 挡而你还扳着扳机,
+ * 车会按菜单 RC Vmax 直接往前冲。点一下就松。
+ * 【与 START 键并列,不是替代】两者置同一个锁存标志 subject3_start_requested,
+ * 后面停录/清打角/启动倒车/点数<2 故障判定全部复用原路径,不新增分支。
+ * 【扳之前先停稳、回正】理由见下面"先停稳、回正再按"那段注释:录制末点打角
+ * 不为 0 会被倒车段带进去。 */
+#if S3_FOLLOW_IS_AUTO
+#define S3_THR_CONFIRM       (3)     /* 扳到底确认拍数(10ms/拍 -> 30ms) */
+#define S3_THR_TRIG_NUM      (7)     /* 触发行程比例:分子 */
+#define S3_THR_TRIG_DEN      (10)    /* 触发行程比例:分母,即超过 70% 行程才算 */
+
+/* 通道值低于此视为链路异常,不当成扳到底(正常扳到底约 579,超程也不会低到一半)。 */
+#define S3_THR_SANITY_MIN    (KART_REMOTE_THR_FWD / 2)
+
+static uint8 s3_thr_armed = 0;       /* 见过中位 = 已武装 */
+static uint8 s3_thr_ticks = 0;       /* 扳到底连续拍数 */
+
+static uint8 s3_throttle_full_edge(void)
+{
+    uint16 raw;
+    int    diff;
+    int    trig;
+
+    if(!kart_remote_is_online())
+    {
+        /* 掉线不认。不清武装位:恢复后若仍在中位,后续扳动应能正常触发。 */
+        s3_thr_ticks = 0;
+        return 0;
+    }
+
+    raw  = kart_remote_get_channel(KART_REMOTE_CH_THROTTLE);
+    diff = (int)raw - KART_REMOTE_THR_CENTER;
+
+    /* 中位 -> 扳到底 的行程乘比例。扳到底一侧原始值更小,所以是减。 */
+    trig = KART_REMOTE_THR_CENTER
+         - (KART_REMOTE_THR_CENTER - KART_REMOTE_THR_FWD)
+           * S3_THR_TRIG_NUM / S3_THR_TRIG_DEN;
+
+    if(diff > -KART_REMOTE_DEADZONE && diff < KART_REMOTE_DEADZONE)
+    {
+        s3_thr_armed = 1;            /* 回到中位:武装 */
+        s3_thr_ticks = 0;
+        return 0;
+    }
+
+    if((int)raw > trig || (int)raw < S3_THR_SANITY_MIN)
+    {
+        /* 没扳到位,或通道值不合理:清确认计数,武装位保留。 */
+        s3_thr_ticks = 0;
+        return 0;
+    }
+
+    if(!s3_thr_armed) return 0;
+
+    if(s3_thr_ticks < S3_THR_CONFIRM) s3_thr_ticks++;
+
+    if(s3_thr_ticks >= S3_THR_CONFIRM)
+    {
+        s3_thr_armed = 0;
+        s3_thr_ticks = 0;
+        return 1;
+    }
+
+    return 0;
+}
+#endif
+
 static void subject3_loop(void)
 {
     /* 倒车阶段接受遥控急停:命中即完整停机回 IDLE(全程 deadman 保护)。
@@ -711,6 +800,15 @@ static void subject3_loop(void)
             {
                 subject3_start_requested = 1;
             }
+
+#if S3_FOLLOW_IS_AUTO
+            /* 遥控油门扳机扳到底:与上面那个 START 键等效,置同一个锁存标志。
+             * 三道保险与"为什么用油门不用三段开关"见 s3_throttle_full_edge 注释。 */
+            if(s3_throttle_full_edge())
+            {
+                subject3_start_requested = 1;
+            }
+#endif
 
             if(subject3_start_requested)
             {
