@@ -1,0 +1,36 @@
+# 行尾规矩：git 库里一律存 LF，Windows 工作区检出 CRLF。
+# 起因：自己写的 82 个源文件里有 19 个在同一份文件里混着两种行尾，
+# 每个改代码的脚本都要先跟行尾搏斗一轮，diff 也脏。
+# 注意：同一路径匹配到多条时，写在后面的那条赢。
+#
+# 这里【故意】不写 `* text=auto`，也【故意】不给厂商 SDK 目录任何规则：
+# 没有 text 属性就等于 git 完全不做行尾转换，第三方代码原样进原样出。
+# 所以下面的规则全部按路径点名，只管我们自己的东西。
+
+# 自己的 C 源码：库里 LF，工作区 CRLF（TASKING / AURIX Studio 用着顺手）
+Kart_TC387/code/**/*.c text eol=crlf
+Kart_TC387/code/**/*.h text eol=crlf
+Kart_TC387/user/**/*.c text eol=crlf
+Kart_TC387/user/**/*.h text eol=crlf
+
+# 第三方 TLD7002 / TPL 就在 code/ 底下，会被上面两条扫到。
+# 它整个目录现在是纯 LF，这里锁成 LF：零改动，diff 还能正常看。
+Kart_TC387/code/Kart_TPL/** text eol=lf
+
+# 文档和脚本保持 LF，跨平台看着一致
+*.md           text eol=lf
+*.py           text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+
+# 二进制，永不转换永不 diff
+*.png binary
+*.jpg binary
+*.bmp binary
+*.pdf binary
+*.hex binary
+*.elf binary
+*.bin binary
+*.zip binary
+*.rar binary
+*.7z  binary

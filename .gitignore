@@ -44,9 +44,18 @@ TC387_Library-master/Example/Motherboard_Demo/
 # ===== 构建产物 / 相机厂商副本 / 分析临时目录 (2026-08-17) =====
 Kart_TC387/Release/
 Kart_TC387/release build/
-Kart_TC387/build_log.txt
-Kart_TC387/build_full.txt
+Kart_TC387/build_*.txt
 Kart_TC387/SCC8660_Product-master/
 /TC387/
 /tmp/
 tools/__pycache__/
+
+# ===== 脚本改代码掉下来的渣 (2026-08-25) =====
+# 这个仓库里改文件一律先写脚本再跑,过程中会落下这些中间文件。
+# 它们只在本机有意义,从来不该入库;真要留的东西自己改名进 docs/。
+*.new
+*.bak
+*.orig
+*.rej
+*.patch
+*.tmp
