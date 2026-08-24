@@ -10,8 +10,28 @@
 - `6067bb3` / tag `race-final-2026` —— 实车跑出全国二等奖的那一份，一个字没动。
   任何时候想回到"当时就是这么跑的"，`git switch --detach race-final-2026`。
 - 这个仓库原本是队友的（`RyanChenJH/SmartCar`，private）。2026-08-24 起工作仓库换成
-  自己的 `Yusei-YK/Polaris-Kart-TC387`，remote 名 `mine`；队友的 `origin` 留着但不再推。
+  自己的 `Yusei-YK/Polaris-Kart-TC387`，remote 名 `mine`。
+  2026-08-25 把队友的 `origin` remote 移掉了，不再往那边推——项目已经跟他分开。
+  为了留存来源，原地址记在这里：`https://github.com/RyanChenJH/SmartCar.git`。
   暂时设为 private——全历史里有队友 14 条提交，翻公开之前先跟他说一声。
+
+## 分支怎么摆
+
+一条分支 `main`，就这一条。要留住某个时刻用标签，不要新开分支——
+分支是"还在往下写的线"，标签是"钉住不动的点"，混着用两三个月后就没人认得出谁是谁。
+
+| 标签 | 指向 | 是什么 |
+|---|---|---|
+| `race-final-2026` | `6067bb3` | 实车跑出全国二等奖的那一份 |
+| `flash-s3-20260823` | `a383fe2` | 科目三最后一次烧进车里的版本 |
+| `freeze-20260726-light-voice` | `7c23740` | 灯 + 语音做完时的冻结点 |
+| `snapshot-pre-multicore-20260722` | `c818976` | 视觉搬去 core3 之前的老 main |
+| `archive/teammate-main-20260722` | `a5513dc` | 队友那条线的最后快照，5 条提交 |
+
+2026-08-25 删掉的四条分支，一条提交都没丢：`flash/s3-20260823` 和 `main` 同一个
+commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
+`cleanup/dead-code-20260726`（`86291d1`）本来就在 `main` 历史里；
+`archive/teammate-main-20260722` 转成了标签。
 
 ## 几条规矩
 
@@ -60,7 +80,7 @@
 
 ## B 目录
 
-- [ ] B1 删散落文件。五个草稿都是 8 月 10 到 16 号的东西，真文件全比它们新，
+- [x] B1 已删。五个草稿都是 8 月 10 到 16 号的东西，真文件全比它们新，
       逐个核实过内容已落地或已作废，删了不丢信息：
       - `kart_bench.c.new` —— 0 字节空文件
       - `bench_fill.txt` —— B9/B11/B12 三个 bench 用例怎么填的施工笔记，
@@ -72,6 +92,8 @@
       - `kart_vtrack_fix.txt` —— 金字塔缓冲超配诊断（分配 38400 字节、
         实际只需 24000），`pyr_gray` 这个变量随视觉重构已经不存在了
       另外还有 `build_full.txt`、`build_log.txt`、`menudiff.txt` 三个日志。
+      2026-08-25 删完：8 个文件 6826 字节，删前确认过一个都没被 git 跟踪，
+      删后工作区没有任何文件变成 deleted 状态。
 - [ ] B2 删重复的调试配置：`Kart_TC387 Debug (1).launch`、`Debug（1）.launch`、
       `Debug（2）.launch`，只留 `Kart_TC387 Debug.launch` 和 release build 那个
 - [ ] B3 `SCC8660_Product-master/SCC8660_Product-master/` 移出编译工程
@@ -86,7 +108,10 @@
 
 - [ ] C1 README 重写。客观记录：这车是什么、四个科目怎么跑的、
       一路上遇到过什么、最后拿了什么成绩。给自己，也给后来的人。
-- [ ] C2 `docs/devlog.md`：把这几个月补回来，git log 是现成的素材
+- [ ] C2 `docs/devlog.md`：把这几个月补回来，git log 是现成的素材。
+      注意 `docs/开发日志.md` 已经有了（10145 字节），但标签
+      `archive/teammate-main-20260722` 上那份是 10516 字节，多 371 字节，
+      写之前对一眼，别把队友 7 月写的东西漏掉。
 - [ ] C3 标定手册：`kart_calib.h` 里每个数是怎么测出来的。
       已知要写进去的：Ackermann 常数实测 1410（注释里写的 1480 是错的）、
       抓地悬崖 1.8 m/s、后轮 `v = 0.00046*duty - 0.10`、
@@ -101,6 +126,18 @@
 - [ ] C6 参考来源写清楚：这套方案是照着东北大学秦皇岛 TopSpeed 的开源学的。
       README 里把"跟着他们的思路做的部分"和"我们自己搞出来的部分"分开写，
       别让后来人误会成全是原创，也算给人家一个交代。
+      标签 `archive/teammate-main-20260722` 上有一份现成的
+      `docs/05_官方例程与第三方来源.md`（2472 字节），`main` 里没有，
+      写这一节的时候捞出来当底子：
+      `git show archive/teammate-main-20260722:docs/05_官方例程与第三方来源.md`。
+      同一条线上还有 `.gitmodules` 和 `examples/README.md`，指向英飞凌 TLD7002
+      官方点阵屏例程——子模块不必要恢复，把仓库地址写进文档就够。
+- [ ] C7 捞回那份单元测试。标签 `archive/teammate-main-20260722` 上有
+      `tests/kart_light_logic/`：`test_kart_light.c` 5420 字节 + `README.md` 712 +
+      一个 10 行的 `zf_common_headfile.h` 桩，是整个仓库里唯一一份能脱离硬件跑的
+      测试。灯板逻辑本身在 `code/Kart_App/kart_light.c` 里还在用，测试值得留。
+      同一条线上另外两套（`tests/kart_control_logic/`、`tests/kart_mission_logic/`）
+      是被作者自己 Revert 掉的，不要捞。
 
 ## D 代码
 
@@ -135,11 +172,14 @@
 ## E 收尾
 
 - [x] E1 新建自己的仓库——已完成 2026-08-24。`Yusei-YK/Polaris-Kart-TC387`，private，
-      5 个分支 + 4 个 tag 全推上去，作者信息原样保留。
+      作者信息原样保留。2026-08-25 收成 1 条分支 + 5 个标签（见上面"分支怎么摆"）。
       `gh` 用的是免安装 zip，解压在 `G:/CODE/gh/bin/gh.exe`，没进 C 盘、没进 PATH。
       老 main（`c818976`，多核重构前快照）先打了 tag `snapshot-pre-multicore-20260722`
-      再快进到 `6067bb3`；队友 main 上那 5 条分叉提交留在
-      `archive/teammate-main-20260722`。
+      再快进到 `6067bb3`；队友 main 上那 5 条分叉提交钉在标签
+      `archive/teammate-main-20260722`（原来是分支，08-25 转成标签）。
+      那 5 条提交里的灯板和 TLD7002 驱动 `main` 里都有、而且更新——只是目录重排过，
+      从平铺的 `Kart_TC387/user/` 挪进了 `code/Kart_App`、`code/Kart_TPL` 等。
+      真正只在那条线上的是 8 个文件，处置见 C6 和 C7。
 - [ ] E1b 决定要不要翻成 public（会连带公开队友的 14 条提交，先问他）
 - [ ] E2 从干净 clone 验证一次能编译过
 - [ ] E3 打 tag，写 CHANGELOG
