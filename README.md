@@ -136,6 +136,32 @@ Polaris-Kart-TC387/
 
 `VOFA_标定操作.md` 在根目录,是 43 通道遥测的标定步骤。待办清单在 `docs/TODO.md`。
 
+## 参考与自研
+
+这套方案是照着东北大学秦皇岛分校 TopSpeed 队的开源工程学的。哪些是学的、哪些是
+自己做的分开写在这儿,免得后来人误会成全是原创。
+
+跟着 TopSpeed 学的：
+
+- 骨架：分层架构、控制节拍的划分、PID 算子、统一由 `kart_power` 出口、
+  Mission 任务状态机这套组织方式。
+- 只学到结构和算子这一层。他们用舵机、车上没有前轮角度传感器,那个
+  `angle_ctrler` 控的是车身航向而不是前轮角,所以转向闭环搬不过来。
+
+自己做的：
+
+| 模块 | 为什么得自己写 |
+|---|---|
+| 转向内环与航向外环 `kart_steer_ctrl.c` | 卡丁用直流转向电机加前轮绝对编码器,角度环没有可抄的对象 |
+| 里程与位姿推算 `kart_odom.c` | 左右轮脉冲当量拆成独立通道,共用一个系数会把单侧故障盖在均值里 |
+| 轨迹录制与复刻 `kart_record.c` `kart_playback.c` | Flash 路径格式自定,每点 7 字,头部存起点位姿,复刻不用手动把车摆回原位 |
+| 视觉识别与 CPU3 异步投递 `kart_vision.c` `user/kart_multicore.c` | 一帧约 360 ms,必须投递即返回,同步通道用不了 |
+| 灯光 `kart_light.c` | 灯板用 74HC238 把三位地址译码成 SR0~SR6,和官方例程七路 GPIO 直接行选不是一回事,扫描得重写 |
+| 人车联动与语音 `kart_person_link.c` `kart_voice.c` | 科目要求,官方例程里没有 |
+| 菜单在线调参与 flash 存取 `kart_menu.c` `kart_params.c` `kart_flash.c` | 现场没有上位机,参数改不动就只能一遍遍烧写 |
+| 引导员跟随 `kart_follow.c` | 科目要求 |
+| 43 通道遥测 `kart_debug_uart.c` | 调参得有数据支撑,不靠手感猜 |
+
 ## 版权与使用声明
 
 - 根目录 `LICENSE` 是 MIT,覆盖 `code/` `user/` `docs/` `tools/` 里本队自己写的部分。
@@ -169,5 +195,8 @@ Polaris-Kart-TC387/
   <https://zhuanlan.zhihu.com/p/656101554>)。`code/Kart_App/kart_imu.c`
   的解算部分来自这份资料。
 - 逐飞科技的 TC387 开源库和 AURIX Studio 使用说明。
+- 逐飞科技的 TLD7002 点阵屏例程
+  (<https://gitee.com/seekfree/TLD7002_LED_Dot_Matrix.git>,当年固定在提交
+  `335abb7`,GPL-3.0)。只作为官方接口参照,比赛用的显示逻辑是自己写的。
 - Infineon 的 iLLD 与 SFR 头文件。
 

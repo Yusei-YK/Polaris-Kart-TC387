@@ -109,8 +109,8 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
 
 ## C 文档
 
-- [ ] C1 README 重写。客观记录：这车是什么、四个科目怎么跑的、
-      一路上遇到过什么、最后拿了什么成绩。给自己，也给后来的人。
+- [x] C1 README 重写。这车是什么、四个科目怎么跑的、四核怎么分工、
+      二次开发要注意什么，都写进去了。成绩和名次还欠着（见 C2）。
 - [ ] C2 开发日志补全。日志已提到根目录 `开发日志.md`，按阶段记到 2026-08-04。
       正文里还留着四处【待补】：各科目跑成什么样与最终名次、旧灯板还有哪些设计
       错误、`KART_MULTICORE_COMPAT_ENABLE` 当年留 0 的真实原因、赛后那段是为
@@ -128,21 +128,17 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
       项目代号 Polaris Kart / 组别卡丁快跑组。
       英文缩写用 HRBUST，不要用 HUST——那个是华中科技大学的。
 - [ ] C5b 成员名单，写 README 时补
-- [ ] C6 参考来源写清楚：这套方案是照着东北大学秦皇岛 TopSpeed 的开源学的。
-      README 里把"跟着他们的思路做的部分"和"我们自己搞出来的部分"分开写，
-      别让后来人误会成全是原创，也算给人家一个交代。
-      标签 `archive/teammate-main-20260722` 上有一份现成的
-      `docs/05_官方例程与第三方来源.md`（2472 字节），`main` 里没有，
-      写这一节的时候捞出来当底子：
-      `git show archive/teammate-main-20260722:docs/05_官方例程与第三方来源.md`。
-      同一条线上还有 `.gitmodules` 和 `examples/README.md`，指向英飞凌 TLD7002
-      官方点阵屏例程——子模块不必要恢复，把仓库地址写进文档就够。
-- [ ] C7 捞回那份单元测试。标签 `archive/teammate-main-20260722` 上有
-      `tests/kart_light_logic/`：`test_kart_light.c` 5420 字节 + `README.md` 712 +
-      一个 10 行的 `zf_common_headfile.h` 桩，是整个仓库里唯一一份能脱离硬件跑的
-      测试。灯板逻辑本身在 `code/Kart_App/kart_light.c` 里还在用，测试值得留。
-      同一条线上另外两套（`tests/kart_control_logic/`、`tests/kart_mission_logic/`）
-      是被作者自己 Revert 掉的，不要捞。
+- [x] C6 参考来源写清楚。README 加了「参考与自研」一节，跟着 TopSpeed 学的
+      （分层架构、控制节拍、PID 算子、统一 Power 出口、Mission 状态机）和自己做的
+      （转向角度环、里程推算、轨迹复刻、视觉与 CPU3 异步、灯光扫描适配、人车联动、
+      在线调参、跟随、遥测）分开列。致谢里补了 TLD7002 点阵例程的上游地址、
+      当年固定的提交 `335abb7` 和 GPL-3.0，子模块没恢复。
+      标签上那份 `docs/05_官方例程与第三方来源.md` 没有搬进来：它说 TLD7002 底层
+      还没移植、没上板，而日志 07-25 灯板已恢复、07-26 实车验证通过，是过期稿。
+- [x] C7 捞回那份单元测试。`tests/kart_light_logic/` 已在库里，是整个仓库唯一
+      一份能脱离硬件跑的测试。捞之前核对过接口：测试用到的 24 个 `kart_light_*`
+      符号在当前代码里一个不缺。编译命令改指 `code/Kart_App/`，这条命令没有在本机
+      跑过。被作者自己 Revert 掉的另外两套没捞。
 
 ## D 代码
 
