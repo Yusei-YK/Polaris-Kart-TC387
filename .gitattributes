@@ -28,6 +28,7 @@ code/Kart_TPL/** text eol=lf
 *.jpg binary
 *.bmp binary
 *.pdf binary
+*.docx binary
 *.hex binary
 *.elf binary
 *.bin binary
