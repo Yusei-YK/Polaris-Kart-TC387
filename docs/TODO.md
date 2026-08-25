@@ -94,12 +94,15 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
       另外还有 `build_full.txt`、`build_log.txt`、`menudiff.txt` 三个日志。
       2026-08-25 删完：8 个文件 6826 字节，删前确认过一个都没被 git 跟踪，
       删后工作区没有任何文件变成 deleted 状态。
-- [ ] B2 删重复的调试配置：`Kart_TC387 Debug (1).launch`、`Debug（1）.launch`、
-      `Debug（2）.launch`，只留 `Kart_TC387 Debug.launch` 和 release build 那个
+- [x] B2 已删。根目录现在只有 `Kart_TC387 Debug.launch` 和
+      `Kart_TC387 release build.launch` 两份配置，带括号的副本一个不剩。
 - [ ] B3 `SCC8660_Product-master/SCC8660_Product-master/` 移出编译工程
-      （厂商例程 + PDF + png，不该在这里），`docs/` 留一条说明
-- [ ] B4 外层 `SmartCar_归档`、`tmp`、`.reference_audit` 处置
-- [ ] B5 未跟踪副本 `Kart_TC387 2` 删掉
+      （厂商例程 + PDF + png，不该在这里），`docs/` 留一条说明。
+      目录本身已经不在了：既没被 git 跟踪，盘上也没有。剩下的是 `docs/` 里
+      那条说明还没写，所以这条先不划掉。
+- [x] B4 已处置。仓库的同级目录现在只剩 `.claude`、`CLAUDE.md` 和仓库本身，
+      归档、tmp、审计目录都没了。
+- [x] B5 已删。同名带后缀的未跟踪副本目录一个都不存在了。
 - [ ] B6 历史里有个 52.67 MB 的 Infineon TC3xx 用户手册 PDF
       （`TC387_Library-master/【文档】说明书 芯片手册等/核心板文档/`），超了 GitHub
       50 MB 的建议线。从历史里摘掉要重写提交，先不动，记在这里。
