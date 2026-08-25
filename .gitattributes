@@ -13,6 +13,10 @@ code/**/*.h text eol=crlf
 user/**/*.c text eol=crlf
 user/**/*.h text eol=crlf
 
+# 主机侧测试也是自己写的 C，跟上面同口径
+tests/**/*.c text eol=crlf
+tests/**/*.h text eol=crlf
+
 # 第三方 TLD7002 / TPL 就在 code/ 底下，会被上面两条扫到。
 # 它整个目录现在是纯 LF，这里锁成 LF：零改动，diff 还能正常看。
 code/Kart_TPL/** text eol=lf
