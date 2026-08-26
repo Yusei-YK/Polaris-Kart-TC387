@@ -13,6 +13,11 @@ static int16 kart_steer_abs_deg_x100 = 0;
 #define KART_STEER_ABS_STATUS_REG       (0x06)
 #define KART_STEER_ABS_TIMEOUT_COUNT    (100)
 
+/* 把 raw - center 折回 ±2048。为什么非折不可:中位贴着 raw 0(当前 164),
+ * 过零时 raw 在 0 与 4095 之间跳,不折就会读出 ±4000 的假打角,而软限位是拿
+ * 这个值比的 —— 那一下就是打死(kart_calib.h 第四节记了这件事)。
+ * 【注意】2048 / 4096 是写死的,没用 kart_calib.h 的 KART_STEER_ABS_RAW_FULL。
+ * 哪天换成不是 12 位的编码器,这里两个数要跟着改,光改那个宏不够。 */
 static int16 kart_steer_abs_wrap_delta(uint16 raw, uint16 center)
 {
     int16 delta = (int16)raw - (int16)center;
@@ -73,6 +78,12 @@ static uint8 kart_steer_abs_read_register(uint8 reg)
     return data;
 }
 
+/* 上电自检:把 6 个配置寄存器反复写一遍,直到状态寄存器读回 0x1C 才算好,
+ * 超过 100 轮放弃并返回 1。那组寄存器地址和值来自厂商例程,本工程没有这颗
+ * 芯片的手册,不要凭猜改数。
+ * 【已知缺口】init() 里自检失败只是跳过零位与方向配置,既不报警、也不置故障位、
+ * 也不拦着后面出数 —— 现象是转向角看着有值但不可信,而转向角是软限位唯一
+ * 依据。要补就在 init() 里把返回值存成模块状态,由菜单或 VOFA 露出来。 */
 static uint8 kart_steer_abs_self_check(void)
 {
     uint8 i;
@@ -121,6 +132,9 @@ void kart_steer_abs_init(void)
 
     if(0 == kart_steer_abs_self_check())
     {
+        /* 芯片零位写 0:不把零点烧进编码器,中位放在软件里
+         * (kart_calib.h 的 CENTER_RAW,当前 164)。这样换齿轮重标只改一个宏,
+         * 不用重新配芯片;代价是中位贴着 raw 0,过零环绕交给 wrap_delta 处理。 */
         uint16 zero_position = 0;
         kart_steer_abs_write_register(KART_STEER_ABS_DIR_REG, 0x00);
         kart_steer_abs_write_register(KART_STEER_ABS_ZERO_L_REG, (uint8)zero_position);
@@ -135,6 +149,8 @@ void kart_steer_abs_update(void)
     kart_steer_abs_frame = kart_steer_abs_read_frame();
     kart_steer_abs_raw = (uint16)((kart_steer_abs_frame >> KART_STEER_ABS_RAW_SHIFT) & 0x0FFF);
     kart_steer_abs_delta = kart_steer_abs_wrap_delta(kart_steer_abs_raw, KART_STEER_ABS_CENTER_RAW);
+    /* 36000 = 360.00 度 × 100。先乘后除并走 int32:反过来先除会把 12 位量
+     * 的精度丢光。 */
     kart_steer_abs_deg_x100 = (int16)(((int32)kart_steer_abs_delta * 36000) / 4096);
 }
 
