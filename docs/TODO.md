@@ -169,15 +169,19 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
         `:220` 按 1.35/1.15 讲、`:226` 按 0.70/0.85 推、`:235` 才是现在的
         1.67/1.36；`:251` 那段单帧尖峰推导也还挂在 1.35 上；`:276` 写着
         "配合 V_CRUISE 降到 0.70"，而现值是 1.10（`:180`）。要整段重写。
-        动之前先确认这份头有没有编进去：`FOLLOW_ENABLE` 全仓库只在 `:84`
-        出现一次、值是 0，跟随实际走的是本地视觉还是 `kart_person_link`
-        那条链得先查清楚。
+        这份头是活的：`kart_mission.c:538` 和 `:648` 无条件调
+        `kart_follow_update()`，`kart_follow.c` 里也没有任何 `#if FOLLOW_ENABLE`
+        包着。跟随走的是本地视觉那条——`PERSON_LINK_ENABLE` 是 0
+        （`board_pins.h:176`）。所以这几段阈值推导是会被人当真的，得重写。
 - [ ] D4 死代码清理，先列清单再删：
       - `KART_DOT_ROW0_TEST` / `KART_DOT_ROWS_TEST` / `DOT_ALLON_TEST`
         三个自检死循环，硬件早就确认了
       - `KART_USE_SCHEDULER=0` 的旧主循环分支，还留着做 A/B 对照吗
       - `kart_bench.c` 253 行，还用不用
       - `kart_menu.c` 2602 行是最大的单文件，值得单独看一遍
+      - `FOLLOW_ENABLE`（`kart_follow.h:84`）是死宏：全仓库只这一处定义，
+        没有任何地方读它，`kart_follow.c` 也没被它包起来。要么补上开关，
+        要么删掉——现在它看着像总开关，实际不是，最容易骗人
 - [ ] D5 函数名清单：只挑词不达意的，给出对照表，人工确认后再改
 
 ## E 收尾
