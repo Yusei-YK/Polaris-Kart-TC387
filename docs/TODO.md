@@ -96,10 +96,9 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
       删后工作区没有任何文件变成 deleted 状态。
 - [x] B2 已删。根目录现在只有 `Kart_TC387 Debug.launch` 和
       `Kart_TC387 release build.launch` 两份配置，带括号的副本一个不剩。
-- [ ] B3 `SCC8660_Product-master/SCC8660_Product-master/` 移出编译工程
-      （厂商例程 + PDF + png，不该在这里），`docs/` 留一条说明。
-      目录本身已经不在了：既没被 git 跟踪，盘上也没有。剩下的是 `docs/` 里
-      那条说明还没写，所以这条先不划掉。
+- [x] B3 那个凌瞳产品包目录早就不在了（git 没跟踪过，盘上也没有），
+      欠的那条 `docs/` 说明已经补在 `docs/README.md` 末尾：它是什么、
+      为什么移出编译工程、在用的驱动和包装层在哪、说明书留在哪。
 - [x] B4 已处置。仓库的同级目录现在只剩 `.claude`、`CLAUDE.md` 和仓库本身，
       归档、tmp、审计目录都没了。
 - [x] B5 已删。同名带后缀的未跟踪副本目录一个都不存在了。
