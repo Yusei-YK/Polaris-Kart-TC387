@@ -169,15 +169,21 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
       巡航速度重算。`board_pins.h` 那条本来就不用改，`:269-278` 已经是订正后的说法。
       顺带查实 `kart_follow` 是活代码（`kart_mission.c:538` `:648` 无条件调），
       `FOLLOW_ENABLE` 是死宏，已记进 D4。
-- [ ] D4 死代码清理，先列清单再删：
-      - `KART_DOT_ROW0_TEST` / `KART_DOT_ROWS_TEST` / `DOT_ALLON_TEST`
-        三个自检死循环，硬件早就确认了
-      - `KART_USE_SCHEDULER=0` 的旧主循环分支，还留着做 A/B 对照吗
-      - `kart_bench.c` 253 行，还用不用
-      - `kart_menu.c` 2602 行是最大的单文件，值得单独看一遍
-      - `FOLLOW_ENABLE`（`kart_follow.h:84`）是死宏：全仓库只这一处定义，
-        没有任何地方读它，`kart_follow.c` 也没被它包起来。要么补上开关，
-        要么删掉——现在它看着像总开关，实际不是，最容易骗人
+- [x] D4 死代码清理，删了两处、留了两处：
+      - 删 `user/cpu0_main.c` 的旧主循环回退（`KART_USE_SCHEDULER` 的 `#else`
+        分支连宏和两处 `#if`/`#endif` 一起）和三个点阵屏自检死循环，
+        577 → 475 行。调度器 overrun 恒 0，回退没有留的理由；而且旧循环里那份
+        模式显示副本还挂着科目四改名前的编号，本身就是过期注释源。
+        活的那份在 `kart_dot_show_mode()`，车上看到的 444 没变。
+      - 删 `kart_follow.h` 的死宏 `FOLLOW_ENABLE`：全仓库零读取点，
+        `kart_mission.c:538` `:648` 一直是无条件调，跟随从来就是活代码。
+      - 留 `kart_bench.c`/`.h`（389 行）：B1-B12 一项都没实测过，但这 12 项的
+        划分有参考价值。文件头已写清"未实现、不参与运行"，以及真要开先处理
+        38400 字节假图与 cpu0 DSRAM 那 240K 的争抢。
+      - 留 `kart_hw_test.c`/`.h`：开关常 0，但换板时是现成的落地工具，
+        文件头已标状态。
+      `kart_menu.c` 2602 行不是死代码，是活的菜单，挪去 D2 按层级过。
+      删宏之后 `board_pins.h` 和 `kart_debug_uart.c:577` 两处悬空引用已改说法。
 - [ ] D5 函数名清单：只挑词不达意的，给出对照表，人工确认后再改
 
 ## E 收尾
