@@ -574,7 +574,8 @@ void kart_debug_uart_poll(void)
          *   CH41 width_px 标定 f_px 用          CH42 dist_m 视觉反算距离
          *   CH43 bearing_deg >0=目标在右      CH44 kart_follow state 0=IDLE 1=TRACKING 2=HOLD 3=LOST
          *
-         * 【VISION_ENABLE / FOLLOW_ENABLE 都是 0 时这 6 条恒为 0】
+         * 【VISION_ENABLE = 0 时这 6 条恒为 0】跟随没有编译开关：原来那个 FOLLOW_ENABLE
+ * 从来没生效过，2026-08-26 已删。
          * 两个 get() 返回的是模块内部静态快照,禁用时也有定义、可安全取,只是不更新。 */
         {
             const kart_vision_result_t *v = kart_vision_get();

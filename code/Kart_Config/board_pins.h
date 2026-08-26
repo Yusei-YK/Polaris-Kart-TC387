@@ -269,8 +269,9 @@
  *   无线模块要它当 INT。【注意：这里原先写的"SYNC 已 exti_disable、让出来无代价"
  *   是错的】dot_matrix_screen_init() 末尾 (zf_device_dot_matrix_screen.c:732) 仍然会
  *   exti_init(SYNC, EXTI_TRIGGER_FALLING) 把 P15.8 配成下降沿中断；那句
- *   exti_disable 在 dot_matrix_screen_test_rows_static() 里面，被
- *   DOT_ROWS_TEST(=0) 卡着，正常开机流程从来没执行过。
+ *   exti_disable 在 dot_matrix_screen_test_rows_static() 里面，那个诊断函数一直
+ *   被一个恒为 0 的自检开关卡着（该开关 2026-08-26 随死代码一起删了），
+ *   正常开机流程从来没执行过。
  *   后果：插上无线模块后它把 P15.8 当 INT 频繁翻转，每个下降沿都进
  *   exti_ch1_ch5_isr；模块拔掉时该脚被下拉恒低、一个沿也不产生。
  *   这就是 2026-08-11 实测到的"拔了才有 VOFA 日志"。现已在
