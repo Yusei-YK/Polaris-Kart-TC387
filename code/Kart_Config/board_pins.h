@@ -154,25 +154,26 @@
  *   PORT = LIGHT（默认） UART_1  P11.12(TX)/P11.10(RX)  灯板 TLD7002 飞线位
  *     视觉阶段拔灯板、插 4D7；跟随调完再插回灯板（把 ENABLE 改 0 就行）。
  *     两者物理上不同时存在，且本宏一开就把点阵屏整条链路（tld7002_init /
- *     tld7002_set_duty / CCU61_CH0 1ms 扇描 / uart1_rx_isr 的 tld7002_callback）全部静默，
+ *     tld7002_set_duty / CCU61_CH0 1ms 扫描 / uart1_rx_isr 的 tld7002_callback）全部静默，
  *     不可能出现两个主抢 ASCLIN1 波特率（2M 与 115200）的情况。
  *
  *   PORT = VOFA          UART_10 P13.0(TX)/P13.1(RX)  无线模块排针位
- *     比赛不让接无线模块，这个坐子比赛时本来就空。但调试时 VOFA 日志与
+ *     比赛不让接无线模块，这个座子比赛时本来就空。但调试时 VOFA 日志与
  *     语音模块也在这个口，真冲突 → 选它时必须同时 LOG_ON_UART0=1
  *     （日志改走 USB-TTL 直插），否则下面的 #error 会拦住。 */
-/* 总开关。为何它在 board_pins.h 而不在 kart_person_link.h：
- * 下面 DOT_MATRIX_MUTED 的推导要用到它，而点阵屏/灯板驱动（Kart_TPL）
- * 只 kart_include board_pins.h，不能反过来 kart_include Kart_App 的头。
- * 放在这里也符合分层：“哪个外设归谁”本来就是 Kart_Config 的职责。
+/* 4D7 链路总开关，同时也是【视觉源一键切换】—— 这两件事是同一件：
+ *   0 = 不出任何代码、不动 UART 归属，工程行为与没这个模块一模一样；
+ *       科目三跟随用本地 SCC8660 视觉（S3_FOLLOW_SRC_VISION）。
+ *   1 = 接管 PERSON_LINK_PORT 选定的那个 UART（选 LIGHT 时点阵屏整条链路
+ *       自动静默）；跟随改用 4D7 送来的人体结果（S3_FOLLOW_SRC_PLINK）。
+ * 控制源由 kart_mission.h:103 的 #if PERSON_LINK_ENABLE 自动跟随，
+ * 不需要也不要再手改第二个宏（那边注释写了手改的两种陷阱组合）。
+ * 默认 0：硬件没接 4D7 时开着毫无意义，还白白丢掉点阵屏与菜单回显。
  *
- * 0 = 完全不出代码、不动 UART 归属，工程行为与没这个模块一模一样。
- * 1 = 接管 PERSON_LINK_PORT 选定的 UART；选 LIGHT 时点阵屏自动静默。
- * 默认 0：硬件没接 4D7 时开着毫无意义，而且会白白丢掉点阵屏与菜单回显。 */
-/* 【视觉源一键切换】只改下面这一个值：
- *   0 = Kart_TC387 本地 SCC8660 视觉（S3_FOLLOW_SRC_VISION）
- *   1 = TC4D7 / PLINK 视觉（S3_FOLLOW_SRC_PLINK）
- * kart_mission.h 会自动联动控制源，不需要再改第二个宏。 */
+ * 为何这个宏放 board_pins.h 而不放 kart_person_link.h：下面 DOT_MATRIX_MUTED
+ * 的推导要用它，而点阵屏/灯板驱动（Kart_TPL）只 include board_pins.h，
+ * 不能反过来 include Kart_App 的头。放这里也符合分层：“哪个外设归谁”
+ * 本来就是 Kart_Config 的职责。 */
 #define PERSON_LINK_ENABLE         (0)
 
 #define PERSON_LINK_PORT_LIGHT     (0)
@@ -204,23 +205,23 @@
 
 /* 语音模块是否该全链路静默。同样是推导而不是手写。
  * 为何需要它：语音模块就插在无线排针(P13.0/P13.1 = UART_10)上，
- * 而 4D7 选 VOFA 口时插的是同一个坐子 —— 硬件上就不可能共存，
+ * 而 4D7 选 VOFA 口时插的是同一个座子 —— 硬件上就不可能共存，
  * 软件再去初始化它只会把链路搞死。具体两个坑：
  *   ① kart_voice_init() 在 cpu0_main 里比 kart_person_link_init() 晚，
  *      它的 uart_init() 末尾是 uart_rx_interrupt(n, 0) —— 把链路刚开的
  *      RX 中断又关掉了。现象是一个字节也收不到(CH39 恒 0)，
  *      而波特率、引脚、接线全是对的，极难查。
  *   ② kart_voice_poll() 的 uart_query_byte() 与链路 RX 中断抢同一个
- *      1 字节 FIFO，谁先取走另一方就永远收不到 → CRC 错漮天飞。
+ *      1 字节 FIFO，谁先取走另一方就永远收不到 → CRC 错漫天飞。
  * 代价：这个配置下科目二与科目三信号阶段的语音不工作。
- * 这不是回避，是把硬件事实写进代码：坐子被 4D7 占着，语音本来就没插。 */
+ * 这不是回避，是把硬件事实写进代码：座子被 4D7 占着，语音本来就没插。 */
 #define VOICE_MUTED                (PERSON_LINK_ENABLE && (PERSON_LINK_PORT == PERSON_LINK_PORT_VOFA))
 
 #if (PERSON_LINK_ENABLE && (PERSON_LINK_PORT == PERSON_LINK_PORT_VOFA) && !LOG_ON_UART0)
 #error "kart_person_link 选了 VOFA 口(UART_10) 但日志也在 UART_10：把 LOG_ON_UART0 改 1，或把 PORT 改回 LIGHT"
 #endif
 
-/* ---------------- GPS(UART_3,交接文档 3.5)---------------- */
+/* ---------------- GPS(UART_3)---------------- */
 /* 主板有 GPS,科目一先跑纯惯导,GPS 仅作辅助/以后融合用。
  * 注意方向:GPS_TX→MCU_RX=P15.7,MCU_TX→GPS_RX=P15.6,所以 UART3 的 TX 是 P15_6、RX 是 P15_7。*/
 #define BOARD_GPS_UART_INDEX            (UART_3)
@@ -287,8 +288,8 @@
 
 /* 【引脚数值不写在这里,写在 zf_device_wifi_spi.h】
  * 反直觉,但只有这一个位置可行:库函数 wifi_spi_init() 用的是硬编码宏、没有引脚形参,
- * 必须在那个头文件里覆盖;而那个头文件被 zf_common_headfile.h:111 先 kart_include,
- * 本文件又 kart_include zf_common_headfile.h —— 在那里反向 kart_include 本文件会构成头文件环,
+ * 必须在那个头文件里覆盖;而那个头文件被 zf_common_headfile.h:111 先 include,
+ * 本文件又 include zf_common_headfile.h —— 在那里反向 include 本文件会构成头文件环,
  * 让本文件在 SPI2_SCLK_P15_3 等枚举还没定义时被展开,报一堆对不上原因的错。
  * 所以分工是:数值在 zf_device_wifi_spi.h(带出厂默认值注释),取舍依据在这里。
  * 两处一致性由 kart_wifi.c 顶部的编译期断言强制 —— .c 里才能安全比较枚举常量,
@@ -300,7 +301,7 @@
 /* ---------------- 按键板(2026-07-28 新板,按键板.tel 网表)----------------
  * 板上三个操作件,H1 是 2.54-2×6P 排线到主板:
  *   SW1  EC11 旋转编码器  A=P11.2  B=P11.3  按下(D)=P20.6   (C/E 脚接 GND)
- *   SW2  五向开关         UP=P33.11 DOWN=P20.0 KART_LEFT=P21.6 RIGHT=P21.7 MID=P33.4
+ *   SW2  五向开关         UP=P33.11 DOWN=P20.0 LEFT=P21.6 RIGHT=P21.7 MID=P33.4
  *   SW3  轻触开关         START=P20.7                        (3/4 脚接 GND)
  *
  * 电平:三个件的公共端全接 GND,按下/导通把信号脚拉低 → 按下读 0。
@@ -311,7 +312,7 @@
  * 与旧板的差异(换板后同步改的地方):
  *   DOWN   P20.6 → P20.0    P20.6 让给旋钮按下
  *   MID    P20.7 → P33.4    P20.7 让给独立 START 键
- *   KART_LEFT   P33.4 → P21.6    旧板 P21.6 与 UP 短路,故当年拿 P33.4 顶 KART_LEFT,新板已修
+ *   LEFT   P33.4 → P21.6    旧板 P21.6 与 UP 短路,故当年拿 P33.4 顶 LEFT,新板已修
  *   START  仍是 P20.7,但不再与菜单 MID 共用一个脚 ——
  *          就绪/科目三界面不必再屏蔽菜单 MID,kart_menu 与 kart_mission 也不会再对同一脚
  *          做两种 gpio_init(旧板 kart_menu 配 FLOATING、kart_mission 配 PULL_UP,谁后 init 谁生效)。
@@ -333,7 +334,7 @@
  * 若实测按下读 1,把 kart_mission 里的边沿判据取反即可。 */
 #define BOARD_START_KEY_PIN            (P20_7)
 
-/* ---------------- 蜂鸣器 / ADC 检测(交接文档 3.6 / 5)---------------- */
+/* ---------------- 蜂鸣器 / ADC 检测 ---------------- */
 #define BOARD_BEEP_PIN                 (P33_10)     /* 蜂鸣器输出 */
 #define BOARD_MIC_ADC_CH               (ADC0_CH0_A0)    /* 硅麦采集(发车声控) */
 #define BOARD_VBAT_ADC_CH              (ADC1_CH3_A11)   /* 电池电压检测,分压比待硬件标注 */
@@ -344,6 +345,14 @@
  * 注意:第一版曾把灯板挂 UART0/P14.0/P14.1,已废弃且不可复用 ——
  * P14.x 属 boot 相关引脚,占用会导致 MCU 下载不进去(见项目根 不建议使用的引脚.txt)。 */
 
+/* 主循环节拍(毫秒)。它不是引脚,放这里是因为"节拍归谁"也算资源分配。
+ * 两个牵连,改之前都要想到:
+ *   ① 速度环/转向内环就是这个周期。kart_calib.h 第五节 KART_CTRL_PERIOD_S
+ *      (0.005f) 是同一个 5ms 的另一处写法,两处不联动,改一处必须同步另一处,
+ *      否则速度环量纲与实际派发周期对不上,现象是所有速度增益凭空缩放。
+ *   ② kart_power.h:34 :35 拿它把毫秒阈值折成拍数,改这里那两个阈值的
+ *      实际时长跟着变。
+ * 所以往大改等于同时改掉控制周期和所有 PID 的等效增益,不要为省算力动它。 */
 #define KART_MAIN_LOOP_PERIOD_MS        (5)
 
 #endif
