@@ -3,6 +3,10 @@
 #include "zf_common_headfile.h"
 #include "board_pins.h"
 
+/* 三路 PWM 共用这一个频率:左后轮、右后轮、转向电机(kart_power.c 里 pwm_init
+ * 三处)。17kHz 在人耳上限之上,选它是为了驱动不啸叫。
+ * duty 满量程是 PWM_DUTY_MAX(逐飞库定义),所有 duty 都按它钳位,见
+ * kart_power.c 的 kart_limit_duty()。 */
 #define KART_POWER_PWM_FREQ_HZ          (17000)
 #define KART_POWER_MAX_DUTY             (PWM_DUTY_MAX)
 #define KART_BOOT_MOTOR_DUTY            (0)
@@ -23,7 +27,9 @@
 #define KART_SLEW_ZERO_DWELL_TICKS      (6)     /* 反向前在 0 点驻留 6 拍≈30ms */
 
 /* 上电自检:开机跑一遍左右轮+转向的动作确认接线。
- * 调参阶段必须关(=0):它会在开机 12.5s 内反复写 Power_now 后轮 duty,和速度环抢控制权。
+ * 调参阶段必须关(=0):它会在开机头 12 秒里反复写 Power_now 后轮 duty,和速度环抢
+ * 控制权。12 秒是算出来的:5 段动作 × RUN 2000ms + 4 段间隔 × STOP 500ms
+ * = 12000ms,按 5ms 一拍折 2400 拍(见 kart_power.c 的 power_check_poll 分段)。
  * 硬件接线确认完、正式跑之前想重新验证接线时再开回 1。 */
 #define KART_POWER_BOOT_CHECK_ENABLE    (0)
 #define KART_POWER_CHECK_REAR_DUTY      (3000)
@@ -43,6 +49,16 @@ typedef struct
     uint8 Debug_Stage;
 } Power_Output_Struct;
 
+/* 全车三路输出的唯一交汇点。
+ * 【量纲】四个 duty 都是 ±PWM_DUTY_MAX 的原始占空,不带方向语义;正负号在
+ *   kart_set_dir_pwm() 里配合 kart_calib.h 第六节的 KART_*_MOTOR_SIGN
+ *   变成 DIR 引脚电平。Debug_Stage 只给上电自检显示,自检关掉时恒 0。
+ * 【别直接写这个结构体】写了 Motor_Duty,下一次 power_sync() 会认为"有人改了整车
+ *   duty",把两个后轮强制拉成同值,差速就没了(kart_power.c 的
+ *   power_set_motor_duty 那条写了机理)。要设值走 power_set_* 三个函数。
+ *   目前 kart_power.c 之外没有代码写它,这个坑是潜在的,不是现行故障。
+ * 【volatile 的原因】5ms 中断和主循环都碰它;成组读取的临界区在 power_sync()
+ *   开头,防的是读到中断写一半的撕裂值。 */
 extern volatile Power_Output_Struct Power_now;
 
 void power_init(void);

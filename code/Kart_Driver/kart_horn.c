@@ -8,7 +8,9 @@
  * 使用 CCU60_CH1 独立1ms中断运行节拍机和GPIO翻转。
  * 节拍表:每条命令一串拍数,偶数索引=响、奇数索引=停,以 0 结尾。
  * 响步:根据目标频率按周期翻转GPIO。停步:GPIO保持低电平。
- * 警报模式:每步切换翻转频率(400Hz/1000Hz)产生双频效果。
+ * 警报模式:每步切换翻转频率产生双频效果。写进去的是 300 与 900
+ * (kart_horn_start 与本文件 ISR 里那两处 900 : 300),实际方波约 167Hz 与
+ * 500Hz —— 为什么对不上,头文件顶部算过。
  * ------------------------------------------------------------------
  */
 
@@ -21,6 +23,10 @@ static uint16 horn_freq_target = 0;
 static uint16 horn_freq_counter = 0;
 static uint16 horn_freq_period = 0;
 
+/* 设翻转周期。period = 1000/freq 拍,horn_gpio_tick() 每 period 拍翻转一次;
+ * 翻转两次才是一个方波周期,所以实际频率是 freq/2,还要被整数除截断
+ * (600→1 拍→500Hz,300→3 拍→167Hz,900→1 拍→500Hz)。
+ * freq=0 是静音:period 清 0 让 tick 直接返回,并把 GPIO 拉低,不留半个电平。 */
 static void horn_set_freq(uint16 freq)
 {
     if(freq == 0)
@@ -60,6 +66,10 @@ static const uint16 horn_3times[]    = {1000, 1000, 1000, 1000, 1000, 0};
 static const uint16 horn_4times[]    = {1000, 1000, 1000, 1000, 1000, 1000, 1000, 0};
 static const uint16 horn_long_short[]= {1000, 1000, 3000, 0};
 static const uint16 horn_urgent[]    = {500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 0};
+/* 警报表与其它八条不同:响步全在偶数索引(1000 拍),停步写的是 0 拍,靠 ISR 里
+ * "警报 + 当前步为 0 + 奇数索引就跳过"那段跨过去,所以警报是连续变频、中间不停。
+ * 末尾那个 1 是占位,防最后一步被当成 0 终止符 —— 但 KART_HORN_MAX_STEPS=16
+ * 先把表截断了,它到不了(头文件那条写了后果)。 */
 static const uint16 horn_alarm[]     = {1000, 0, 1000, 0, 1000, 0, 1000, 0, 1000, 0, 1000, 0, 1000, 0, 1000, 0, 1000, 0, 1000, 1};
 
 /* -------------------- 节拍机状态 -------------------- */
@@ -141,6 +151,8 @@ void kart_horn_isr(void)
 
         if(horn_step >= KART_HORN_MAX_STEPS || horn_pattern[horn_step] == 0)
         {
+            /* 警报的停步写的是 0 拍,不是终止符:跳过它直接进下一个响步,
+             * 效果就是连续变频不停顿。别的表里偶数索引上的 0 才是真终止符。 */
             if(horn_is_alarm && horn_pattern[horn_step] == 0 && (horn_step & 0x01) != 0)
             {
                 horn_step++;

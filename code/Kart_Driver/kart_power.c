@@ -85,6 +85,11 @@ static int16 kart_slew_step(int16 target, int16 applied, uint16 *dwell, int16 st
 #endif
 }
 
+/* 整车同速:两个后轮写成同一个 duty,并记下 kart_last_motor_duty。
+ * 那个记录量是 power_sync() 判断"有没有人绕过接口直接改 Motor_Duty"的依据 ——
+ * sync 里发现 Power_now.Motor_Duty 与它不一致,就回头调本函数把左右拉平。
+ * 所以 power_set_rear_duty() 设完差速之后也必须更新 kart_last_motor_duty
+ * (它确实更新了),否则差速会在下一拍被这条重置抹掉。 */
 void power_set_motor_duty(int16 duty)
 {
     Power_now.Motor_Duty = kart_limit_duty(duty);
@@ -162,7 +167,13 @@ void power_stop(void)
 
 /* 硬兜底：直接写三路 PWM=0，绕过 Power_now/主循环/slew。
  * 专给 5ms 中断失能分支调，作最后防线：主循环卡死也能停。
- * 不碰 DIR（duty=0 方向无意义）、不碰 Power_now（不跟主循环抢结构体）。*/
+ * 不碰 DIR（duty=0 方向无意义）、不碰 Power_now（不跟主循环抢结构体）。
+ * 【已知缺口一】它也不碰 power_sync() 里那三个 static applied,所以硬清零之后
+ * 限速器仍以为输出停在旧值:下一次 power_sync() 若目标与旧值同号且不更大,
+ * 会直接把旧 duty 写回硬件,爬坡限速被整段跳过。要补就把 applied/dwell 提成
+ * 文件级静态量,在这里一并清零。
+ * 【已知缺口二】当前全仓库没有调用点。在用的是下面只清后轮的版本(isr.c 的
+ * 5ms 中断失能分支),这个三路版本是留着的兜底接口。*/
 void power_force_pwm_zero(void)
 {
     pwm_set_duty(KART_STEER_PWM_PIN, 0);
