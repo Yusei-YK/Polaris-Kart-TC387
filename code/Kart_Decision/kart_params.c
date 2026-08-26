@@ -69,7 +69,9 @@ static const kart_param_meta_t param_meta[PARAM_MAX] =
     /* 转角内环输出限幅。出厂 6000 = 原 KART_STEER_OUTMAX_DEFAULT。 */
     { "Str OutMax",1000.0f,10000.0f, 250.0f, KART_STEER_OUTMAX_DEFAULT,         0 },
     /* 倒车段速度倍率。出厂 1.0 = 原样照抄录制速度,行为与改动前逐位相同。
-     * 放大它治"录制→回放每代掉一档";放大过头会放大开环打角回放的里程漂移。 */
+     * 放大它治"录制→回放每代掉一档";放大过头会放大开环打角回放的里程漂移。
+     * 【管两段】科目一录制里夹着的倒车段,以及科目三那段独立开环倒车 ——
+     * 后者的目标速度就是"该点录制速度 × 本倍率"再夹上限(kart_playback.c:754)。 */
     { "PB RevScl",   0.20f,   5.00f,  0.05f, 1.00f,                             2 },
     /* 后轮 duty 每拍升幅上限。出厂 400 = 原 KART_SLEW_REAR_STEP。 */
     { "Slew Rear", 100.0f,10000.0f, 100.0f,  (float)KART_SLEW_REAR_STEP,        0 },

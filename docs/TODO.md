@@ -37,7 +37,7 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
 
 - 本机没有编译器，只做源码级检查。每批改完由人在 AURIX Studio 里编一次。
   永远不写"编译通过"。
-- 改文件走 python 脚本（`C:/tmp/pNN_*.py`），每个锚点断言只命中一次，
+- 改文件走 python 脚本（`G:/CODE/claude-tmp/pNN_*.py`），每个锚点断言只命中一次，
   写完检查字节数、行数、CR 数、注释配对、括号平衡、`#if`/`#endif` 配对。
 - 不碰：SeekFree / Infineon 库、TLD7002 驱动（9463 行第三方代码）、
   `SCC8660_Product-master`。
@@ -155,17 +155,23 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
 `user/` 里 10 个文件 2445 行也要过：`cpu0_main.c`、`cpu1/2/3_main.c`、
 `kart_multicore.c/h`、`isr.c/h`、`isr_config.h`、`cpu0_main.h`。
 
-- [ ] D1 注释标准样板：先做 `kart_calib.h`（173 行，纯常量+注释，
-      改坏了不影响逻辑，本身又是最该留给后人的东西），认可了再铺开
+- [x] D1 注释标准样板：`kart_calib.h` 不用重写，它本身就是标准。四条特征是
+      后面 93 个文件要照抄的：每个数带标定来源和日期、派生量标明"不要手改"、
+      重标步骤编号列出、踩过的坑留在原地（例如 `:137` 记着 2026-07-29 误改
+      符号导致一动就打死不回中，已回退）。文件里六处算术全复算过，对得上。
 - [ ] D2 按上面顺序过完 94 个文件
-- [ ] D3 订正已知的过期注释：
-      - `kart_playback.h` 里"Ke 从 100 往上加"的建议，在 Kh 由 Ke 派生之后
-        已经是误导（`kart_playback.c:826`）
-      - `board_pins.h` 关于点阵屏 SYNC "已 exti_disable" 那段已被证伪，
-        真相在 `cpu0_main.c` 的 `WIFI_ENABLE` 块里
-      - `kart_follow.h` 有一条陈旧注释
-      - `kart_vtrack.c:332` 还在讲 `pyr_gray` 怎么建两帧，这个变量已经没了
-      - `kart_params.h` 里 `PB RevScl` 的说明没提它现在也管科目三倒车段
+- [ ] D3 订正已知的过期注释。已经做掉的：`kart_playback.h` 的 Ke 建议
+      （改成直接填实车完赛那对 Ke=-600，并写明当前剖面看不到 e_lat）、
+      `kart_vtrack.c:332` 的 `pyr_gray`（实际是 `pyr_L0`/`pyr_L1`）、
+      `kart_params.c:71` 的 `PB RevScl`（补上它也管科目三那段开环倒车）。
+      `board_pins.h` 那条不用改，`:269-278` 已经是订正后的说法。剩下一条：
+      - `kart_follow.h` 近距联锁的阈值推导叠了三层，只有最外层是现值：
+        `:220` 按 1.35/1.15 讲、`:226` 按 0.70/0.85 推、`:235` 才是现在的
+        1.67/1.36；`:251` 那段单帧尖峰推导也还挂在 1.35 上；`:276` 写着
+        "配合 V_CRUISE 降到 0.70"，而现值是 1.10（`:180`）。要整段重写。
+        动之前先确认这份头有没有编进去：`FOLLOW_ENABLE` 全仓库只在 `:84`
+        出现一次、值是 0，跟随实际走的是本地视觉还是 `kart_person_link`
+        那条链得先查清楚。
 - [ ] D4 死代码清理，先列清单再删：
       - `KART_DOT_ROW0_TEST` / `KART_DOT_ROWS_TEST` / `DOT_ALLON_TEST`
         三个自检死循环，硬件早就确认了

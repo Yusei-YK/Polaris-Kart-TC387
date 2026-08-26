@@ -329,7 +329,7 @@ static uint8 kart_vtrack_fb_check(float x_prev, float y_prev, float x_curr, floa
     /* Backward: 从 curr 回到 prev（金字塔仍然是当前帧和上一帧的，
      * 这里"backward"是逻辑上的，实际还是用当前帧金字塔做模板、prev 做搜索 ——
      * 标准 FB 需要保留上一帧金字塔，内存翻倍。简化实现：当前帧金字塔 + 当前位置反向跟。
-     * 【坑】这要求 pyr_gray 是 t-1 和 t 两帧都建好。实际上我们只建 t 帧，
+     * 【坑】这要求 pyr_L0/pyr_L1(本文件 :19 :20)是 t-1 和 t 两帧都建好。实际上我们只建 t 帧，
      * 所以这里的 backward 只能近似：用 t 帧金字塔、从 curr 往 prev 方向跑 LK。
      * 真实 FB 要两套金字塔，占 48KB dsram，当前预算吃紧，先用近似版。
      * 【TODO】若 FB 误判率高，改成双金字塔。 */
