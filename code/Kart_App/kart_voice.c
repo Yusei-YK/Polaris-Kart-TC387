@@ -47,7 +47,8 @@ static void voice_queue_reset(void)
 }
 
 /* 入队。满则丢弃最旧一条腾位(比赛口令不能丢新的,宁可挤掉最早未执行的)。
- * 实际队列深 8、指令间隔长,正常跑不会满,此处只是兜底。 */
+ * 可用深度是 7 不是 8(上面那条:留一个空位区分满/空),指令间隔长,正常跑不会满,
+ * 此处只是兜底。 */
 static void voice_queue_push(uint8 cmd)
 {
     uint8 next = (uint8)((voice_q_tail + 1) % KART_VOICE_QUEUE_SIZE);
@@ -169,9 +170,15 @@ static void voice_feed_byte(uint8 byte)
  * 故 isr.c 的 uart10_rx_isr 保持为空即可,也不会和日志 TX 抢中断。 */
 void kart_voice_init(void)
 {
-    /* 2026-08-12 VOICE_MUTED：4D7 人体视觉链路选了 VOFA 口(UART_10)，
-     * 而语音模块插的是同一个坐子 —— 硬件上已经不在了。
-     * 这里必须不碰 uart_init：它末尾是 uart_rx_interrupt(n, 0)，
+    /* 【先说当前值:VOICE_MUTED = 0,语音没被静音】它是
+     * PERSON_LINK_ENABLE && (PERSON_LINK_PORT == PERSON_LINK_PORT_VOFA),
+     * 而 board_pins.h 里 PERSON_LINK_ENABLE 是 0、口选的是 _PORT_LIGHT,
+     * 两个条件都不成立。下面这段之所以还是编不进来,是另一个开关:
+     * BOARD_VOICE_SHARES_AUX_UART = 1(与 VOFA 分时复用),独占式配置用不上。
+     *
+     * 2026-08-12 加 VOICE_MUTED 的原因：4D7 人体视觉链路若选了 VOFA 口(UART_10)，
+     * 语音模块插的是同一个座子 —— 那种配置下硬件上就不在了。
+     * 那时这里必须不碰 uart_init：它末尾是 uart_rx_interrupt(n, 0)，
      * 而本函数在 cpu0_main 里比 kart_person_link_init() 晚，
      * 一跑就把链路刚开的 RX 中断又关了 → 一个字节也收不到。 */
 #if (!BOARD_VOICE_SHARES_AUX_UART && !VOICE_MUTED)

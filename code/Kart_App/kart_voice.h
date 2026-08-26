@@ -26,6 +26,15 @@
  *                切 115200;退出时 release() 切回 460800 再开闸(顺序相反,见 kart_mission.c)。
  *       比赛不许接无线模块,所以科二把无线模块拔掉、语音模块插同一排针即可。
  *       P33.12/P33.13 属 ASCLIN1,已被灯板 TLD7002(P11.12/P11.10 @2M)占用,不可用。
+ *
+ * 【当前编译配置下本模块是活的】两个开关决定它的形态,都在 board_pins.h:
+ *   BOARD_VOICE_SHARES_AUX_UART = VOICE_ON_AUX_UART(1) && !LOG_ON_UART0(0) = 1
+ *     → 分时复用那条路成立,所以 kart_voice_init() 里那段独占式 uart_init 是
+ *       #if 掉的,init 实际不配串口;115200 是 acquire() 现场切的。
+ *   VOICE_MUTED = PERSON_LINK_ENABLE(0) && ... = 0
+ *     → 语音没被静音。它只在 4D7 人体视觉链路选 VOFA 口(UART_10)时才变 1,
+ *       那时语音模块的座子被占,硬件上确实不在,整个模块自动空转。
+ *   改了 PERSON_LINK_* 之后要回头核这一段,别照着旧结论判断语音有没有工作。
  * 收发: 主循环(科目二执行循环)查询 uart_query_byte,不进 RX 中断。
  * 触发: ASR-PRO 每识别一条口令发一帧,一条一帧不重复。
  * ------------------------------------------------------------------
@@ -37,9 +46,28 @@
 #define KART_VOICE_FRAME_HEAD2      (0x00)
 #define KART_VOICE_FRAME_HEAD3      (0x81)
 #define KART_VOICE_FRAME_TAIL       (0xFB)
+/* 帧长常量,全仓库没有读者:解析器是逐字节状态机(kart_voice.c 的 voice_feed_byte),
+ * 8 个状态一对一盯 8 个字节,不需要长度。留着是因为它是协议事实的一部分 ——
+ * 换模块/改协议时先看这里对不上对不上。 */
 #define KART_VOICE_FRAME_LEN        (8)         /* 6B 79 00 81 CMD 00 CHECK FB */
 
 /* -------------------- 语音命令码(CMD 0x04~0x26,共35条) -------------------- */
+/* 分四类:灯光 0x04~0x0B(8) 鸣笛 0x0C~0x14(9) 门洞 0x15~0x1E(10) 动作 0x1F~0x26(8),
+ * 8+9+10+8 = 35 = 0x26-0x04+1,铺满不留空号。
+ *
+ * 【35 个名字里 12 个真被代码引用,23 个只是协议表 —— 不是死代码,别删】
+ * 三种用法各不相同,改编号前先分清自己在改哪种:
+ *   动作 8 条:名字是真的分支标签,kart_motion.c:611~705 逐条 case。
+ *             kart_voice_dispatch 把原始码整个传给 kart_motion_start(),
+ *             改这里的编号,motion 会跟着走,不会错位。
+ *   灯光、鸣笛:只用到首尾两个当区间上下界 ——
+ *             灯光 LEFT_LIGHT..WIPER 在 kart_voice.c 的 dispatch,
+ *             鸣笛 HORN_1S..HORN_ALARM 在 kart_mission.c:1013(科目三信号阶段),
+ *             中间那 6 + 7 个名字没有读者,靠"码 - 首码"算偏移。
+ *             所以改编号必须保持【连续且顺序不变】,否则偏移全错。
+ *   门洞 10 条:一个读者都没有。dispatch 写的是裸 0x15~0x19 / 0x1A~0x1E,
+ *             改这里的编号编译不报错、行为也不跟着变 —— 要改就同时改那两条分支。
+ * 表本身照引脚表看待:记录 ASR-PRO 固件里烧的口令编号,人照着查。 */
 /* 灯光类(0x04~0x0B,8条) */
 #define KART_VOICE_CMD_LEFT_LIGHT       (0x04)  /* 打开左转向灯 */
 #define KART_VOICE_CMD_RIGHT_LIGHT      (0x05)  /* 打开右转向灯 */
@@ -84,7 +112,11 @@
 #define KART_VOICE_CMD_TURN_RIGHT       (0x26)  /* 右转 */
 
 /* -------------------- 命令队列 -------------------- */
-/* 指令间隔长、串行执行,深度 8 足够容纳一组(四区八条)的排队缓冲。 */
+/* 【实际能存 7 条,不是 8 条】环形队列留一个空位区分满/空(kart_voice.c 的
+ * voice_queue_push:next == head 就算满),所以可用深度是 SIZE-1。
+ * 满了不是丢新的,是丢最旧的一条 —— 一口气来 8 条会掉掉第 1 条。
+ * 现场不会这样:ASR-PRO 一条口令一帧,人说话的间隔远大于执行一条的时间,
+ * 执行层每拍取一条。要真按"一组八条"留余量就把这个数改成 9。 */
 #define KART_VOICE_QUEUE_SIZE       (8)
 
 typedef struct
@@ -129,8 +161,14 @@ uint32 kart_voice_get_byte_count(void);
  *   鸣笛(0x0C~0x14) → kart_horn_start()   已实现,可测
  *   灯光(0x04~0x0B)  → kart_light_set_command()  已接通,7x15 图案/动画
  *   门洞(0x15~0x19)  → kart_record_load_from_flash + kart_playback_start(槽1~5)
- *   返回(0x1A~0x1E)  → kart_mission_subject2_start_return()(2026-07-29 接通,槽6~10)
- *                       原来落 else 丢弃,现在走 GOTO 摆位 + 按录制原点复现两步
+ *   返回(0x1A~0x1E)  → 两条路,由 kart_mission_subject2_get_manual_return() 选:
+ *                       0 = Voice A → kart_mission_subject2_start_return()
+ *                           (2026-07-29 接通,槽6~10;原来落 else 丢弃,
+ *                            现在走 GOTO 摆位 + 按录制原点复现两步)
+ *                       1 = Voice B → kart_mission_subject2_start_return_here()
+ *                           跳过 GOTO,按车当前位姿复现 —— 人遥控把车摆回集结点,
+ *                           等于把 kart_odom 的累计漂移一次性归零。
+ *                       开关在菜单 S2 Voice 页(kart_menu.c:1180 显示 Voice A/B)。
  *   动作(0x1F~0x26)  → kart_motion_start()
  * 每调一次处理一条,长动作(鸣笛)期间忙则本拍不取新命令,让当前动作跑完。
  * 科目二用它执行灯光、鸣笛、门洞和固定动作；科目三信号阶段
