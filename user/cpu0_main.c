@@ -32,34 +32,8 @@
  * 不跑正式主循环。硬件确认完必须改回 0。 */
 #define KART_HW_TEST    (0)
 
-/* 点阵屏静态单行诊断开关:=1 时 dot init 后锁第0行常亮 3s(解耦扫描时序与硬件)。
- * 第0行亮=TLD7002+通路OK问题在扫描;仍黑=硬件/供电/接线。测完必须改回 0。 */
-#define KART_DOT_ROW0_TEST  (0)
-
-/* 点阵屏逐行静态排查开关:=1 时 dot init 后进死循环,15 列恒亮、7 行逐行各保持 1s。
- * 用途:先把\"行译码链(74HC238/S8050/AO3401)\"与\"扫描时序\"彻底解耦——
- *   看哪几行不亮 → 缺 2/4/6→A0,缺 3/4/7→A1,缺 5/6/7→A2;单行缺→该行输出链故障。
- * 这是修显示前的第一步硬件确认。测完必须改回 0。 */
-#define KART_DOT_ROWS_TEST  (0)
-
-/* 点阵屏"SYNC 驱动全亮"自检开关:
- * =1 时 dot init 后进死循环,只置 all_on 标志,扫描全交给 SYNC(P15.8)→exti_ch1_ch5_isr→scan()。
- * 与 ROW0/ROWS 两个静态测试不同,本测试不自己碰硬件,故能同时验证
- *   ①SYNC 边沿是否真到 MCU ②EXTI 通道是否挂对 ③scan() 时序是否正确。
- * 每秒重跑一次芯片 init 并往 VOFA 发 6 通道:
- *   ch0=本秒 SYNC_Hz ch1=init 返回码 ch2=本轮发出字节 ch3=本轮收到字节
- *   ch4=芯片应答字节(ch3-ch2) ch5=累计 SYNC 边沿
- * 期望:屏 7×15 全亮 + ch1=0 + ch0 数千。判读表见函数注释。测完必须改回 0。 */
-#define DOT_ALLON_TEST (0)
-
 /* 菜单系统开关。当前 IPS200 走软件 SPI(P02.8/P20.3)，与无线 SPI2 不冲突。 */
 #define KART_USE_MENU   (1)
-
-/* 协作式调度器开关(A/B 对照):
- *   =1  5ms PIT 节拍(g_tick_5ms)驱动的分频调度,控制窗口对齐硬件拍;
- *   =0  回退旧主循环(末尾 system_delay_ms(5),周期=执行耗时+5ms,非恒定)。
- * 出问题可临时改 0 用旧主循环 A/B 对照定位。 */
-#define KART_USE_SCHEDULER  (1)
 
 #if defined(__TASKING__)
 #pragma section all "cpu0_dsram"
@@ -73,7 +47,6 @@ volatile uint32 g_sched_last_exec_us  = 0;
 volatile uint32 g_sched_max_exec_us   = 0;
 volatile uint32 g_sched_overrun_count = 0;
 
-#if KART_USE_SCHEDULER
 /* 点阵屏显当前模式号:000=待机 111=科目一 222=科目二 444=科目三 333=遥控 FFF=故障 */
 static void kart_dot_show_mode(void)
 {
@@ -257,7 +230,6 @@ static void kart_task_100ms(void)
         kart_dot_show_mode();
     }
 }
-#endif  /* KART_USE_SCHEDULER */
 
 int core0_main(void)
 {
@@ -303,33 +275,6 @@ int core0_main(void)
     dot_matrix_screen_init();
     dot_matrix_screen_set_brightness(10000);
 
-#if KART_DOT_ROW0_TEST
-    /* 静态单行常亮自检(死循环永不返回),专供万用表逐级定位断点:
-     * row0 恒选(A0/A1/A2=000)、EN 恒高使能 74HC238、15 列恒满占空比。
-     * 各节点都是稳定直流,便于测量(全亮扫描是 1ms 快切,表读平均值不好判)。
-     * 期望链路:P33_8=3.3V → 238 Y0(SR0)=3.3V → 高边 → 行0线=8V;列线被 TLD7002 灌流拉低。
-     * 测完必须把 KART_DOT_ROW0_TEST 改回 0,否则死循环进不了主循环。 */
-    dot_matrix_screen_test_row0_static(0);
-#endif
-
-#if KART_DOT_ROWS_TEST
-    /* 逐行静态排查(死循环永不返回):15 列恒亮,7 行逐行各保持 1s。
-     * 观察缺行组合定位 A0/A1/A2 或单路输出故障(见 KART_DOT_ROWS_TEST 注释)。
-     * 测完必须把 KART_DOT_ROWS_TEST 改回 0。 */
-    dot_matrix_screen_test_rows_static();
-#endif
-
-#if DOT_ALLON_TEST
-    /* SYNC 驱动全亮自检(死循环永不返回):必须放在 dot_matrix_screen_init() 之后
-     * (init 里已 exti_init 开了 P15.8 中断),且放在 kart_imu_init() 之前 ——
-     * IMU 标定要静置约 6s,没必要为看灯等它;此处也不需要 5ms 拍。
-     * 每秒(=每换一行)VOFA 6 通道,以被调函数为准:
-     *   ch0=本秒 SYNC 边沿数(≈SYNC_Hz)  ch1=累计 SYNC 边沿  ch2=开机 init 返回码
-     *   ch3=当前点亮行地址 0~6          ch4=本秒 UART1 收到字节  ch5=init 期芯片应答字节
-     * 测完必须把 DOT_ALLON_TEST 改回 0,否则死循环进不了主循环。 */
-    dot_matrix_screen_test_all_on_sync();
-#endif
-
     dot_matrix_screen_set_all_on(1);                    /* 全亮:标定中 */
     /* 标定期间点阵扫描已由 1ms PIT 自动驱动(dot_matrix_screen_init 末尾已 pit_ms_init),
      * 不再需要标定 hook 手动刷屏 —— hook 再调 scan 会与 PIT 抢 entry_num,故撤。 */
@@ -373,7 +318,8 @@ int core0_main(void)
      * 【board_pins.h 里的旧注释是错的】它写着“SYNC 已于 2026-07-26 降级为
      * 诊断计数，zf_device_dot_matrix_screen.c:553 已经 exti_disable 掉了”——
      * 但那个 exti_disable 在 dot_matrix_screen_test_rows_static() 里面，
-     * 那是个被 KART_DOT_ROWS_TEST(=0) 卡死的诊断函数，正常开机流程根本不调。
+     * 那是个诊断函数，一直被一个恒为 0 的自检开关卡着
+     * （该开关 2026-08-26 随死代码一起删了），正常开机流程从来没调过。
      * 也就是说“让出来无代价”这个结论成立的前提一直没被执行过。
      *
      * 放在这里（dot init 之后、kart_wifi init 之前）而不是改 dot init：
@@ -460,7 +406,6 @@ int core0_main(void)
     cpu_wait_event_ready();
     kart_multicore_enable_runtime();
 
-#if KART_USE_SCHEDULER
     /* ===== 5ms PIT 节拍驱动的协作式调度器 =====
      * 时基:cc60_pit_ch0_isr 每 5ms 末尾 g_tick_5ms++(硬件拍,不受主循环耗时影响)。
      * 调度:主循环忙等 tick 变化,每变一拍分发一次;分频出 10/50/100ms 拍。
@@ -523,53 +468,6 @@ int core0_main(void)
             }
         }
     }
-#else
-    /* ===== 旧主循环(A/B 对照回退)=====
-     * 周期 = 本轮执行耗时 + 5ms,非恒定;仅在排查调度器问题时临时启用。 */
-    while(TRUE)
-    {
-        switch(kart_mission_get_mode())
-        {
-            case MISSION_SUBJECT_1: kart_multicore_dot_show_string("111"); break;
-            case MISSION_SUBJECT_2: kart_multicore_dot_show_string("222"); break;
-            case MISSION_SUBJECT_3: kart_multicore_dot_show_string("444"); break;
-            case MISSION_REMOTE:    kart_multicore_dot_show_string("333"); break;
-            case MISSION_FAULT:     kart_multicore_dot_show_string("FFF"); break;
-            case MISSION_IDLE:
-            default:                kart_multicore_dot_show_string("000"); break;
-        }
-        power_check_poll();
-        kart_steer_abs_update();
-        kart_playback_poll();
-        kart_steer_ctrl_update();
-
-        if(!kart_control_is_enabled())
-        {
-            power_set_rear_duty(0, 0);
-        }
-
-        power_sync();
-        /* 点阵屏扫描由 1ms PIT 中断驱动,旧主循环同样不需要软扫。 */
-        kart_remote_poll(KART_MAIN_LOOP_PERIOD_MS);
-        kart_mission_poll();
-        kart_multicore_record_poll();
-        kart_debug_uart_poll();
-
-#if KART_USE_MENU
-        /* 旧主循环 5ms 一转,而菜单的长按重复/快旋常数是按 10ms 拍定的,
-         * 故隔一转调一次输入,保持与调度器路径一样的手感。
-         * 画屏这里每转都调,比调度器的 50ms 勤 —— 这条路径本来就只用于排查。 */
-        {
-            static uint8 menu_div = 0;
-            menu_div ^= 1u;
-            if(menu_div) kart_menu_input_poll();
-        }
-        kart_menu_poll();
-#endif
-
-        system_delay_ms(KART_MAIN_LOOP_PERIOD_MS);
-    }
-#endif  /* KART_USE_SCHEDULER */
 }
 
 #if defined(__TASKING__)
