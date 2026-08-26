@@ -79,11 +79,6 @@
 #include "kart_vision.h"
 #include "kart_vtrack.h"
 
-/* 总开关。0 = 编译期不产生任何调用。 */
-#ifndef FOLLOW_ENABLE
-#define FOLLOW_ENABLE              (0)
-#endif
-
 /*=========================== 【重要】纵向为什么不用绝对测距 ===========================*/
 /* 单目按宽度反算距离 dist = W_real * f_px / W_px 成立需要三个前提：
  *   刚性、正对镜头、完整可见。
