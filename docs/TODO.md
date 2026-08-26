@@ -160,19 +160,15 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
       重标步骤编号列出、踩过的坑留在原地（例如 `:137` 记着 2026-07-29 误改
       符号导致一动就打死不回中，已回退）。文件里六处算术全复算过，对得上。
 - [ ] D2 按上面顺序过完 94 个文件
-- [ ] D3 订正已知的过期注释。已经做掉的：`kart_playback.h` 的 Ke 建议
+- [x] D3 订正已知的过期注释，五条都处理完了：`kart_playback.h` 的 Ke 建议
       （改成直接填实车完赛那对 Ke=-600，并写明当前剖面看不到 e_lat）、
       `kart_vtrack.c:332` 的 `pyr_gray`（实际是 `pyr_L0`/`pyr_L1`）、
-      `kart_params.c:71` 的 `PB RevScl`（补上它也管科目三那段开环倒车）。
-      `board_pins.h` 那条不用改，`:269-278` 已经是订正后的说法。剩下一条：
-      - `kart_follow.h` 近距联锁的阈值推导叠了三层，只有最外层是现值：
-        `:220` 按 1.35/1.15 讲、`:226` 按 0.70/0.85 推、`:235` 才是现在的
-        1.67/1.36；`:251` 那段单帧尖峰推导也还挂在 1.35 上；`:276` 写着
-        "配合 V_CRUISE 降到 0.70"，而现值是 1.10（`:180`）。要整段重写。
-        这份头是活的：`kart_mission.c:538` 和 `:648` 无条件调
-        `kart_follow_update()`，`kart_follow.c` 里也没有任何 `#if FOLLOW_ENABLE`
-        包着。跟随走的是本地视觉那条——`PERSON_LINK_ENABLE` 是 0
-        （`board_pins.h:176`）。所以这几段阈值推导是会被人当真的，得重写。
+      `kart_params.c:71` 的 `PB RevScl`（补上它也管科目三那段开环倒车）、
+      `kart_follow.h` 近距联锁那三层叠着的阈值推导（1.35/1.15 → 0.70/0.85 →
+      现值 1.67/1.36）压成一层现值，FRAMES 与 SLOW_MIN_RATIO 两段也按 1.10 的
+      巡航速度重算。`board_pins.h` 那条本来就不用改，`:269-278` 已经是订正后的说法。
+      顺带查实 `kart_follow` 是活代码（`kart_mission.c:538` `:648` 无条件调），
+      `FOLLOW_ENABLE` 是死宏，已记进 D4。
 - [ ] D4 死代码清理，先列清单再删：
       - `KART_DOT_ROW0_TEST` / `KART_DOT_ROWS_TEST` / `DOT_ALLON_TEST`
         三个自检死循环，硬件早就确认了
