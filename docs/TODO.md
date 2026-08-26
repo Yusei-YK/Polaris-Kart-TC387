@@ -159,7 +159,6 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
       改坏了不影响逻辑，本身又是最该留给后人的东西），认可了再铺开
 - [ ] D2 按上面顺序过完 94 个文件
 - [ ] D3 订正已知的过期注释：
-      - `kart_playback.h:171` Ke 量程写的 ±800，实际 ±3000
       - `kart_playback.h` 里"Ke 从 100 往上加"的建议，在 Kh 由 Ke 派生之后
         已经是误导（`kart_playback.c:826`）
       - `board_pins.h` 关于点阵屏 SYNC "已 exti_disable" 那段已被证伪，
