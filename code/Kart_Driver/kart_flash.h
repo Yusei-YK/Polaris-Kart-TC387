@@ -34,7 +34,10 @@
  *   返程槽:   7  页 = 3584  uint32,减 8 字头 = 3576/7  = 510 点。
  *     够不够:录制阈值 0.05m/点(KART_RECORD_DIST_THRESH),510 点 ≈ 25m 直线路程,
  *     弯多时点更密、里程更短,但"集结点→门洞→发车区"实测量级 10~15m,余量 ×1.7。
- *     只给 7 页是因为 DFlash 只剩 37 页,5 个槽必须均分且不能碰参数页。
+ *     只给 7 页是因为页 91 往后只剩 37 页(页 91~127),其中页 127 是参数表,
+ *     真正可分的是 36 页,5 个槽均分 → 7 页/槽(占 35 页,页 126 空着)。
+ *     下面 FLASH_S2R_PAGES_PER_SLOT 处写的"只剩 36 页可分"是同一笔账,
+ *     差别只在算不算参数页那一页。
  *     【真录满了怎么办】save 会截断到 510 点(kart_flash.c 有 slot_capacity 钳位),
  *     后半段路径直接没了 —— 现场判据是菜单里显示的点数,接近 510 就要缩短返程录制。
  *
@@ -96,7 +99,12 @@
 #define KART_FLASH_SLOT_NUM         (KART_FLASH_S1_SLOT_NUM + KART_FLASH_S2_SLOT_NUM + \
                                      FLASH_S2R_SLOT_NUM)
 
-/* 兼容旧代码:科目一使用槽0,按 S1 槽页数/容量(v2 = 21 页) */
+/* 兼容旧代码:科目一使用槽0,按 S1 槽页数/容量(v2 = 21 页)。
+ * 【这三个宏现在没有外部读者】PAGES_PER_SLOT 和 MAX_WAYPOINTS 全仓库零引用,
+ * SLOT_CAPACITY 只被下面那个 #if 和 MAX_WAYPOINTS 用到 —— 也就是整段只自己引用自己。
+ * 保留不删的理由:它们是 v1 时代的对外名字,删掉等于把"科目一槽有多大"这个
+ * 事实从头文件里抹掉;而且删一个宏要重新确认没有 .bak/分支在用,不值当。
+ * 新代码请直接用 KART_FLASH_S1_* / S2_* / S2R_* 三组,别再用这三个。 */
 #define KART_FLASH_PAGES_PER_SLOT   KART_FLASH_S1_PAGES_PER_SLOT
 #define KART_FLASH_SLOT_CAPACITY    KART_FLASH_S1_SLOT_CAPACITY
 #if (KART_FLASH_SLOT_CAPACITY >= KART_RECORD_MAX_WAYPOINTS)
@@ -134,7 +142,12 @@ uint16 kart_flash_load_path(uint8 slot, kart_waypoint_t *wp_out,
                             kart_flash_meta_t *meta_out, uint16 max_count);
 
 /* 查询 slot 槽位是否存有有效路径(magic 匹配)。有=返回点数,无=0。
- * 只读页头 2 word,快;供菜单显示"槽位是否已录"用。 */
+ * 【读的是整页,用的是 2 个 word】实现里是 flash_read_page(..., EEPROM_PAGE_LENGTH),
+ * 一次拷 512 word 进 page_buf,只取 [0]=magic 和 [1]=count。DFlash 是直接映射地址,
+ * 这个拷贝很快,不是瓶颈 —— 但它会把 page_buf 冲掉。page_buf 是全模块共用的
+ * 单页缓冲,所以【不能在 load_path 的逐点循环中间调本函数】。
+ * 目前八个调用点全在 kart_menu.c(槽位列表/保存/加载页),都在 CPU0 的 50ms 拍上,
+ * 不存在这种交叉。供菜单显示"槽位是否已录"用。 */
 uint16 kart_flash_slot_count(uint8 slot);
 
 #endif

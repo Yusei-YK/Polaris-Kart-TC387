@@ -40,6 +40,12 @@ static uint32 slot_base_page(uint8 slot)
         return FLASH_S2R_BASE_PAGE
              + (uint32)(slot - FLASH_S2R_FIRST_SLOT) * FLASH_S2R_PAGES_PER_SLOT;
     }
+    /* 【已知缺口】越界槽号在这里落到页 0,而页 0 正是科目一路径的首页。
+     * 配合 slot_capacity() 同样返回 0(→ save 把 count 截成 0),一次越界的 save 会往
+     * 页 0 写下 magic + count=0,科目一路径当场判空,必须重录。
+     * 现在不会发生:save/load/slot_count 三个入口都先查 slot >= KART_FLASH_SLOT_NUM
+     * 再往下走,静态槽号也都来自菜单的固定范围。所以这是潜在坑,不是现行故障。
+     * 要补就把返回值改成一个不可能的页号(如 0xFFFFFFFF)并在调用处判。 */
     return 0;
 }
 
@@ -101,7 +107,10 @@ static uint32 stream_word(uint32 idx)
         case 3: return f2u(sw_wp[p].v_left);
         case 4: return f2u(sw_wp[p].v_right);
         /* kart_steer 是 int16,统一按 float 存:全流一个字宽,读回不必分类型解析。
-         * 打角量程 ±2800 计数,float 精确表示整数到 2^24,没有精度损失。 */
+         * 存进来的是 kart_steer_abs_get_center_delta()(见 kart_record.c:182),
+         * 也就是相对中位的计数差:软限位 ±1064、机械行程 ±1084(kart_calib.h:116/108)。
+         * float 能精确表示到 2^24 的整数,整个 int16 值域都无精度损失,读回 (int16)
+         * 强转拿到的就是原值。 */
         case 5: return sw_steer ? f2u((float)sw_steer[p]) : 0u;
         default:return sw_dist  ? f2u(sw_dist[p])         : 0u;
     }
@@ -138,6 +147,12 @@ uint8 kart_flash_save_path(uint8 slot, const kart_waypoint_t *wp,
          * 【注意】v2 一槽最多 21 页,整段 save 比 v1 长约 40%,更不能在行驶中调。 */
         flash_write_page(0, base_page + pi, page_buf, EEPROM_PAGE_LENGTH);
     }
+    /* 【返回 0 的含义】只表示"参数合法、该写的页都走了一遍",不表示写进去了。
+     * 逐飞的 flash_write_page() 返回 void(zf_driver_flash.h),擦写结果拿不到 ——
+     * 库里带状态的是 flash_write_page_from_buffer(),但它一次只能写 buffer 那一页,
+     * 换过去要重排整个组页流程。
+     * 现场判据只能靠回读:存完在菜单里看槽位点数(kart_flash_slot_count),
+     * 点数对得上才算存住了。 */
     return 0;
 }
 

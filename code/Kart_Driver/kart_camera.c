@@ -137,13 +137,15 @@ static void kart_camera_dma_wrap(void)
     }
 }
 
-/*-------------------------------------------------------------------------------------------------------------------
- * 把 UART1 还给灯板。
- * scc8660_init 走 UART 分支时会把 UART1 重配成 9600 并且把 camera_uart_handler 挂上，
- * 所以这里必须：改归属 → 重跑 tld7002_init（它自己会 uart_init 回 2Mbps）→ 重开 1ms 扫描。
- * 不直接调 dot_matrix_screen_init()，因为它会重跑 gpio_init 和 pit_ms_init，
- * 而行选通 GPIO 和 PIT 通道此刻都还是好的，重跑只会多一次全屏清屏闪烁。
- -------------------------------------------------------------------------------------------------------------------*/
+/*------------------------------------------------------------------------------
+ * 【2026-08-10 删除说明】这里原有一个 kart_camera_uart_give_back() —— 摄像头配置
+ * 期把 UART1 借走,配完再改归属、重跑 tld7002_init、重开 1ms 点阵扫描。
+ * 连同它一起删掉的还有运行期归属标志和 uart1_rx_isr 里的分派。
+ * 删的理由(kart_camera.h 顶部详述):两者时间上不重叠,只要 kart_camera_init()
+ * 早于 dot_matrix_screen_init(),UART1 就静态归灯板,不需要运行期仲裁。
+ * 现在灯板的 UART1 是由 dot_matrix_screen_init() 内部的 tld7002_init() 按 2Mbps
+ * 重配的,时序约束写在 cpu0_main.c:271 和本文件 init 的注释里。
+ ------------------------------------------------------------------------------*/
 
 #endif  /* CAMERA_ENABLE */
 
@@ -160,10 +162,10 @@ uint8 kart_camera_init(void)
     cam_state = KART_CAM_STATE_INIT_FAIL;
     g_cam_wb_ret = 0xFFu;
 
-    /* 第一步：停掉 1ms 点阵扫描。它会调 tld7002_set_duty() 往 UART1 发 23 字节，
-     * 摄像头借用期间必须闭嘴，否则两边抢同一个 ASCLIN1。 */
-    /* 第二步：改归属。改完 uart1_rx_isr 就会把收到的字节喂给 camera_uart_handler，
-     * 而不是 tld7002_callback。必须在 scc8660_init 之前改，它 240ms 就超时了。 */
+    /* 这里不需要停点阵扫描、也不需要改 UART1 归属:本函数被约束在
+     * dot_matrix_screen_init() 之前调用(cpu0_main.c:265 / :275),那时灯板还没起来,
+     * UART1 没人用。原先的动态仲裁已于 2026-08-10 删除,删除说明就在本函数上方
+     * (CAMERA_ENABLE 段末那块注释)。 */
 
     for(try_i = 0; try_i < CAMERA_INIT_RETRY; try_i++)
     {
@@ -189,7 +191,7 @@ uint8 kart_camera_init(void)
 
     if(0 == ret)
     {
-        /* 第三步：套上诊断包装。必须在 init 成功之后做 —— init 内部自己会多次
+        /* 套上诊断包装。必须在 init 成功之后做 —— init 内部自己会多次
          * set_camera_type，早套会被覆盖掉。 */
         cam_raw_vsync = camera_vsync_handler;
         cam_raw_dma   = camera_dma_handler;
@@ -221,8 +223,10 @@ uint8 kart_camera_init(void)
         cam_state           = KART_CAM_STATE_NO_SIGNAL;   /* 等第一个 VSYNC 才算 RUNNING */
     }
 
-    /* 第四步：无论成败都要把 UART1 还给灯板。摄像头挂了不能连灯一起挂 —— 灯是
-     * 科目三终点语音联动要用的，属于计分项。 */
+    /* 这里也不需要把 UART1 还给灯板 —— 静态归属之后灯板自己在
+     * dot_matrix_screen_init() 里把 UART1 配成 2Mbps。摄像头初始化失败不影响灯:
+     * 本函数无论成败都只是设 cam_state 和几个诊断量,车照常能跑(只是没图),
+     * 而灯是科目三终点语音联动要用的,属于计分项。 */
 
     g_cam_init_us = (system_getval() - t_start_raw) / 100u;
 

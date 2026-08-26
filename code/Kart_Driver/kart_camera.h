@@ -57,8 +57,10 @@
 #define CAMERA_ENABLE              (1)
 #endif
 
-/* 上电初始化失败时是否重试。凌瞳 set_config 单次超时 240ms，重试代价不低，
- * 上电阶段可接受；跑车途中不做任何重试。 */
+/* 上电初始化的【总尝试次数】,不是重试次数。kart_camera.c 里的循环是
+ * for(try_i = 0; try_i < CAMERA_INIT_RETRY; try_i++),所以 2 = 试 2 次 = 只重试 1 次;
+ * g_cam_init_try 记的也是尝试次数(try_i + 1),不是重试次数。
+ * 凌瞳 set_config 单次超时 240ms，重试代价不低，上电阶段可接受；跑车途中不做任何重试。 */
 #define CAMERA_INIT_RETRY          (2)
 
 /* 连续多少毫秒没有 VSYNC 判为"无信号"。60FPS 一帧 16.7ms，25FPS 一帧 40ms，取 200ms 足够宽。 */
@@ -95,7 +97,8 @@ extern volatile uint8  g_cam_wb_ret;         /* 固定白平衡下发结果：0�
 
 /*======================================== 对外接口 ========================================================*/
 
-/* 上电初始化。内部完成：scc8660_init（失败重试 CAMERA_INIT_RETRY 次）→ 挂计数包装回调。
+/* 上电初始化。内部完成：scc8660_init（最多试 CAMERA_INIT_RETRY = 2 次,即只重试 1 次）
+ * → 挂计数包装回调。
  *
  * 【两条硬性调用顺序约束，改 cpu0_main 时不要动】
  *   1) 必须在 dot_matrix_screen_init() 之【前】调用。摄像头配置可能要用 UART1@9600
@@ -111,7 +114,16 @@ uint8  kart_camera_init                 (void);
 /* 10ms 周期调用。刷新帧率/无信号判定，不做任何图像处理，不阻塞。 */
 void   kart_camera_poll                 (void);
 
-/* 是否有一帧可用。返回 1 时图像在 scc8660_image 里，处理完必须调 kart_camera_frame_release()。 */
+/* 是否有一帧可用。返回 1 时图像在 scc8660_image 里，处理完必须调 kart_camera_frame_release()。
+ *
+ * 【这是一把全局单槽锁,不是每个使用者一份】持帧标志只有 cam_frame_hold 一个,
+ * 同一拍里谁先问到谁拿走,其余全部返回 0。当前四个模块在抢它:
+ *   kart_mission.c:494(跑车主链路)、kart_menu.c:788(相机调试页)、
+ *   kart_assist_img.c:131(下载器图传)、kart_wifi.c:282(WiFi 图传)。
+ * 所以图传开着的时候跑车链路会周期性拿不到帧 —— 这是设计如此,不是丢帧 bug,
+ * 图传只在调试时开。
+ * 【拿了必须还】漏掉 release 会把 hold 永久置 1,相机再也取不到新帧,现象是
+ * "视觉全程丢目标"。菜单退页面时无条件还一次就是防这个,见 kart_menu.c:1841。 */
 uint8  kart_camera_frame_ready          (void);
 
 /* 释放当前帧，允许 DMA 写下一帧。 */
@@ -120,7 +132,10 @@ void   kart_camera_frame_release        (void);
 kart_cam_state_enum kart_camera_state   (void);
 
 /* IPS200 预览。整屏 RGB565，逐行阻塞 SPI，耗时几十毫秒级 ——
- * 只能在 IDLE/调试页调用，绝对不能进 5ms 控制窗口。内部自带限帧。 */
+ * 只能在 IDLE/调试页调用，绝对不能进 5ms 控制窗口。内部自带限帧。
+ * 【当前全仓库没有调用点】相机调试页故意不用它:那页要对【同一帧】既出图又跑
+ * kart_vision,而本函数自己 ready→显示→release,帧在它手里进出,框会画到另一帧的
+ * 位置上。原因写在 kart_menu.c:627。留着是给"只想看看出不出图"的场合用。 */
 void   kart_camera_preview              (void);
 
 #endif
