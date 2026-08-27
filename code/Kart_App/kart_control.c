@@ -153,7 +153,10 @@ void kart_control_speed_update(void)
 
     /* 5. 单速度环:误差 = 中心目标 - 左右平均实测,只喂一个 PID。
      *    两后轮共轴松耦合,双独立闭环 PID 会互顶发散(悬空撞 ±10000)。
-     *    改成唯一积分器控平均速度,得到基准 duty base。 */
+     *    改成唯一积分器控平均速度,得到基准 duty base。
+     *    【全工程唯一一处 kart_pid_update】kart_speed.pid_right 从此不再被推进,
+     *    只留着参数同步(理由写在 kart_control.h 的 pid_right 声明处)。
+     *    所以在线调 Kp/Imax 只有 kart_pid 那份真正起作用。 */
     kart_pid_update(&kart_speed.kart_pid, kart_speed.target - kart_speed.meas);
     int16 base = (int16)kart_speed.kart_pid.output;
 
@@ -236,9 +239,14 @@ static float kart_control_get_steer_norm(void)
     return norm;
 }
 
-/* 设中心目标速度,并按实测转角分配左右轮目标(电子差速)。
- * steer_norm>0(左转):左轮内侧应慢(1-r)、右轮外侧应快(1+r)。
- * 倒车(target<0)第一版关闭差速(方向符号未验证),左右直接同目标。 */
+/* 设中心目标速度。
+ * 【下面这套左右目标分配算完没人用】left_target/right_target 全工程零读者,
+ * speed_update 的差速走的是第 6 步的 duty 前馈偏置(base×(1±r)),不看这两个值。
+ * 也就是说:把 KART_EDIFF_ENABLE 改成 1,生效的只有 duty 偏置那一半,
+ * 这里的目标端分配仍然是空转。要么把它接进 speed_update,要么就当它是记账。
+ * 留着的原因是这段写清了差速的方向约定,删掉等于把这个约定也删了:
+ *   steer_norm>0(左转):左轮内侧应慢(1-r)、右轮外侧应快(1+r)。
+ *   倒车(target<0)关闭差速(方向符号未验证),左右直接同目标。 */
 void kart_control_set_target(float target)
 {
     /* 写"请求目标";实际喂 PID 的 kart_speed.target 由 5ms 中断按 ramp_step 逐拍靠拢。

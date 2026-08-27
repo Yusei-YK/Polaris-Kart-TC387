@@ -16,11 +16,15 @@
  *      改成直接赋值 duty = output,更直观好调(已跟用户确认)。
  *   3. 下发:TopSpeed 走 send_motor_duty 无刷串口;卡丁车是有刷 DRV8701,
  *      换成 power_set_rear_duty() 出 PWM。
- * 保留照搬的:10 点滑动平均滤波、位置式 PID、目标速度斜坡(后面接规划时用)。
+ * 保留照搬的:10 点滑动平均滤波、位置式 PID、目标速度斜坡。
+ *   斜坡不是"留着以后接规划用"——它是起步顿挫的正式对策,上电即生效
+ *   (SPEED_RAMP_STEP_DEFAULT = 0.4,kart_control_init 直接装进 ramp_step),
+ *   病因链见下面那段。
  * ------------------------------------------------------------------
  * 调用节拍:kart_control_speed_update() 必须放 5ms 定时中断里,和 IMU 同拍。
- * 单位说明:当前速度环仍用"编码器脉冲/5ms"在线调初值;
- *          左右距离标定量已分开放在 board_pins.h,后续速度环再统一改成 m/s。
+ * 单位说明:当前速度环仍用"编码器脉冲/5ms"在线调初值,后续再统一改成 m/s。
+ *          左右轮距离标定量在 kart_calib.h,不在 board_pins.h ——
+ *          board_pins.h 只管引脚和外设编号,一个整车尺寸宏都没有。
  * ------------------------------------------------------------------
  */
 
@@ -73,11 +77,17 @@
  * 航向环只管前轮转角,消不掉后轮轮速差;同目标喂两独立 PID 会拖滑互顶。
  * 用实测转角(非目标)分配左右目标:内轮乘(1-r),外轮乘(1+r)。
  * 初版保守:GAIN 小、比例上限 12%;倒车关闭(符号未验证)。
- * 【2026-07-28 赛前复核:保持关闭】不是"来不及验",是量程本身就配不上:
- * 满舵 R=1.32m、轮距 0.60m → 内外轮半径 1.02m / 1.62m,轮速偏差 ±23%,
+ * 【2026-07-28 赛前复核:保持关闭】不是"来不及验",是量程本身就配不上。
+ * 按代码里的标定量重算(原注释写的 1.32m / ±23% 对不上,数已订正,结论不变):
+ *   满舵 R = KART_STEER_R_TIMES_DELTA / 软限位 = 1480/1064 = 1.39m
+ *            (kart_calib.h:48 与 :117 的 KART_STEER_DELTA_LIMIT_L)
+ *   轮距 KART_WHEEL_TRACK_M = 0.60m → 内外轮半径 1.09m / 1.69m
+ *   轮速偏差 = (0.60/2)/1.39 = ±21.6%
  * 而 MAX_RATIO 只有 ±12% —— 恰恰在最需要差速的满舵处只能补一半,
  * 补一半的效果是"两个 PID 仍在互顶,只是顶得轻些",引入的不确定性大于收益。
- * 要开必须先把 MAX_RATIO 提到 0.25 并实车验符号,赛前不动这条路径。 */
+ * 要开必须先把 MAX_RATIO 提到 0.25 并实车验符号,赛前不动这条路径。
+ * 【另外:光把 KART_EDIFF_ENABLE 改成 1 不够】见下面 left_target/right_target
+ * 那条 —— 目标端那套分配算完没人用,真正生效的是 duty 前馈偏置。 */
 #define KART_EDIFF_ENABLE              (0)
 #define KART_EDIFF_GAIN                (0.08f)     // steer_norm→差速比例增益
 #define KART_EDIFF_MAX_RATIO           (0.12f)     // 差速比例上限(±12%)
@@ -87,7 +97,14 @@
  * ------------------------------------------------------------------------- */
 typedef struct
 {
-    /* kart_pid 保持为左轮控制器，兼容现有在线调参命令。 */
+    /* 【pid_right 是双环时代的遗留,现在不参与控制】
+     * 全文件只有一处 kart_pid_update(),喂的是下面那个 kart_pid;pid_right 只被
+     * kart_pid_init 建一次、被 reset 五次、Kp/Ki/Kd/i_max 跟着三个 setter 同步 ——
+     * 它的 output 从来没算过,所以左右后轮的 duty 与它无关(见 kart_control.c
+     * 第 5 步:单 PID 控左右平均速度,base 只来自 kart_pid)。
+     * 保留不删的理由:删一个结构体成员要跟着改 init/reset/三个 setter 五处,
+     * 而它现在零成本(一拍多几个浮点赋值);万一将来真要回到双环,参数是同步好的。
+     * 【别被名字骗了】kart_pid 不是"左轮控制器",它控的是左右平均速度。 */
     kart_pid_t  pid_right;
     kart_pid_t  kart_pid;                            // 速度环 PID(复用 kart_pid)
     uint8       enable;                         // =1 才输出,=0 输出 0(悬空/急停用)
@@ -95,6 +112,12 @@ typedef struct
     float       target;                         // 斜坡后的实际 PID 目标(脉冲/5ms)
     float       target_cmd;                     // 上层请求的目标(set_target 写),target 每拍朝它爬
     float       ramp_step;                      // 加速斜坡步长(脉冲/5ms 每拍),0=不限速
+    /* 【下面 left_target / right_target 与上面 meas_raw 都没有读者】
+     * 三个都是只写不读:kart_control_set_target() 算出左右目标(EDIFF 两个分支
+     * 都算),speed_update() 却不看它们 —— 真正的差速是第 6 步拿 base 做 duty
+     * 前馈偏置。meas_raw 同理,滤波前的原始速度只留在结构体里,VOFA 取的是 meas。
+     * 保留不删:它们是结构体成员,VOFA/菜单随时可能要拿来看一眼,
+     * 删了反而要动 init 和 set_target。看波形时别指望这三个字段有意义。 */
     float       left_target;                    // 左轮目标(电子差速后,脉冲/5ms)
     float       right_target;                   // 右轮目标(电子差速后,脉冲/5ms)
     float       meas_raw;                       // 本次实测速度(滤波前,脉冲/5ms)
@@ -113,7 +136,9 @@ typedef struct
     /* 开环 duty 支路(科目二固定动作用):=1 时跳过 PID,直接把 open_duty 下发两后轮。
      * 【为什么放在本模块内、不在上层直接写 PWM】
      *   enable 是"后轮有没有主人"的唯一开关,全工程有三处冗余检查它并清零后轮:
-     *     kart_control.c(本模块) / isr.c:70(硬写 PWM) / cpu0_main.c:103
+     *     kart_control.c(本模块,speed_update 第 4 步)
+     *     isr.c:73 判断 → :75 power_force_rear_pwm_zero()(5ms 中断里硬写 PWM)
+     *     cpu0_main.c:83 判断 → :85 power_set_rear_duty(0, 0)
      *   上游改这个开关的是遥控挡位(SW3_H 开 / SW3_M 关)、遥控失联、kart_mission 切模式。
      *   上层若绕过本模块直接 power_set_rear_duty(),会被这三处里的某一处抹成 0。
      *   所以开环也走本模块:enable 照样置 1(三处检查放行、遥控急停链完全不变),
