@@ -9,22 +9,27 @@
  * 顶层模式机 + 科目一阶段骨架。参考 TopSpeed Mission/Subject 的分层思想,
  * 但不照搬业务代码,也不先造通用事件框架。各科目用自己的非阻塞状态与计时。
  *
- * 顶层模式:
+ * 顶层模式(与下面的枚举一一对应,六个):
  *   IDLE       安全待机(车/转向/蜂鸣器全部无输出)
- *   SUBJECT_1  科目一自动驾驶(当前只搭空骨架,不自行启动)
+ *   SUBJECT_1  科目一绕桩:START 键触发 kart_playback 前向复现,是活的流程
  *   SUBJECT_2  科目二人车交互(语音识别 + 鸣笛在此轮询)
+ *   SUBJECT_3  科目三如影随形:跟随录轨 → 开环反向复现 → 盲盒固定动作
+ *   REMOTE     SBUS 遥控接管(调试/手动)
  *   FAULT      故障锁止
  *
- * 运行模式由菜单或对外接口切换。
- * 最终交互(IPS200 菜单 / 实体按键)待定,不使用语音选科目。
+ * 运行模式由 IPS200 菜单切换(kart_menu.c 里十余处 kart_mission_set_mode),
+ * 调试口的 VOFA m 命令是备用入口。不使用语音选科目。
  *
  * 任意模式切换统一经 kart_mission_set_mode(): 先 exit 旧模式(统一停机),
  * 再 enter 新模式。保证互切无后轮/转向/蜂鸣器残留输出。
  *
  * 调用位置:
  *   kart_mission_init()  —— cpu0_main.c 初始化段(kart_voice/kart_horn init 之后)
- *   kart_mission_poll()  —— 主循环每拍(替代原先直接调 kart_voice/kart_horn)
- *   kart_mission_set_mode() —— VOFA m 命令 / 后续菜单
+ *   kart_mission_poll()  —— 【10ms 一拍】cpu0_main.c 的 kart_task_10ms() 里,
+ *       由 5ms 调度器每两拍派发一次(替代原先直接调 kart_voice/kart_horn)。
+ *       本文件所有 *_TICKS 宏都按 10ms/拍折算成秒,换调用点就得连它们一起改,
+ *       否则每个超时的实际秒数都会跟着变 —— 这是本模块最容易漏的一处耦合。
+ *   kart_mission_set_mode() —— IPS200 菜单为主入口,VOFA m 命令为备用
  * ------------------------------------------------------------------
  */
 
@@ -99,7 +104,10 @@ typedef enum
  *   链路开了但 SRC 还是 VISION：车拿没启用的摄像头结果跟随，永远丢目标；
  *   SRC 选了 PLINK 但链路没开：kart_vtrack 永远 valid=0，车原地不动。
  * 两种都能编过、都不报错，只表现为“车不跟人”，现场很难往宏上想。
- * 要手动覆盖仍然可以：在本文件前面或 -D 定义 S3_FOLLOW_SRC 即可。 */
+ * 要手动覆盖仍然可以：在本文件前面或 -D 定义 S3_FOLLOW_SRC 即可。
+ * 【当前出厂值是 VISION,不是 PLINK】board_pins.h 里 PERSON_LINK_ENABLE 是 0,
+ * 所以下面这个 #if 走 #else 分支:阶段1 用本地摄像头认黄色引导板。
+ * 要换成 4D7 认人,只改 board_pins.h 那一个宏,这里自动跟上。 */
 #ifndef S3_FOLLOW_SRC
 #if PERSON_LINK_ENABLE
 #define S3_FOLLOW_SRC          (S3_FOLLOW_SRC_PLINK)
@@ -142,9 +150,15 @@ typedef enum
 #define S3_HOLDS_VOICE_UART(stage)   ((stage) >= S3_SIGNAL)
 #endif
 
-/* 起步前等车停稳:滤波实测速度(脉冲/5ms)进 EPS 且连续保持 TICKS 拍。
+/* 起步前等车停稳:滤波实测速度(脉冲/5ms)进 EPS 且连续保持 TICKS 拍
+ * (30 拍 = 0.3s;MAX 300 拍 = 3s,都按 10ms/拍)。
  * 倒车复现 stop 后车不是立刻静止,带着残速起步会多冲出去一截。
- * MAX 是保底,等不到停稳也要往下走 —— 灯光/鸣笛那一段还得做。 */
+ * MAX 是保底,等不到停稳也要往下走 —— 灯光/鸣笛那一段还得做。
+ * 【这三个值在 kart_motion.h 还有一份同值副本】MOTION_S3_PAUSE_EPS /
+ * _TICKS / _MAX_TICKS 同样是 4.0 / 30 / 300,干的是同一件事(等车停稳),
+ * 区别只在谁用:那份给 kart_motion 内部固定动作的段间停顿,这份给
+ * kart_mission 的阶段交接。两份都在跑,改停稳判据必须两处一起改,
+ * 只改一处的后果是两段等待悄悄不一致,现场表现为"有时多冲一截"。 */
 #define S3_FIXED_SETTLE_EPS      (4.0f)
 #define S3_FIXED_SETTLE_TICKS    (30U)
 #define S3_FIXED_SETTLE_MAX_TICKS (300U)
@@ -163,7 +177,7 @@ typedef enum
  * 现在识别搬到 core3,单帧要 ~360ms = ~36 拍,而年龄是按【结果帧】计的,
  * 再给 10U 就是每一帧都必定超龄 → vis 恰好在大部分拍变 NULL → kart_follow
  * 每帧掉一次 LOST,转向反而比搬核前更乱。
- * 100U = 1s 约为单帧耗时的 3 倍,既能容下 core3 正常节奇,又能在采集链
+ * 100U = 1s 约为单帧耗时的 3 倍,既能容下 core3 正常节奏,又能在采集链
  * 真断时 1s 内兜底。【若日后把单帧耗时降下来,这个值要跟着降】——
  * 判据看 VOFA CH5(core3 单帧 ms),本值取它的 3 倍除以 10。 */
 #define S3_VISION_MAX_AGE_TICKS (100U)
@@ -182,7 +196,7 @@ void kart_mission_init(void);
 /* 切换顶层模式:内部 exit 旧模式 → enter 新模式。 */
 void kart_mission_set_mode(kart_mission_mode_t mode);
 
-/* 主循环每拍调:按当前模式分发 loop。 */
+/* 10ms 一拍调(cpu0_main.c 的 kart_task_10ms):按当前模式分发 loop。 */
 void kart_mission_poll(void);
 
 /* 读当前模式(点阵屏显示 / 调试用)。 */
