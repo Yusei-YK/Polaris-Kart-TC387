@@ -26,10 +26,14 @@
 /*
  * 科目状态机实现 —— 见 kart_mission.h 头注释。
  * 边界:不改 PID/中断/里程系数/Pure Pursuit。
- * 科目一 = 绕桩(kart_playback 复现现场手推轨迹) + 倒库(几何法直线倒车)。
- * 倒库不用航向外环:倒车时前轮打角对车尾是正反馈会发散,故方向物理回中
- *   (target_delta=0)+ 只开转角内环把方向盘按在中位 + 速度环给负速直倒,
- *   短距(1.4m)直线偏差可接受。
+ * 科目一 = 绕桩:START 键触发 kart_playback 前向复现现场手推的整条轨迹,
+ *   【倒车入库也在这条轨迹里】,不是单独一段代码 —— 见下面 S1_CONE_ROUTE。
+ *   所以科目一的阶段只有四个(等发车/复现/结束/故障,见 kart_mission.h),
+ *   没有"倒库阶段"这个东西。
+ * 【原来这里写的"倒库 = 几何法直线倒车、短距 1.4m 偏差可接受"已作废】那是
+ *   录轨复现之前的设计:自己算一段直线、方向物理回中、速度环给负速直倒。
+ *   现在倒车的打角是从录制点回放出来的,不再是"按在中位"。留这段话会让人
+ *   去找一个不存在的阶段。倒车段真正的控制在 kart_playback.c。
  */
 
 static kart_mission_mode_t   mission_mode  = MISSION_IDLE;
@@ -186,7 +190,9 @@ static void mission_enter(kart_mission_mode_t mode)
              * 返程都会切 use_back_gains),内环就还挂在 KP_BACK=5 上 —— 只有前进组
              * KP_DEFAULT=15 的 1/3,现象正是"舵机听得见响但推不动"(占空比出得来,
              * 克不住转向摩擦)。遥控源不犯这个病只是因为它进来前多半路过了
-             * kart_motion.c 里那十处 use_fwd_gains 之一,属于蒙对,不是有人管。
+             * kart_motion.c 里那 11 处 use_fwd_gains 之一(kart_playback.c 另有
+             * 3 处),属于蒙对,不是有人管 —— kart_remote.c 自己一次都不切增益组,
+             * 它拿到的永远是上一个动作留下的那一组。
              * 与 kart_motion.c 现有做法一致:谁要用哪组,自己进场时切。 */
             kart_steer_use_fwd_gains();
             kart_steer_set_head_enable(0);
@@ -619,7 +625,11 @@ static void subject3_vision_follow_tick(void)
     }
 
     /* 下发:打角给转向内环,速度给速度环。
-     * 单位:kart_follow 输出的 target_v_pulse 已经是"脉冲/5ms",与 kart_control 一致。 */
+     * 单位:kart_follow 输出的 target_v_pulse 已经是"脉冲/5ms",与 kart_control 一致。
+     * 【这里绕过了 kart_motion 的 motion_set_delta】那个包装会叠中位偏置
+     * MOTION_DELTA_CENTER_OFS。当前偏置是 0(kart_calib.h 的
+     * KART_STEER_CENTER_OFS),两条路等价;哪天重标出非零偏置,跟随段就会比
+     * kart_motion 的动作少补那一份。PLINK 源那边同样是直调。 */
     kart_steer_set_target_delta(fo->target_delta);
     kart_control_set_target(fo->target_v_pulse);
 
@@ -856,7 +866,15 @@ static void subject3_loop(void)
             kart_remote_control_update();
 #endif
 
-            /* 只有 START(P20.7) 下降沿才停止录制并开始倒车。
+            /* 【这一块实际进不来,别当成第二条发车路径】上面本拍开头已经调过一次
+             * subject1_start_pressed(),而它每次调用都写 subject1_start_key_last
+             * (见函数体),下降沿在第一次调用时就被吃掉了。要走到这里,按键沿得
+             * 正好落在同一拍这两次读之间的几微秒内 —— 现场发车全部走上面那个
+             * subject3_start_requested 锁存。
+             * 【那为什么不删】两处做的事完全一样(停录/点数<2 判故障/清打角/
+             * 启动开环倒车),留着无害,而删动的是发车路径,赛后不动。下面这些
+             * 注释仍然是有效的知识,只是描述的动作由上面那一支执行。
+             * 原注释:只有 START(P20.7) 下降沿才停止录制并开始倒车;
              * 车停住、视觉丢失和 MID 键都不再自动推进任务。 */
             if(subject1_start_pressed())
             {
@@ -990,7 +1008,15 @@ static void subject3_loop(void)
             break;
 
         case S3_SIGNAL:
-            /* 第三阶段:已回发车区,按语音口令做灯光/鸣笛。
+            /* 【当前编译配置下这一整个分支进不来】S3_FIXED_ACT_ENABLE 是 1,
+             * 而 subject3_stage = S3_SIGNAL 全工程只有一处,在上面
+             * #if !S3_FIXED_ACT_ENABLE 里(subject3_enter_signal),被编译掉了。
+             * 出厂流程是 倒车复现 → S3_FIXED_ACT(盲盒固定动作) → S3_FINISHED。
+             * 连带 kart_mission_set_mode 里那个 S3_HOLDS_VOICE_UART 判据也永远
+             * 为假 —— 科目三这条路根本没 acquire 过语音串口。
+             * 【保留原因】把 S3_FIXED_ACT_ENABLE 改回 0 就整段复活,这是规则要求
+             * "回发车区后按口令做灯光/鸣笛"的实现,省赛跑过。别删。
+             * 第三阶段:已回发车区,按语音口令做灯光/鸣笛。
              * 【不用 kart_voice_dispatch()】它会把门洞类(0x15~0x1E)和动作类
              * (0x1F~0x26)派发成 kart_playback / kart_motion —— 那会让已经完赛停稳的车
              * 重新开动。这里只放行灯光(0x04~0x0B)和鸣笛(0x0C~0x14),
