@@ -22,7 +22,9 @@ static uint8  record_running = 0;
  * 【为什么后来必须入 Flash】科目一从槽位载入后倒车半径明显大于手动、倒不进库:
  * kart_playback 倒车段的打角是开环回放 steer_buf[nearest] 的,过去这数组不进 Flash,
  * 载入路径后它还是上次录制的残留(冷启动即全 0)→ 打角只剩航向纠偏一项,而纠偏被
- * REV_CORR_MAX=400 计数钳死 → R=1480/400≈3.7m,手动满锁只要 1.32m。 */
+ * REV_CORR_MAX=400 计数钳死 → R=1480/400≈3.7m,手动满锁只要 1.39m
+ * (1480/1064,见 kart_calib.h 的 KART_STEER_MIN_RADIUS_M;原注释写的 1.32m 是
+ * 重标中位之前的值,已订正 —— 差距比原来还大一点,结论不变)。 */
 static int16 steer_buf[KART_RECORD_MAX_WAYPOINTS];
 static float dist_buf[KART_RECORD_MAX_WAYPOINTS];
 
@@ -140,6 +142,12 @@ void kart_record_poll(void)
     kart_odom_snapshot_t kart_odom;
 
     if(!record_running) return;
+    /* 【录满即静默停录】没有溢出标志也没有返回码:调用者只能看到
+     * kart_record_is_running() 从 1 变 0,与正常按键停录无法区分,现场唯一迹象是
+     * 点数恰好卡在 KART_RECORD_MAX_WAYPOINTS。1500 点 × 0.05m = 直线 75m 封顶,
+     * 弯道更短,而跟随段实测 65m —— 是够用但不宽裕,长路线要先加大那个宏。
+     * 【为什么不在这儿补个标志】赛后不动运行时行为;真要报,该在菜单那层显示
+     * 点数,而点数已经显示了。 */
     if(record_count >= KART_RECORD_MAX_WAYPOINTS)
     {
         record_running = 0;
@@ -211,7 +219,12 @@ uint8 kart_record_adjust_segment(uint16 center, uint16 radius, float dx, float d
 
         if(i == 0U) continue;                 /* 录制坐标原点必须保持 (0,0) */
         /* 倒车段实际按 kart_steer/dist/yaw 开环回放，不按 x/y 追踪。改它的坐标只会
-         * 让屏幕看起来变了、车辆动作却不变，因此红色倒车点明确锁住。 */
+         * 让屏幕看起来变了、车辆动作却不变，因此红色倒车点明确锁住。
+         * 【这里的门限比 kart_playback 判倒车的门限松 100 倍】本处 -0.02 脉冲/5ms,
+         * 而 kart_playback 要低于 KART_PLAYBACK_REV_SPEED_EPS = 2.0 才切开环回放。
+         * 于是 -2.0 ~ -0.02 这一段里的点:编辑器锁住不让拖,复现时却仍走 Pure
+         * Pursuit 当前进点。方向是安全的那一边(锁多了,不会把该锁的放过去),
+         * 所以只记不改。真要对齐就把本处改成引用那个宏,别再写字面量。 */
         if(0.5f * (record_buf[i].v_left + record_buf[i].v_right) < -0.02f)
             continue;
         d = (i > center) ? (uint16)(i - center) : (uint16)(center - i);

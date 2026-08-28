@@ -11,13 +11,31 @@
  * ------------------------------------------------------------------
  * 调用位置:
  *   kart_record_init()  —— cpu0_main.c 初始化段
- *   kart_record_poll()  —— 主循环(每拍检查阈值)
- *   kart_record_start/stop() —— VOFA 命令 r1/r0 触发
+ *   kart_record_poll()  —— 【10ms 一拍】cpu0_main.c:156 的 kart_task_10ms(),
+ *       紧跟在 kart_mission_poll() 后面。而且不是直调:中间隔着
+ *       kart_multicore_record_poll(),那个包装只在 runtime_enabled 为真时才把
+ *       活派给 CPU2 —— 该标志仅在 #if KART_MULTICORE_COMPAT_ENABLE 里被置 1,
+ *       宏是 0,所以出厂固件恒走 else 分支,poll 就在 CPU0 上原地跑。
+ *       采样阈值是【距离/转角】的,不是时间的,所以换拍率不改路径形状,
+ *       只改能跟上 0.05m 间距的最高车速(10ms 一拍、2m/s 时每拍走 2cm)。
+ *   kart_record_start/stop() —— 六处,都不是调试口:
+ *       start: kart_menu.c:2097、kart_mission.c:174
+ *       stop : kart_menu.c:2102、kart_mission.c:87、kart_mission.c:827、
+ *              kart_mission.c:883
+ *       【原来写的"VOFA 命令 r1/r0"已作废】调试口现在一处都不碰录制。
  * ------------------------------------------------------------------
- * 后续扩展:Flash 写入在 kart_record_flush_to_flash() 里做,
- *          IPS200 菜单调它保存/加载路线。
+ * Flash 持久化【已经做完了,不是后续扩展】:接口就是本文件下面的
+ * kart_record_save_to_flash() / kart_record_load_from_flash(),菜单已在调。
+ * 原来这里写的 kart_record_flush_to_flash() 全工程不存在,别去找。
  */
 
+/* 【容量上限值得先算一遍】1500 点 × 0.05m = 直线 75m 封顶;弯道里 2° 转角阈值
+ * 会额外花点,所以实际能录的路程只会比 75m 短。跟随段实测已经 65m,离顶不远。
+ * 【录满了会静默停录】kart_record_poll() 见 record_count 到顶就把 record_running
+ * 清 0 直接返回(kart_record.c 里那个 >= MAX_WAYPOINTS 分支),没有溢出标志、没有
+ * 返回码,kart_record_is_running() 只是从 1 变 0 —— 和正常停录一模一样,现场只能
+ * 靠"点数恰好停在 1500"这一个迹象判断。要录更长的路先加大本宏(RAM 在 cpu2_dsram,
+ * 三个数组按点数线性涨),不要靠放大距离阈值,那会直接牺牲路径精度。 */
 #define KART_RECORD_MAX_WAYPOINTS   (1500)
 #define KART_RECORD_DIST_THRESH     (0.05f)
 #define KART_RECORD_YAW_THRESH      (2.0f)
