@@ -883,7 +883,11 @@ static void kart_playback_poll_closedloop(void)
     /* 倒车速度:跟该点录制速度,S3 OLSpd 为上限。见 kart_playback_ol_target_v。 */
     kart_control_set_target(kart_playback_ol_target_v(k));
 
-    /* 诊断:CH20=航向误差(度) CH21=横向偏差(m) CH22=索引 k CH23=最终打角。
+    /* 诊断四路。【出厂 43 通道剖面(LOG_PROFILE_S3=1)下不是 CH20-23】那套编号
+     * 属于 51 通道剖面;43 通道里 CH20-23 是 left_meas / hue_pct / dark_pct /
+     * over_pct,按旧编号读会读到一堆摄像头统计量。实际落点(kart_debug_uart.c):
+     *   CH39=横向偏差 e_lat(m) CH40=索引 k CH41=最终打角 CH42=航向误差(度)
+     * 注意这个顺序与本函数写 cur/aim 的顺序不同,别按"CH39=航向误差"去读。
      * 判读:e_lat 应被压向 0;若持续单向增大就是 Ke 符号反了,菜单取负。 */
     playback_cur_x = head_err;
     playback_cur_y = e_lat;
@@ -968,7 +972,11 @@ static void kart_playback_poll_openloop(void)
             corr = 0.0f;
         }
 
-        /* 参考航向进 CH13,与 CH9(实测 yaw)直接对比。外环没开,这个字段只是显示用。 */
+        /* 外环没开,这个字段只是显示用 —— 而且现在【看不到】:
+         * playback_target_yaw 的 getter kart_playback_get_target_yaw() 全工程
+         * 没有调用者,真正上日志的是下一行 kart_steer_set_target_yaw() 存进转向
+         * 模块的那一份。它在 51 通道剖面是 CH13(可与 CH9 的实测 yaw 对比),
+         * 但出厂 43 通道剖面里没有这一路,实测 yaw 也挪到了 CH16。 */
         playback_target_yaw = ref_yaw;
         kart_steer_set_target_yaw(ref_yaw);
     }
@@ -984,8 +992,11 @@ static void kart_playback_poll_openloop(void)
     kart_control_set_target(kart_playback_ol_target_v(k));
 
     /* 诊断快照:开环无投影坐标,借 cur/aim 四通道。
-     * 关纠偏:CH20=倒退里程 d、CH21=剩余弧长 s、CH22=索引 k、CH23=最终打角;
-     * 开纠偏:CH20 改记航向误差、CH21 改记纠偏量(里程 d 可从 CH19 减起点得到),
+     * 【下面原来标的 CH20-23 是 51 通道剖面的编号,出厂 43 通道剖面上不对】
+     * 43 通道下这四个量落在 CH39/40/41/42(依次是 cur_y/aim_x/aim_y/cur_x),
+     * CH20-23 被摄像头统计量占着。通道表在 kart_debug_uart.c,别在这里记编号。
+     * 关纠偏:cur_x=倒退里程 d、cur_y=剩余弧长 s、aim_x=索引 k、aim_y=最终打角;
+     * 开纠偏:cur_x 改记航向误差、cur_y 改记纠偏量,
      *         这样一屏就能看清"误差有没有被压住"和"纠偏有没有顶到钳位"。 */
 #if PLAYBACK_OL_HEAD_EN
     playback_cur_x = head_err;
