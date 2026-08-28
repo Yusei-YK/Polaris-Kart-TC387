@@ -84,11 +84,11 @@ typedef enum
     PARAM_PB_REVCORR,      /* 倒车段航向纠偏钳位(计数)。倒车打角 =
                                  * 录制打角 + clamp(纠偏, ±本值)。
                                  * 【只管一处】前进复现里【夹着的】倒车段
-                                 * (kart_playback.c:477,靠录制速度符号判段)。
+                                 * (判段在 kart_playback_poll() 里,靠录制速度符号 rec_v < -KART_PLAYBACK_REV_SPEED_EPS;原注释写的 kart_playback.c:477 已对不上,改记函数名)。
                                  * 科目三那种"整段独立开环倒车"不看它 ——
                                  * 两条倒车路径(里程查表 / 位置闭环)都用死宏
                                  * PLAYBACK_OL_CORR_MAX=400,菜单调不动。
-                                 * 所以科四倒车拐不进去,调本项【没用】。 */
+                                 * 所以科三倒车拐不进去,调本项【没用】(原注释写的"科四"是笔误,本项目只有科目一/二/三)。 */
     PARAM_FLW_CRUZ,        /* 科目三跟随巡航速度(m/s)。原 FOLLOW_V_CRUISE_MS 死宏。
                                  * 【下限 0.65 不能再低】约束是
                                  * V_CRUISE x SLOW_MIN_RATIO(0.40) > V_MIN_MS(0.25),
