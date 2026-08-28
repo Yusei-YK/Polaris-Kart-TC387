@@ -5,7 +5,9 @@
 /*
  * IPS200 菜单系统（科目选择 + 语音控制 + 路线管理）
  * ------------------------------------------------------------------
- * 功能：取代 VOFA m 命令，通过屏幕菜单 + 五向按键完成科目切换、语音控制、
+ * 功能：取代 VOFA m 命令（当年那套单字母命令 m/r/w/z/f 现在整个 code/ 里
+ *       一处分发都没有了,所以下面各流程原本标的 m3/r1/r0/w<slot>/z/f<slot>
+ *       全部删掉,改成动作描述）,通过屏幕菜单 + 五向按键完成科目切换、语音控制、
  *       路线录制和复现准备。所有界面顶部固定显示状态栏（Yaw/遥控在线/挡位）。
  *
  * 交互：UP/DOWN 光标移动，MID 确认/开始录制/结束录制，KART_LEFT 返回上级。
@@ -23,25 +25,36 @@
  *   · 新增界面务必走 kart_menu.c 里的 ui_bar/ui_item（补空格到定宽），
  *     直接 ips200_show_string 写不定长串会留上一帧的尾巴。
  *
- * 菜单结构（3级）：
- *   [一级] Subject 1 / Subject 2
- *   [二级-科目一] Record / Playback / Enter Remote / Exit Remote
- *   [二级-科目二] Voice Control / Gate Recording / Back
+ * 菜单结构（最深四级,下面照 kart_menu.c 的 menu_level_t 和各 item 枚举写。
+ * 原注释写的"3级、一级只有 Subject 1/2"是加科目三、Camera、Settings 三页之前的
+ * 老结构,已订正）：
+ *   [一级] Subject 1 Slalom / Subject 2 Voice / Subject 3 Follow /
+ *          Camera Kart_Debug / Settings
+ *   [二级-科目一] Record Path / Playback Path / View Sampled Path /
+ *                 Enter Remote / Exit Remote
+ *   [二级-科目二] Voice A auto ret / Voice B RC ret / Gate Recording /
+ *                 Return Path / Back
+ *   [二级-科目三 / Camera] 各自一张实时页,没有子项列表(只有 level,没有 item 枚举)
  *   [三级-语音控制] 显示"Speak Command"，解析语音执行，按MID退出
- *   [三级-门洞录制] Record / Playback / Back
+ *   [三级-门洞录制 Gate Recording] Record / Playback / Back
+ *   [三级-返程录制 Return Path]    Record / Playback / Back
  *   [四级-门洞槽位] Gate1 Left / Gate1 / Gate2 / Gate3 / Gate3 Right
+ *   [四级-返程槽位] Ret1 Right / Ret1 / Ret2 / Ret3 / Ret3 Left
+ *   [Settings] 31 行 = 24 个参数 + 5 个分组标题 + 存 Flash + 恢复出厂。行表是
+ *     kart_menu.c 的 set_rows[],不按 param_id_t 下标铺;PARAM_MAX 是 25,少的
+ *     那一个是保留槽 PARAM_S1_REV_SPD,菜单里连显示都没有。
  *
  * 录制流程（科目一）：
- *   选"Record" → 进遥控(m3) → 屏显"Press MID to Start" → 用户遥控到起点 →
- *   按MID开始录制(r1) → 屏显录制点数实时刷新 → 按MID结束录制(r0) →
- *   弹出保存菜单（Slot1/Don't Save）→ 选槽位执行 w<slot> → 返回二级菜单。
+ *   选"Record" → 进遥控 → 屏显"Press MID to Start" → 用户遥控到起点 →
+ *   按MID开始录制 → 屏显录制点数实时刷新 → 按MID结束录制 →
+ *   弹出保存菜单（Slot1/Don't Save）→ 选槽位存进 Flash → 返回二级菜单。
  *
  * 录制流程（科目二门洞）：
  *   选Gate Recording → Record → 选门洞槽位(1~5) → 进遥控 → 录制 → 保存到对应槽位
  *
  * 复现流程：
  *   选"Playback" → 弹出槽位选择（显示[已录xxx点]/[Empty]）→
- *   选中后自动执行 z(清里程) + f<slot>(加载) + 退出遥控模式 →
+ *   选中后自动清里程 + 从 Flash 加载该槽 + 退出遥控模式 →
  *   等待 START 键触发 kart_playback（由 kart_mission.c 状态机处理）。
  *
  * 语音控制流程：
@@ -49,9 +62,14 @@
  *   开始解析语音(kart_voice_poll/dispatch) → 执行灯光/鸣笛/运动/门洞命令 →
  *   按MID退出返回二级菜单
  *
- * 槽位分配：
- *   科目一：槽位 0（Flash slot 0，1500点）
- *   科目二门洞：槽位 1~5（Flash slot 1~5，每槽1000点）
+ * 槽位分配（页数和容量都在 kart_flash.h,这里只记区间和真实点数;原注释写的
+ * "1500点 / 每槽1000点"是抹零的约数,而且整段漏了返程那五个槽）：
+ *   科目一：槽位 0（21 页,1534 点）—— 录制缓冲 KART_RECORD_MAX_WAYPOINTS 只有
+ *           1500 点,所以顶上 34 点余量用不到
+ *   科目二门洞去程：槽位 1~5（每槽 14 页,1022 点）
+ *   科目二返程：槽位 6~10（每槽 7 页,510 点）
+ *   【注意】一次录满的 1500 点装不进门洞槽的 1022 点,存路径失败/截断怎么表现
+ *   赛后没有实测过,门洞录制别一路录到底。
  *
  * 调用位置：
  *   kart_menu_init()       —— cpu0_main.c 初始化段（IPS200/按键 GPIO 初始化后）
@@ -86,8 +104,8 @@
 #define MENU_ENC_PEND_MAX  (8)
 
 /* -------------------- 槽位分配 -------------------- */
-#define KART_MENU_S1_SLOT_NUM   (1)             /* 科目一槽位数(Flash slot 0, 1500点) */
-#define KART_MENU_S2_GATE_SLOT_NUM (5)          /* 科目二门洞槽位数(Flash slot 1~5, 每槽1000点) */
+#define KART_MENU_S1_SLOT_NUM   (1)             /* 科目一槽位数(Flash slot 0, 1534点) */
+#define KART_MENU_S2_GATE_SLOT_NUM (5)          /* 科目二门洞槽位数(Flash slot 1~5, 每槽1022点) */
 #define MENU_S2_RET_SLOT_NUM  (5)          /* 科目二返程槽位数(Flash slot 6~10, 每槽510点) */
 
 /* -------------------- 对外接口 -------------------- */
