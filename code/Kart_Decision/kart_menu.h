@@ -58,7 +58,7 @@
  *   等待 START 键触发 kart_playback（由 kart_mission.c 状态机处理）。
  *
  * 语音控制流程：
- *   选"Voice Control" → 显示"Speak Command" → 调用kart_odom_reset()清零 →
+ *   选"Voice A auto ret 或 Voice B RC ret" → 显示"Speak Command" → 调用kart_odom_reset()清零 →
  *   开始解析语音(kart_voice_poll/dispatch) → 执行灯光/鸣笛/运动/门洞命令 →
  *   按MID退出返回二级菜单
  *
