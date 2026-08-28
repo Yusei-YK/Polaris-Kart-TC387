@@ -73,7 +73,12 @@ static kart_motion_goto_state_t motion_goto_state = KART_MOTION_GOTO_NONE;
 
 /* -------------------- 转角下发:唯一出口 --------------------
  * 全模块所有打角都必须走这里,统一叠转向中位偏置。
- * 实测"真正走直"的 delta 不在 0 而在约 -25(见 MOTION_DELTA_CENTER_OFS),
+ * 【当前偏置是 0,本函数等于直通】MOTION_DELTA_CENTER_OFS 引到 kart_calib.h 的
+ * KART_STEER_CENTER_OFS = 0.0f —— 2026-07-30 重标中位后新中值正好是硬限位
+ * 几何中点,左右软限对称 ±1064,不需要补。
+ * 【那也别删这个函数】重标出非零偏置的那天只改 kart_calib.h 一处、全模块跟随;
+ * 绕过它直接调 kart_steer_set_target_delta() 就漏一个偏置。
+ * 下面是重标之前(偏置约 -25)为什么必须补的记录,机制没变,只是值成了 0:
  * 不补的话所有【左右对称的动作】都会一边大一边小:
  *   转圈 ±950 变成 左975/右925 => 顺时针半径比逆时针大 7cm(用户实车观察到了);
  *   蛇形左右摆幅不等 => 整条轨迹净漂,收尾再修也压不住。
@@ -93,9 +98,10 @@ static float motion_yaw_err(void)
 }
 
 /* 航向修正打角(比例),本地算,【不动共享航向环 head_pid】。
- * 前进段也走这里(不再用 head_pid):head_pid 的输出被直接写进 target_delta,
- * 绕开 motion_set_delta 拿不到中位偏置,而且纯 P + 内环静摩擦死区叠起来
- * 会让小误差压根不修 —— 这就是"前行十米修的很少"的成因,详见 .h。
+ * 前进段也走这里(不再用 head_pid)。理由见 .h 的保向修正那节 —— 注意那节
+ * 已复核过:当年"绕开中位偏置 + 常驻 0.83° 落在死区里"那套算例随中位偏置
+ * 归零而作废,现在维持本地修正靠的是"head_pid 为科目一/四/遥控共用、不能为
+ * 科目二动它"加实车已跑通。别再复述作废的那套数。
  *
  * 符号推导(err = yaw0 - yaw):
  *   前进 Δyaw = +k*delta*Δs。err>0 表示车头还差 err 才回到目标,需要 Δyaw>0,
@@ -103,7 +109,7 @@ static float motion_yaw_err(void)
  *   后退 Δs<0,同一打角的航向变化整体反号 => delta = -KP*err = SIGN*KP*err。
  *   直接把前进那套用到倒车 = 正反馈,越倒越歪。
  * 【实车若发现越修越歪】只翻 MOTION_REV_YAW_SIGN,别动 KP。
- * 限幅后叠中位偏置仍远在软限位(+1103/-1048)内。 */
+ * 限幅后叠中位偏置仍远在软限位(对称 ±1064)内。 */
 static float motion_yaw_corr_delta(uint8 reverse)
 {
     float corr = MOTION_YAW_KP * motion_yaw_err();
@@ -611,10 +617,10 @@ uint8 kart_motion_start(uint8 voice_cmd)
         case KART_VOICE_CMD_FWD_10M:
             motion_speed = +KART_MOTION_SPEED;
             /* 【不用共享航向环 head_pid】改用本地保向修正,和倒车那条同一套。
-             * 原因(2026-07-26 实车"修的很少、后边走斜"):head_pid 的输出被直接
-             * 写进 target_delta、绕开 motion_set_delta 拿不到中位偏置;又是纯 P,
-             * 稳态必须站在 delta=-25 => 常驻航向误差 25/30≈0.83°,只要 25 计数,
-             * 而转向内环静摩擦死区是 63 计数 => 方向盘压根不动。详见 .h。 */
+             * 原因(2026-07-26 实车"修的很少、后边走斜")见 .h 的保向修正那节
+             * —— 那里已复核:原来"delta=-25 => 常驻 0.83° => 落在 63 计数死区里"
+             * 这套算例随中位偏置归零而作废。现在的理由是 head_pid 为科目一/四/
+             * 遥控共用不能动,加本地这套实车已跑通。 */
             kart_steer_use_fwd_gains();
             kart_steer_set_head_enable(0);
             kart_steer_set_angle_enable(1);
@@ -742,9 +748,11 @@ void kart_motion_update(void)
     {
         case MOTION_FWD:
             /* 【实车现象】原来这里靠共享航向环 head_pid 保向,结果"前行十米修的很少,
-             * 导致后边走斜了"。定因见 .h:head_pid 绕开中位偏置 + 纯 P 常驻 0.83° 误差,
-             * 而这点误差只要 25 计数,落在转向内环 63 计数的静摩擦死区里 => 不修。
-             * 现在改成和倒车同一套本地修正(用户已验证倒车稳),KP=25 让 2.5° 就出死区。 */
+             * 导致后边走斜了"。现象是真的;当年记的定因(常驻 0.83° 落在 63 计数
+             * 死区里)已随中位偏置归零而作废,见 .h 的保向修正那节。
+             * 【顺带纠一处】"KP=25 让 2.5° 就出死区"不是优点:63 计数 ÷ 25 是 2.5°,
+             * 而 head_pid 的 30 计数/度只要 2.1° —— 本地这套的死区角反而更大。
+             * 现在维持本地修正,靠的是 head_pid 不能为科目二调,以及实车已跑通。 */
             motion_set_delta(motion_yaw_corr_delta(0));
             if(dist >= KART_MOTION_FWD_DIST)
             {
@@ -754,7 +762,8 @@ void kart_motion_update(void)
 
         case MOTION_BACK:
             /* 【实车现象】原来这里每拍写死 target_delta=0,结果倒车十米朝左歪、
-             * 方向盘就停在偏的位置不修 —— 因为"真正走直"的 delta 不是 0 而是约 -25,
+             * 方向盘就停在偏的位置不修 —— 因为当时"真正走直"的 delta 不是 0 而是
+             * 约 -25(重标中位后这个值已是 0,下面是当时那笔账):
              * 常驻 25 计数偏角 => R≈60m,十米下来转 9°、横向偏 0.7m。
              * 前进那条没这个毛病,是因为它开了航向环把偏置吃掉了;倒车这条
              * 原本【完全没有任何航向反馈】,偏置就一路积出去。
