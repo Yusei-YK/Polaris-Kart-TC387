@@ -16,7 +16,7 @@
  *   beta 是目标方位角，L 是到目标的直线距离（视觉直接给出，不用估）。
  *   本车已标定 R(m) * |delta| = 1480（实车日志复核：顺时转1圈中位 1466、
  *   科一录制 1434、科目四测试 1455、科四测2 1453，四条日志散布 ~3%），
- *   （这三个是历史日志【文件名】，不随本次科目四→科目三改名而变）
+ *   （这四个是历史日志【文件名】，不随本次科目四→科目三改名而变）
  *   而 kappa = 1/R，于是
  *       delta = 1480 * kappa
  *   纯跟踪的好处是它天然含前馈：目标越近、越偏，打角越大，不需要靠积分
@@ -45,13 +45,16 @@
  *   默认 FIXED（先保证完赛），实车再试 SCALE 比较。
  *   两套都保留一个二值近距联锁当刹车，防人突然停下被顶。
  *
- * 【延迟预算（实测前的估算，接上硬件要用日志复核）】
+ * 【延迟预算（搬核前的估算，已作废，留作对照）】
  *       曝光+读出   33ms  (FPS_DEF=60, PCLK_DIV=2 → 实际 30FPS)
- *       调度相位    17ms  (10ms 任务平均等待 ~半个周期)
+ *       相位等待    17ms  (帧到达与 10ms 拍不同步，平均等半个相机帧 33/2)
  *       图像处理     3ms  (160x120 单趟扫描)
  *       合计       ~53-60ms
  *   1.5m/s 时对应 9cm 的位置滞后，占 1.5m 前视距离的 6%。
- *   结论：视觉链路不是跟随速度的瓶颈，不需要为了提速去动帧率。
+ *   【2026-08-15 起这段作废】视觉从 10ms 拍搬到 core3 之后，整条流水线约
+ *   360ms，上面的 3ms 只是扫描本身、不含核间投递与排队。视觉链路
+ *   现在正是跟随的主要滞后来源：同一帧的结果会被 10ms 拍连续读约 36 次，
+ *   凡是按帧设计的判据都必须走帧沿（见下面 NEAR_STOP_FRAMES）。
  *
  * 【速度：为什么上限定得比车的能力低】
  *   实车日志（mode=3 倒车复现）已经跑到 2.64 m/s 中位、2.76 m/s 峰值，
@@ -104,7 +107,7 @@
  *   人的眼睛和腿构成的"距离控制器"，带宽和可靠性都远超单目尺度估计。
  *
  *   所以纵向策略变成：
- *       车 = 固定巡航速度（FOLLOW_V_CRUISE_MS）
+ *       车 = 固定巡航速度（菜单 Flw Cruise，出厂值取 FOLLOW_V_CRUISE_MS）
  *       人 = 自己走快走慢，维持与车的距离
  *   横向仍然闭环（车必须自己对准人），因为方位角来自质心中值，
  *   是整条链里【最稳】的观测量，和 scale 完全不是一个可靠性等级。
@@ -154,8 +157,8 @@
 /*---------------------- 方案 FIXED 的参数 ----------------------*/
 /* 跟随段的巡航速度(m/s)。车恒定以此速度前进，不因视觉尺度变化而加减速。
  *
- * 取 1.0 m/s 的依据：
- *   成年人正常步速 1.2-1.4 m/s，快走 1.8 m/s。取 1.0 略低于正常步速，
+ * 取 1.10 m/s 的依据：
+ *   成年人正常步速 1.2-1.4 m/s，快走 1.8 m/s。取 1.10 略低于正常步速，
  *   这样人只需要"稍微放慢"就能维持距离，而不是被车追着必须快走 ——
  *   人在小心走路（要回头看车、要保持板子朝向镜头）时步速本来就会下降。
  *   宁可慢，稳定完赛优先。实车按队友的实际步速改这一个数。
@@ -168,8 +171,8 @@
  *   速度是小占空比堵转区（发热不出力，见 V_MIN_MS 处注释）。
  *   1.00 × 0.35 = 0.35 > 0.25，原来安全；
  *   1.10 × 0.40 = 0.44 > 0.25，不会跌进堵转区。
- *   而 FIXED 分支【没有】像 SCALE 分支那样的死区抬升（kart_follow.c:252
- *   那段在 #if SCALE 里），所以不能指望它兜底。
+ *   而 FIXED 分支【没有】像 SCALE 分支那样的死区抬升（那段在 kart_follow_update() 的
+ *   #if SCALE 分支里），所以不能指望它兜底。
  *   SLOW_MIN_RATIO 保持 0.40：1.10 × 0.40 = 0.44 > 0.25。
  *   以后再改巡航速度，先算这一乘。 */
 #define FOLLOW_V_CRUISE_MS         (1.10f)
@@ -221,12 +224,12 @@
  *   scale_r 约等于 0.04 × 框高px),所以 1px 量化噪声恒等于 0.04 的 scale_r,
  *   与距离无关。0.31 约合 7.8px,再收就要被量化噪声打穿。
  * 【必须两个一起改】只改 STOP 不改 RESUME,车停下后人得退更远才肯走。
- * 【比 kart_vtrack 那个档位高得多】那边 SCALE_NEAR_THRESH 是 1.10
+ * 【比 kart_vtrack 那个档位高得多】那边 VTRACK_SCALE_NEAR_THRESH 是 1.10
  *   (kart_vtrack.h:158),给"轻微靠近"用的,噪声碰得到;刹车这条要 1.67。
  *   宁可迟一点刹,也不要在正常跟随中途被噪声无故停住。
  * 【两条链的停车距离目前不一致】PLINK 那条 height 刹车路径用它自己的
  *   PLINK_SCALE_R_STOP = 2.19(kart_person_link.h:165),折算 1.50/2.19 = 0.69m,
- *   比本条的 0.90m 近 0.2m。PERSON_LINK_ENABLE 现在是 0(board_pins.h:176),
+ *   比本条的 0.90m 近 0.2m。PERSON_LINK_ENABLE 现在是 0(board_pins.h:177),
  *   开它之前先把这两个数对齐。 */
 #define FOLLOW_NEAR_STOP_R         (1.67f)
 #define FOLLOW_NEAR_RESUME_R       (1.36f)
@@ -311,6 +314,12 @@ typedef struct
 /* 复位。进入跟随任务前必须调，清掉上一次的丢失计数和速度状态。 */
 void kart_follow_reset (void);
 
+/* 告诉 kart_follow"本拍带来了一个新的视觉结果"。
+ * 必须在 kart_follow_update() 之前调,只对紧接着的那一次 update 生效(读后自清)。
+ * 不调也能跑:那时帧沿判据永不推进,NEAR_STOP 就永不锁存 —— 所以【本地视觉链路
+ * 必须调】。PLINK 链路(kart_person_link)目前不调,它的近距保护要另行处理。 */
+void follow_note_new_frame (void);
+
 /* 跑一拍控制律。10ms 周期调用，与 kart_camera_poll 同频。
  * kart_vtrack 传 kart_vtrack_get() 的结果（包含 bearing + scale_level + confidence）；
  * kart_vtrack->valid=0 时内部走丢失逻辑。
@@ -319,12 +328,6 @@ void kart_follow_reset (void);
  * 【2026-08-10 接口变更】原先传 kart_vision_result_t（Detector），
  * 现在传 kart_vtrack_result_t（Tracker）。Detector 只在 Reacquisition 时用，
  * 由状态机在 confidence < 阈值时低频调 kart_vtrack_reacquire(kart_vision_get())。 */
-/* 告诉 kart_follow"本拍带来了一个新的视觉结果"。
- * 必须在 kart_follow_update() 之前调,只对紧接着的那一次 update 生效(读后自清)。
- * 不调也能跑:那时帧沿判据永不推进,NEAR_STOP 就永不锁存 —— 所以【本地视觉链路
- * 必须调】。PLINK 链路(kart_person_link)目前不调,它的近距保护要另行处理。 */
-void follow_note_new_frame (void);
-
 const kart_follow_out_t *kart_follow_update (const kart_vtrack_result_t *kart_vtrack);
 
 /* 取最近一次的输出快照。 */
