@@ -383,11 +383,8 @@ static void menu_draw_main(void)
     ui_hint(" knob/UP/DN move  MID enter");
 }
 
-/* 参数一行:"光标 名字 值"。值按 meta.decimals 决定小数位,整数量(Vmax/Kp)不显示 .0。
- * 选中且在编辑态时光标变 '*',提示此刻 knob/UP/DN 改的是值不是光标。
- *
- * 名字用 %-11s 补到定宽:滚屏会让同一行换成另一个参数,名字短一截就会留下
- * 上一个名字的尾巴("Ramp Step"→"PB Prof" 剩个 'e')。 */
+/* 行号 → 屏幕 y。这里原先贴着一段"参数一行"的说明,与本宏无关:它讲的是
+ * menu_draw_param_row(),那个函数头上还有一份逐字节相同的,重复的一份已删。 */
 #define MENU_SET_ROW_Y(row)   ((uint16)(UI_Y_ROW0 + (row) * UI_ROW_H))
 
 /* -------------------- 参数此刻是否真的起作用 --------------------
@@ -395,9 +392,13 @@ static void menu_draw_main(void)
  * 起因:菜单里有一批"看着能调、实际不进任何计算"的项,现场照着调会白费一趟。
  * 逐条都是查过代码的,改代码时记得同步这里:
  *
- *  PB Scale/Vmax/Vmin/Alat/ABrake/RevScl —— 只在 kart_playback_build_profile() 里读,
- *      而该函数在 PB Prof<0.5 时开头就 return(kart_playback.c:97)→ 剖面关着时全灰。
- *      注意 Vmax 也在里面(kart_playback.c:89):剖面关着时限速只剩 PB Clamp 一道。
+ *  PB Scale/Vmax/Vmin/Alat/ABrake —— 只在 kart_playback_build_profile() 里读,
+ *      而该函数在 PB Prof<0.5 时开头就 return → 剖面关着时全灰。
+ *      注意 Vmax 也在里面:剖面关着时限速只剩 PB Clamp 一道。
+ *  PB RevScl —— 【这一行的灰显判据不准】它除了 build_profile 还有第二个读者
+ *      kart_playback_ol_target_v()(科目三开环倒车的目标速),那里不受 PB Prof 管。
+ *      所以剖面关着时它画成灰的,可科目三倒车速度仍被它缩放。判据没动(赛后
+ *      不改运行时行为),现场记住:调科目三倒车速度别管这行是不是灰的。
  *  S3 OL Ke —— 只在 poll_closedloop() 里读,出厂 S3 OLMode=0 走 openloop → 灰。
  *  PB Clamp —— 它是下发前最后一道闸,PB Vmax 是剖面内的天花板。
  *      Clamp ≥ Vmax 时永远轮不到它裁到东西(录制速度回放仍走它,故只在
@@ -824,7 +825,8 @@ static void menu_draw_camera(void)
         camdbg_col(CAMDBG_IMG_Y + 2 * UI_ROW_H, buf, UI_NUM);
 
         /* W 是标定 f_px 的唯一依据:卷尺量准 d,读 W,
-         * f_px = W * d / 0.31,回填 VISION_FPX。 */
+         * f_px = W * d / 0.33,回填 VISION_FPX。0.33 是 VISION_BOARD_W_M
+         * (kart_vision.h),原文写的 0.31 是换板之前的板宽,数已订正。 */
         sprintf(buf, "W%3d", v->width_px);
         camdbg_col(CAMDBG_IMG_Y + 3 * UI_ROW_H, buf, UI_NUM);
 
@@ -941,7 +943,9 @@ static void menu_draw_camera(void)
 
 #endif  /* CAMERA_ENABLE */
 
-/* ================== 科目三跟随实时画面(临时,测完删) ==================
+/* ================== 科目三跟随实时画面(出厂用的就是这一页) ==================
+ * 原标"临时,测完删" —— 但 PERSON_LINK_ENABLE 是 0,S3_FOLLOW_SRC 就取 VISION,
+ * 下面这个 #if 出厂编译进去了,整场比赛看的都是它,一直没删。
  * 只干一件事:把跟随当前用的那一帧和它认出的框显示出来,看识别对不对。
  *
  * 【不走 frame_ready / frame_release】跟随那一拍已经在消费帧了,菜单再取一次
@@ -950,7 +954,8 @@ static void menu_draw_camera(void)
  * 代价是偶尔一条撕裂缝(读到 DMA 正在写的半帧),不影响看框。
  * 框和数字取 kart_vision_get(),就是跟随真正用的结论,不另算一遍。
  *
- * 删除方法:删掉本函数 + menu_draw_s3_run 里那个 #if 分支,两处。 */
+ * 真要删:本函数 + menu_draw_s3_run 里的分支 + menu_poll_body 里那个每拍置
+ * need_repaint 的分支,一共 3 处(同一个 #if 条件)。删了现场就没有观察窗口。 */
 #if (S3_FOLLOW_SRC == S3_FOLLOW_SRC_VISION) && (CAMERA_ENABLE)
 static void menu_draw_s3_live(void)
 {
@@ -975,8 +980,9 @@ static void menu_draw_s3_live(void)
     sprintf(buf, "A%5u", (unsigned int)v->area_px);
     camdbg_col(CAMDBG_IMG_Y + 4 * UI_ROW_H, buf, UI_NUM);
 
-    /* 方位角和跟随下发的打角必须【反号】。同号就是 kart_follow.c:127
-     * 那个负号错了(一打就反向),立刻拨 SW3 到低挡停车。 */
+    /* 方位角和跟随下发的打角必须【反号】。同号就是 kart_follow_update() 里
+     * delta = -(KART_STEER_R_TIMES_DELTA * kappa) 那个负号错了(一打就反向),
+     * 立刻拨 SW3 到低挡停车。原注释指的 kart_follow.c:127 已不是那一行。 */
     sprintf(buf, " bear%+6.1f del%+6.0f",
             (double)(v->bearing_rad * 57.29578f),
             (double)kart_follow_get()->target_delta);
@@ -996,8 +1002,11 @@ static void menu_draw_s3_live(void)
  *
  * 【开销】四行定宽文本，约 1~2ms/拍（跟其他菜单页同量级），不清屏。
  * 不像 menu_draw_s3_live() 那样要 4ms 出图，所以这一页不是“测完删”的临时物。
+ * 但出厂 PERSON_LINK_ENABLE=0,本页整块没编译进去 —— 真正在跑的是上面那页。
  *
- * link 一列的含义与 VOFA CH39 完全一致（kart_debug_uart.c）：
+ * link 一列与 kart_debug_uart.c 里 PERSON_LINK 那档日志的 ch[39] 同义,但出厂档
+ * LOG_PROFILE_S3=1 的通道表里 CH39 是 kart_playback_get_cur_y();ch[39]=link 在
+ * 另一档的 #else 里,还要 PERSON_LINK_ENABLE=1 才编译,别对着出厂日志找它：
  *   0=一个字节没收到（线/波特率/4D7 没在发） 1=有字节但从未成帧（帧头或 CRC）
  *   2=曾通现失联（>200ms 无 VALID 帧）          3=在线
  * 现场先看这一位；0/1 是链路问题，2/3 才轮得到看跟随。 */
@@ -2235,7 +2244,8 @@ static void menu_scan_keys(void)
     if(key_left == 0 && key_left_last == 1)
         menu_handle_key_left_press();
 
-    /* RIGHT 只在摄像头调试页有用:准星【列】+1,撞到右边界回卷到 0。
+    /* RIGHT 有两处用途:摄像头调试页准星【列】+1(撞到右边界回卷到 0),
+     * 以及轨迹页编辑态沿 x 平移一段(见下面那条 else if)。
      * 【为什么不用编码器】原设计把列交给 EC11,但那个旋钮实测一直不好用
      * (2026-08-13 确认),等于取样点根本挪不动,取色标定做不下去。
      * 二维准星必须有两个输入件,而五向只剩 RIGHT 空着 —— KART_LEFT 是返回、
@@ -2320,9 +2330,12 @@ static void menu_scan_keys(void)
     key_start_last = key_start;
     enc_sw_last = key_esw;
 
-    /* RIGHT(P21.7)刻意不绑动作:新板它可用,但"右=进入"与 MID 重复,
-     * 而误触"进入"会直接执行菜单项(发车/擦写 Flash),不如留空。
-     * 需要时把它接到 menu_handle_key_mid_press 即可(记得加 key_right_last)。 */
+    /* RIGHT(P21.7)没绑"进入":与 MID 重复,而误触"进入"会直接执行菜单项
+     * (发车/擦写 Flash)。要接就接到 menu_handle_key_mid_press(记得加
+     * key_right_last)。
+     * 但它并非全无动作 —— 上面 menu_key_hold_fire(key_right) 已经把它接到摄像头
+     * 页的准星列和轨迹页的平移,只是不做菜单导航。原注释写的"刻意不绑动作"是
+     * 加那两处之前的说法。 */
 }
 
 void kart_menu_init(void)
@@ -2429,7 +2442,7 @@ void kart_menu_input_poll(void)
 
 static void menu_poll_body(void)
 {
-    /* 语音收帧/分发已交给 subject2_loop 独占(进 Voice Control 会切 MISSION_SUBJECT_2)。
+    /* 语音收帧/分发已交给 subject2_loop 独占(进 Voice A/B 会切 MISSION_SUBJECT_2)。
      * 此处不再调 kart_voice_poll/dispatch,避免与 subject2_loop 双份分发抢同一队列。
      * 按键/旋钮采样已搬到 10ms 拍的 kart_menu_input_poll,这里只负责画。 */
 
@@ -2517,14 +2530,15 @@ static void menu_poll_body(void)
         repaint_row_only = 0;
     }
 
-    /* 科目三跟随实时画面(临时,测完删)。理由同上:内容自己会变,不主动置标志
+    /* 科目三跟随实时画面(出厂用的就是它,见 menu_draw_s3_live)。理由同上:内容自己会变,不主动置标志
      * 就只在按键时更新一格,那不是预览而是单帧抓拍 —— 而这一页存在的唯一目的
      * 就是看识别对不对。
      * 【与上面那页不同,这里车是自己在动的】所以只放开跟随阶段这一个阶段:
      *   倒车阶段 kart_playback_is_running() 在上面已经 return 了,本来就轮不到;
      *   S3_SIGNAL/FINISHED 车已停机,由换页那次画出即可。
      * 只置 need_repaint 不置 need_clear:ips200_clear 整屏十几 ms,既闪又会
-     * 落在车正跑的时候。代价仍在:出图约 4ms 插进 50ms 拍,测完删掉本块。 */
+     * 落在车正跑的时候。代价仍在:出图约 4ms 插进 50ms 拍 —— 原打算"测完删掉
+     * 本块",赛后没删,整场就靠这一页看识别对不对。 */
 #if (S3_FOLLOW_SRC == S3_FOLLOW_SRC_VISION) && (CAMERA_ENABLE)
     if(current_level == MENU_LEVEL_S3_RUN
        && kart_mission_get_subject3_stage() == S3_PHASE1_FOLLOW)
@@ -2535,6 +2549,7 @@ static void menu_poll_body(void)
 #elif (S3_FOLLOW_SRC == S3_FOLLOW_SRC_PLINK)
     /* PLINK 页同样要每拍刷（link/bear/h 都是自己在变的量），但它只有四行
      * 定宽文本、不出图，1~2ms/拍，比视觉那页的 4ms 出图轻，不是“测完删”的临时块。
+     * 不过出厂 PERSON_LINK_ENABLE=0,整块没编译 —— 跑的是 VISION 那一支。
      * 同样只放开跟随阶段：倒车阶段 kart_playback_is_running() 已在上面 return。 */
     if(current_level == MENU_LEVEL_S3_RUN
        && kart_mission_get_subject3_stage() == S3_PHASE1_FOLLOW)
