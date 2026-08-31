@@ -165,7 +165,7 @@ void read_IMU(sSensorData *sd){
 }
 
 /* =========================== Madgwick 6DOF 姿态更新 =========================== */
-/* 移植自 IMU.c MadgwickAHRSupdateIMU()——核心算法,一字不改照搬。
+/* 移植自 IMU.c MadgwickAHRSupdateIMU()——核心算法照搬,只动了积分步长和有限值保护。
  * 干的事:用陀螺积分预测四元数变化率,再用加速度计(重力方向)做梯度下降修正,
  *         最后积分 + 归一化,得到这一帧的姿态四元数。跑一次约 5us。 */
 void MadgwickAHRSupdateIMU(sSensorData *sd) {

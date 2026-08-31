@@ -6,11 +6,18 @@
 /*
  * 卡丁车航向解算库(IMU660RA + Madgwick 6DOF)
  * ------------------------------------------------------------------
- * 姿态算法参考 TopSpeed，传感器读数按本车 IMU660RA 重新适配。
- * 移植原则:数学部分一字不改照搬。相对原工程做了三处"减法":
+ * 姿态算法参考 TopSpeed；送进算法前的二阶巴特沃斯前置滤波照搬 NEUQ 开源
+ * 惯导(知乎 Morever)；传感器读数按本车 IMU660RA 重新适配。
+ * 移植原则:先照搬,再按本车实测改。相对原工程做了三处"减法":
  *   1. 砍掉 Subject 发射方向偏置(科目一以后再加,现在只要纯 yaw)
  *   2. 砍掉撞击检测、自由落体检测(卡丁车用不上)
  *   3. 零偏标定不写 Flash、不刷 IPS 屏,只算到内存里(先跑起来)
+ * 又做了两处"加法",都在 MadgwickAHRSupdateIMU() 里面:
+ *   1. 四元数积分改用实测步长 g_imu_dt,不再用硬编码 1/sampleFreq
+ *      (kart_imu.c:237),中断抖动时积分才不偏
+ *   2. 加了 NaN/Inf 复位保护(kart_imu.c:252),一次异常输入
+ *      不会永久污染航向
+ * 另外 read_IMU() 的均值滤波换成了二阶巴特沃斯(陀螺 7.5Hz、加速度 35.0Hz)。
  * 结构体名、字段名尽量与 TopSpeed 保持一致,方便以后接科目状态机。
  * ------------------------------------------------------------------
  * 硬件:IMU660RA 挂 SPI_0,引脚见 board_pins.h / 逐飞库 zf_device_imu660ra.h。
@@ -84,7 +91,9 @@ void read_IMU(sSensorData *sd);         // 读一帧并换算单位
 void get_IMU_RAW(IMU_data_RAW_struct *data);        // 读原始寄存器 + 去零偏 + 换算
 void MadgwickAHRSupdateIMU(sSensorData *sd);        // Madgwick 6DOF 姿态更新
 
-/* TF卡运行日志使用的只读诊断量，不参与姿态反馈。 */
+/* 只读诊断量,不参与姿态反馈。读者是 VOFA 波形通道:
+ * yaw_rate_dps 走 CH11/CH18、dt_us 走 CH24(见 kart_debug_uart.c);
+ * yaw_bias_dps 和 acc_norm_g 目前没有任何读者,留着排零偏/振动时手接。 */
 float kart_imu_get_yaw_rate_dps(void);
 float kart_imu_get_yaw_bias_dps(void);
 float kart_imu_get_acc_norm_g(void);
