@@ -22,8 +22,12 @@
  *      左右原始计数分辨率不同,必须先分别换算成米,不能直接平均脉冲。
  *   2. KART_ODOM_YAW_SIGN:IMU yaw 正方向与坐标系是否一致(+1/-1)。
  * ------------------------------------------------------------------
- * 调用位置:kart_odom_update() 放 5ms 定时中断里,紧跟 kart_imu_update()
- *          和 kart_encoder_update() 之后。本模块只读编码器累计和,
+ * 调用位置:5ms 定时中断(cc60_pit_ch0_isr)的第 71 行,
+ *          在航向(:69)与速度环(:70)之后。
+ *          中断里调的是包装函数 kart_multicore_odom_update(),
+ *          多核运行时关闭时它内联 kart_odom_update();编码器累计和由
+ *          kart_control_speed_update() 的第一句 kart_encoder_update()
+ *          (kart_control.c:73)在同一拍更早刷新。
  *          绝不调用 kart_encoder_update()(那会偷走计数、搞坏速度环)。
  */
 
