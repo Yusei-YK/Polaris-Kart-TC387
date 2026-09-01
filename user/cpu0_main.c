@@ -97,7 +97,7 @@ static void kart_task_5ms(void)
  *   灯光命令 != OFF 时灯板图案优先,不发模式号,否则两边 100ms/10ms 交替抢屏。
  *   回 OFF 后 100ms 拍自然把模式号写回去。 */
 /* 位序适配:两个模块的列位约定是相反的,必须在这里翻转,否则图案左右镜像
- *   kart_light.h  : bit14 = col0(最左) ... bit0 = col13(最右)
+ *   kart_light.h  : bit14 = col0(最左) ... bit0 = col14(最右)
  *   show_frame()  : bit0  = C0 (最左) ... bit14 = C14(最右)
  * 左右转向箭头一旦镜像就是反向指示,属于评分错误,所以这层不能省。
  * 若实机发现整体还是左右颠倒,把 LIGHT_MIRROR_COL 改成 0 即可。 */

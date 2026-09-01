@@ -6,11 +6,15 @@
  * 卡丁快跑灯板逻辑层
  *
  * 本模块负责把比赛灯光命令转换成 7x15 单色点阵帧，不直接初始化 UART、
- * TLD7002、SYNC 中断或行选 GPIO。硬件接线确认后，由底层扫描驱动读取
- * kart_light_get_row() 和 kart_light_get_brightness() 完成实际显示。
+ * TLD7002、SYNC 中断或行选 GPIO。实际显示由 user/cpu0_main.c 的
+ * kart_task_light_10ms() 取帧,经点阵层 dot_matrix_screen_show_frame() 下发。
  *
  * 点阵坐标约定：row=0 为最上行，col=0 为观察者看到的最左列；
  * kart_light_get_row() 返回值中的 bit14 对应 col0，bit0 对应 col14。
+ * 【注意】点阵层 dot_matrix_screen_show_frame() 的列位约定与此相反
+ * (它的 bit0 是最左列)，帧必须先过 cpu0_main.c 的
+ * kart_light_bits_to_dot() 翻转。左右箭头一旦镜像就是反向指示，
+ * 属于评分错误，这层不能省。
  *
  * 推荐调用流程：
  *
@@ -23,15 +27,15 @@
  *
  *      kart_light_set_command(KART_LIGHT_CMD_LEFT_TURN);
  *
- * 3. 在主循环或 5ms 周期任务中推进动画。参数必须是两次调用之间实际
+ * 3. 在主循环或周期任务中推进动画。参数必须是两次调用之间实际
  *    经过的毫秒数，函数内部不会阻塞，也不会调用 delay：
  *
- *      void app_task_5ms(void)
+ *      void app_task_10ms(void)
  *      {
- *          kart_light_update(5U);
+ *          kart_light_update(10U);
  *      }
  *
- * 4. 底层 TLD7002 扫描驱动在开始一轮 7 行扫描前复制完整帧，并读取亮度：
+ * 4. 消费方在下发一帧之前复制完整帧，并读取亮度：
  *
  *      uint16 scan_rows[KART_LIGHT_ROW_NUM];
  *      uint16 brightness;
@@ -39,9 +43,10 @@
  *      kart_light_copy_frame(scan_rows);
  *      brightness = kart_light_get_brightness();
  *
- *    随后由底层驱动把 scan_rows[0]~scan_rows[6] 和 brightness 转换为
- *    TLD7002 所需的数据时序。不要在行扫描中途再次复制帧，否则一轮扫描
- *    可能同时出现前后两个动画画面。
+ *    随后把 scan_rows[0]~scan_rows[6] 和 brightness 交给点阵层。
+ *    2026-07-26 起行扫描时基是 1ms PIT 软扫(见 zf_device_dot_matrix_screen.h
+ *    的 DOT_MATRIX_SCREEN_USE_PIT_SCAN，原 TLD7002 SYNC 整形链实测不出波)，
+ *    所以不要在一轮扫描中途再次复制帧，否则同一屏会出现前后两个画面。
  */
 
 #define KART_LIGHT_ROW_NUM              (7U)
@@ -97,12 +102,14 @@ uint16               kart_light_get_brightness  (void);
 
 /*
  * 使用距离上次调用实际经过的毫秒数推进动画。
- * 本函数不阻塞且不包含 delay，建议由主循环或周期任务每 5ms 调用一次。
+ * 本函数不阻塞且不包含 delay，当前由 10ms 拍调用(cpu0_main.c 传
+ * 2U * KART_MAIN_LOOP_PERIOD_MS)。
  */
 void                 kart_light_update          (uint16 elapsed_ms);
 
 /*
  * 返回指定点阵行的 15 位像素数据，row 的有效范围为 0~6。
+ * 供调试和单元测试单行取值用；正式流程走 kart_light_copy_frame()。
  * bit14 是最左侧像素，bit0 是最右侧像素；行号越界时返回 0。
  */
 uint16               kart_light_get_row         (uint8 row);
