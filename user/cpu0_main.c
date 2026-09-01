@@ -383,8 +383,9 @@ int core0_main(void)
         kart_mission_set_mode(MISSION_FAULT);
     }
 
-    /* SBUS 枪式遥控接收(UART3,P15.7 RX)。第一版只解析+失联计数,只上 VOFA 观测,
-     * 不接管电机/转向(见 kart_remote.h 安全红线)。 */
+    /* SBUS 枪式遥控接收(UART3,P15.7 RX)。解析 + 失联计数 + VOFA 观测,
+     * 接管由 kart_mission 在遥控模式下调 kart_remote_control_update()
+     * 落地(见 kart_remote.h 安全红线的三条不变量)。 */
     kart_remote_init();
 
 #if KART_USE_MENU
