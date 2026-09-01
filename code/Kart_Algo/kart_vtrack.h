@@ -1,6 +1,9 @@
 /*********************************************************************************************************************
  * 文件名称  kart_vtrack
- * 所属分层  Kart_Algo（纯算法层：不碰硬件、可脱离板子在 PC 上单测）
+ * 所属分层  Kart_Algo。算法本身是纯数学,但本文件第 72 行 include 了
+ *           zf_common_headfile.h,kart_vtrack.c 又用 #pragma section all
+ *           "cpu0_dsram" 给金字塔定段,两条都是 AURIX/TASKING 专有 ——
+ *           要在 PC 上单测得先补类型垫片、去掉 pragma,不能直接编。
  * 功能说明  视觉跟踪：多特征 LK 光流 + forward-backward 一致性 + 中值 scale → 方位角 + 距离等级
  *
  * 【为什么必须有它：Detector 设定可靠性上限，Tracker 决定实际帧率】
@@ -10,8 +13,20 @@
  *       1) 重检代价高（全图扫描 + 连通域 + 门限判定），30FPS 全跑必然挤占控制拍；
  *       2) 颜色本身不稳定（曝光/阴影/遮挡/同色干扰），连续好帧率做不到 100%，
  *          丢一帧就让速度/转向指令跳变，车会抖。
- *   所以架构上必须：Detector 低频建锚（如 3Hz），Tracker 高频（30Hz）维护特征点集，
- *   Detector 只设可靠性天花板（颜色不对根本认不出来），Tracker 才是决定实际帧率的那层。
+ *   所以架构上必须:Detector 低频建锚(如 3Hz),Tracker 高频(30Hz)维护特征点集,
+ *   Detector 只设可靠性天花板(颜色不对根本认不出来)。
+ *
+ * 【当前接入状态:这套 LK Tracker 最终没有上车】
+ *   kart_vtrack_init() 确实在 user/cpu0_main.c:295 调了,但
+ *   kart_vtrack_update() 全工程只有 kart_bench.c 两个调用点(B9/B12),两处
+ *   都包在 #if BENCH_ENABLE 里,而 BENCH_ENABLE=0,且
+ *   kart_bench_run_one/_all 自己也零调用者 —— 下面这套 LK 一拍都没真跑过。
+ *   真正上车的是【本文件定义的 kart_vtrack_result_t 这个数据结构】:
+ *     - 科目三:kart_mission.c 的 s3_vision_to_vtrack() 拿颜色 Detector 的
+ *       bearing + dist_m 合成一个 result;
+ *     - 人体跟随:kart_person_link_vtrack() 由 PLINK 链路合成。
+ *   两条都直接喂 kart_follow_update()。也就是说 kart_follow 那三档死区的
+ *   语义是照本文件设计的,但产生这些量的不是下面的 LK/FB/MAD。
  *
  * 【为什么是 LK 而不是模板匹配/直方图反投影/Kalman 预测】
  *   模板匹配对旋转/缩放/光照变化全不鲁棒，板子一侧身模板就对不上；
@@ -57,10 +72,11 @@
  *   - valid：本帧有效标志。无效时 kart_follow 走丢失减速逻辑。
  *
  * 【Detector 与 Reacquisition 的分工】
- *   本模块不含 Detector 实现 —— Detector 就是 kart_vision（颜色分割），
- *   已经存在、已验证过。本模块通过 kart_vtrack_reacquire(vis_result) 接受
- *   Detector 的锚定：从 bbox 里均匀撒点、提特征、建参考尺度。
- *   低频调用（如 3Hz 或仅在 confidence < 阈值时调），Detector 设可靠性上限。
+ *   本模块不含 Detector 实现 —— Detector 就是 kart_vision(颜色分割),
+ *   已经存在并验证过。本模块留了 kart_vtrack_reacquire(vis) 接受 Detector
+ *   的锚定:从 bbox 里均匀撒点、提特征、建参考尺度。
+ *   【但这个函数全工程零调用者】"低频调用、Detector 设可靠性上限"是设计
+ *   意图,不是已发生的事实。
  *
  * 修改记录
  * 日期              作者                备注
@@ -72,7 +88,9 @@
 #include "zf_common_headfile.h"
 #include "kart_vision.h"
 
-/* 总开关 */
+/* 总开关。【注意】除了下面这两行自己,全工程没有任何代码读这个宏,
+ * kart_vtrack.c 里也没有 #if VTRACK_ENABLE —— 改成 1 不会多编出任何东西。
+ * 真正决定 LK 跑不跑的是 kart_bench.h 的 BENCH_ENABLE(当前 0)。 */
 #ifndef VTRACK_ENABLE
 #define VTRACK_ENABLE              (0)
 #endif
@@ -91,9 +109,13 @@
 
 /*=========================== 特征点管理 ===========================*/
 /* 最大跟踪点数。越多越鲁棒，但线性增加计算量。
- * 取 32：每点双向 LK（forward + backward）约 200 次迭代 × 2，
- * 再加梯度 + 插值，单点约 0.1-0.15ms，32 点 ≈ 4ms，留给 Detector 和
- * 其它任务约 6ms（10ms 总预算 - 4ms）。存活率按 70% 估，稳态约 22 点在跟。 */
+ * 取 32:每点双向 LK,单方向最坏 VTRACK_PYRAMID_LEVELS(2) ×
+ * VTRACK_LK_MAX_ITER(20) = 40 次迭代,双向 80 次;每次迭代扫 11x11 = 121 个
+ * 窗口点,每点 6 次双线性插值(I_prev / I_curr / ±x / ±y 梯度)。
+ * 存活率按 70% 估,稳态约 22 点在跟。
+ * 【耗时从未实测】原来这里按"视觉跑在 CPU0 的 10ms 拍里"估了个 4ms;
+ * 2026-08-15 视觉整条流水线搬到 core3(见 kart_preprocess.h),那个预算前提
+ * 已经不成立,而 B9 基准从没跑过,所以板上真实耗时至今未知。 */
 #define VTRACK_MAX_POINTS          (32)
 
 /* Reacquire 时在 bbox 内撒点的策略。均匀网格，行列数各 N_SIDE。
@@ -117,7 +139,8 @@
 #define VTRACK_LK_WIN_RADIUS       (5)
 
 /* LK 迭代收敛判据：位移增量(dx² + dy²) < EPS² 时停止。单位像素。
- * 0.01 → 子像素精度 0.1px，对 1.5m 处 f_px=211 来说角度精度 ~0.03°，
+ * 0.01 → 子像素精度 0.1px。按 kart_vision.h 现在的 VISION_FPX(83.5f)算,
+ * 角度精度 ~0.07°(原文写的 f_px=211 对不上,数已订正,结论不变),
  * 足够。再小迭代次数暴涨，收益递减。 */
 #define VTRACK_LK_EPS              (0.01f)
 
@@ -199,16 +222,24 @@ typedef struct
 
 /*======================================== 对外接口 ========================================*/
 
-/* 初始化。分配金字塔内存（cpu0_dsram），清空点集。
- * 必须在 kart_camera_init() 之后、第一次调 update 之前调用。 */
+/* 初始化。清空点集、帧计数、置信度。
+ * 【不分配任何内存】金字塔 pyr_L0/pyr_L1 是 kart_vtrack.c 的 static 数组,
+ * 由该文件顶部的 #pragma section all "cpu0_dsram" 在链接期定段;本函数既不
+ * 申请也不清零金字塔(第一帧 build_pyramid 会整幅写满)。
+ * 本函数不碰摄像头,与 kart_camera_init() 没有先后依赖;唯一的约束是要在
+ * 第一次 kart_vtrack_update() 之前调。当前在 user/cpu0_main.c:295。 */
 void kart_vtrack_init (void);
 
-/* 单帧更新。img 指向当前帧 RGB565（w×h，行优先），与 kart_vision_process 同源。
+/* 单帧更新。img 指向当前帧 RGB565(w×h,行优先),w/h 必须正好 VTRACK_L0_W/H,
+ * 否则把快照置无效后原样返回。全工程唯一的调用点是 kart_bench.c 的 B9/B12,
+ * 喂的是 fake_img_rgb565 假图,并不是 kart_vision_process 那一路真帧。
  * 内部：RGB→灰度 → 建金字塔 → 对所有存活点做双向 LK → FB 一致性检查 →
  *       MAD 剔除 → 中值 scale → 质心方位角 → 更新 confidence。
  * 纯计算、不阻塞、不改全局状态（金字塔和点集是本模块私有）。
  * 返回值同时写入内部快照，可用 kart_vtrack_get() 再取。
- * 预估耗时：32 点双向 LK + 梯度 ≈ 4-5ms @ 300MHz。 */
+ * 【耗时未实测】4-5ms @ 300MHz 是 2026-08-10 的纸面估算,B9 基准没跑过。
+ * valid=1 的门槛有两条,上面没写全:存活点数 >= VTRACK_MIN_ALIVE_POINTS(8)
+ * 且 confidence >= 50(kart_vtrack.c 里的字面常数,没有对应的宏)。 */
 const kart_vtrack_result_t *kart_vtrack_update (const uint16 *img, int16 w, int16 h);
 
 /* 取最近一次的输出快照 */
@@ -217,15 +248,16 @@ const kart_vtrack_result_t *kart_vtrack_get (void);
 /* Reacquisition：接受 Detector（kart_vision）的锚定结果，在 bbox 内重新撒点。
  * vis 传 kart_vision_get() 的结果；若 vis->valid=0 则什么都不做。
  * 调用时机：
- *   1) 首次起跟：kart_follow 进入 TRACKING 状态时必须调一次，建立初始点集；
- *   2) 置信度过低：confidence < 阈值（如 100）时低频调（如 3Hz），重新锚定；
- *   3) 完全丢失后重捕获：valid=0 持续一段时间、然后 Detector 又认到了。
- * 【不要每帧都调】：Reacquisition 会清空当前点集重来，丢掉帧间连续性，
+ * 调用时机(以下是设计意图;本函数当前零调用者,三条都没有真正发生):
+ *   1) 首次起跟:kart_follow 进入 TRACKING 状态时调一次,建立初始点集;
+ *   2) 置信度过低:confidence 低于阈值(如 100)时低频调(如 3Hz),重新锚定;
+ *   3) 完全丢失后重捕获:valid=0 持续一段时间、然后 Detector 又认到了。
+ * 【不要每帧都调】:Reacquisition 会清空当前点集重来,丢掉帧间连续性,
  * 只在必要时用它校准 LK 的累积漂移。 */
 void kart_vtrack_reacquire (const kart_vision_result_t *vis);
 
 /* 复位。清空点集、重置 confidence、帧计数归零。
- * 进入/退出跟随任务时调，避免用到上一次跑车的残留点。 */
+ * 设计上在跟随任务切换时调用,避免用到上一次跑车的残留点;实际零调用者。 */
 void kart_vtrack_reset (void);
 
 #endif
