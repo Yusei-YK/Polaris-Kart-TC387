@@ -88,7 +88,7 @@ float get_distance(GPS_local_Point_struct now, GPS_local_Point_struct aim);     
 /* --- 角度差,处理 ±180 突变(GPS.c) --- */
 float get_relative_angle(float now, float aim);                                 // aim-now,规整到 [-180,180]
 
-/* --- 直线相关(GPS.c) --- */
+/* --- 直线相关(GPS.c)。以下三个目前无调用者,备用件,详见 kart_calc.c --- */
 straight_line_struct draw_straight_line(GPS_local_Point_struct start, GPS_local_Point_struct end);      // 由两点造直线
 float point_to_straight_line_distance(straight_line_struct line, GPS_local_Point_struct Point_2D);      // 点到直线带符号垂距
 int   get_point_to_line_dir(straight_line_struct line, GPS_local_Point_struct Point_2D);                // 点在直线哪一侧(+1/-1)

@@ -11,7 +11,9 @@
  * ------------------------------------------------------------------
  * 移植自 TopSpeed 的 Calcustom.c / GPS.c,函数体一字不改照搬,
  * 仅把原工程的 GBK 乱码注释换成干净中文。
- * 这些函数全是纯数学,不依赖任何硬件,可在 PC 上单独测试。
+ * 这些函数全是纯数学,不调用任何硬件外设;但 kart_calc.h 第 3 行 include 了
+ * zf_common_headfile.h,uint32_t / uint8_t 都来自它,所以要在 PC 上单测
+ * 得先补一层类型垫片,不能直接编。
  * ------------------------------------------------------------------
  */
 
@@ -75,9 +77,11 @@ EulerAngles quaternionToEuler(QUAT q) {
 /* =========================== 两点方位角 =========================== */
 /* 移植自 GPS.c
  * 返回:从 now 指向 aim 的方位角(度,-180~180)
- * 注意 atan2f 的参数顺序是 (x差, y差),因为这里 y 轴朝北当 0 度基准 */
+ * 参数顺序是 atan2f(x差, y差):y 轴朝北,当 0 度基准。
+ * 前面那个负号是有意的 —— 加上以后正北 = 0°、正东 = -90°,
+ * 即航向逆时针为正,与 kart_odom 的 dx=-sin(yaw)*ds / dy=+cos(yaw)*ds 自洽。 */
 float get_angle(GPS_local_Point_struct now,GPS_local_Point_struct aim){
-    return -rad_to_degree(atan2f(aim.x-now.x, aim.y-now.y));  // 用 atan2 求角度,注意 y 在前
+    return -rad_to_degree(atan2f(aim.x-now.x, aim.y-now.y));  // 负号见上:正东 -90°,x 差在前
 }
 
 /* =========================== 两点欧氏距离 =========================== */
@@ -118,8 +122,11 @@ straight_line_struct draw_straight_line(GPS_local_Point_struct start,GPS_local_P
 
 /* =========================== 点到直线的带符号垂距 =========================== */
 /* 移植自 GPS.c
- * 返回:点到直线的垂直距离,带符号(从起点看向终点,右侧为正)
- * 符号靠 get_relative_angle 判方向,这样距离环 PID 知道往哪边打方向 */
+ * 返回:点到直线的垂直距离,带符号(从起点看向终点,右侧为正,已数值核对)
+ * 符号靠 get_relative_angle 判方向。
+ * 【注意】本函数连同 draw_straight_line / get_point_to_line_dir
+ * 目前全工程没有任何调用者,是照搬 TopSpeed 时一起带过来的备用件;
+ * 循迹走的是 kart_playback 的 Pure Pursuit,不用点到直线距离。 */
 float point_to_straight_line_distance(straight_line_struct line,GPS_local_Point_struct Point_2D){
     float dir_line=get_angle(line.start,line.end);          // 路线方向
     float dir_aim=get_angle(Point_2D,line.end);             // 目标方向
