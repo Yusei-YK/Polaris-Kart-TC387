@@ -253,9 +253,15 @@ void kart_traj_view_draw(void)
     map.ox = (uint16)(TV_PLOT_X0 + TV_PLOT_W / 2);
     map.oy = (uint16)(TV_PLOT_Y0 + TV_PLOT_H / 2);
 
-    /* 数字全走 tv_fmt(见上方说明:不用 %f,长度可证)。n 是 uint16,%u 最多 5 位。
-     * 两行最长:" 1500 pts  9999.99 m" 21 字、" box 9999.9x9999.9m 9999p/m" 27 字,
-     * 都在 30 字之内,tv_bar 不会截掉有效信息。 */
+    /* 数字全走 tv_fmt(见上方说明:不用 %f,长度可证)。n 是 uint16,但录制上限是
+     * KART_RECORD_MAX_WAYPOINTS=1500,所以点数和光标序号各最多 4 位。
+     * 按当前两个格式串算最宽:
+     *   第一行 " %u pts P%u %s%s%s" → 点数+光标+EDIT+*+LOCK 全满时 26 字;
+     *   第二行 " box %sx%sm  %sp/m" → 两个 9999.9 加一个 9999 时 28 字。
+     * 都在 30 字之内,tv_bar 不会截掉有效信息。
+     * 【下面这行算了总里程却没用】tv_fmt(...total_dist..., na) 之后的
+     * sprintf 并不引用 na,na 到第二行又被包围盒宽度覆盖 —— 屏上看不到
+     * 总里程。留着不删是因为要加回去只需在第一行插一个 %s。 */
     if(tv_cursor >= n) tv_cursor = (uint16)(n - 1U);
     tv_fmt(kart_record_get_total_dist(), 2, na);
     sprintf(buf, " %u pts P%u %s%s%s", (unsigned)n, (unsigned)tv_cursor,
