@@ -108,6 +108,10 @@ void kart_hw_test_run(void)
         ips200_show_string(0, 160, "STRT:");
         ips200_show_int(80, 160, gpio_get_level(KEY_START_PIN), 2);
 
-        system_delay_ms(2);         /* 2ms 轮询,够软件读旋钮 */
+        system_delay_ms(2);         /* 【不等于 2ms 一圈】这一圈还要做 16 次
+                                     * 阻塞的 ips200 写屏,实际周期是 2ms
+                                     * 加上那些写屏的时间。所以旋钮转快了
+                                     * 会漏边沿、计数偏小 —— 自测时慢慢转。
+                                     * 只是自测,不值得为它上中断或硬件解码。 */
     }
 }
