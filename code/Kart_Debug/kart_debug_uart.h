@@ -24,7 +24,12 @@ void kart_debug_uart_tick_5ms(void);
 void kart_debug_uart_poll(void);              /* 采样组帧入环形缓冲(放调度任务) */
 void kart_debug_uart_background_poll(void);   /* 后台分块非阻塞发送(放主循环每 spin) */
 
-/* 科目三关键事件：CH45编号、CH46级别、CH47发生时的5ms节拍。 */
+/* 科目三关键事件：CH45编号、CH46级别、CH47发生时的5ms节拍。
+ * 【这三路只在全量档发得出去】出厂编译的是 43 路剖面(kart_debug_uart.c 的
+ * LOG_PROFILE_S3=1),只到 CH42;ch[45..47] 的赋值在 #else 里。也就是说
+ * set_event() 照样把事件写进模块静态量,VOFA 上却一路都看不见。
+ * 想在现场看事件:要么把 LOG_PROFILE_S3 改 0(VOFA 通道数同步改 51),
+ * 要么拿调试器 watch kart_event_id / level / tick。 */
 #define EVENT_LEVEL_INFO           (0U)
 #define EVENT_LEVEL_WARNING        (1U)
 #define EVENT_LEVEL_ERROR          (2U)
@@ -49,8 +54,10 @@ void kart_debug_uart_background_poll(void);   /* 后台分块非阻塞发送(放
 void kart_debug_uart_set_event(uint16 event_id, uint8 level);
 
 /* CH38 分段打点 +1。日志模块自己会数 START(P20.7) 下降沿,
- * 这个接口是退路:若现场发现 START 在当前菜单页上有别的作用,
- * 换一个键/菜单项调它即可。 */
+ * 【本接口全工程没有任何调用点】留着当退路:若现场发现 START 在当前
+ * 菜单页上有别的作用,换一个键/菜单项调它即可。
+ * 另注意 CH38 是打点只在出厂档(43 路)成立;全量档的 CH38 是
+ * 摄像头中断最长耗时。 */
 void kart_debug_uart_bump_mark(void);
 
 #endif
