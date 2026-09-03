@@ -1,6 +1,10 @@
 /*********************************************************************************************************************
  * 文件名称  kart_vision_calibrate
  * 功能说明  视觉参数标定辅助工具实现
+ *
+ * 【本模块目前是孤立的】.h 没有任何文件 #include,update/reset/print_report
+ * 也没有任何调用点。CALIB_MODE 默认 CALIB_DISABLED,整份实现编译成文件末尾
+ * 那几个空壳。想用它得先照 .h 开头"第 0 步"把调用接进视觉链路。
  ********************************************************************************************************************/
 #include "kart_vision_calibrate.h"
 #include <stdio.h>
@@ -16,7 +20,10 @@ const uint16 *g_calib_img_ptr = NULL;
 int16 g_calib_img_w = 0;
 #endif
 
-/* 焦距标定用的滑动窗口 */
+/* 焦距标定用的滑动窗口。定长 50 帧的环形缓冲,每帧覆盖最老的一格,
+ * 取的是窗口内非零项的算术平均,不是中位数。
+ * 【别拿它测太远的板子】宽度门 VISION_MIN_WIDTH=10 决定了可标距离上限是 2.76 m,
+ * 再远 result->valid 恒为 0,窗口一格都填不上。 */
 #if (CALIB_MODE == CALIB_FOCAL)
 static float g_width_window[CALIB_WINDOW_SIZE] = {0};
 static uint32 g_window_idx = 0;
@@ -91,7 +98,11 @@ void kart_calib_update(const uint16 *img, int16 w, int16 h, const kart_vision_re
             if(count > 0)
             {
                 g_calib_stat.width_avg = sum / (float)count;
-                /* f_px = (width_px × dist_m) / board_w_m */
+                /* f_px = (width_px × dist_m) / board_w_m
+                 * 【按板宽解,且没有做离轴校正】kart_vision.c 测距那行乘了
+                 * lens_range_scale = theta/sin(theta) 来补 130 度鱼眼的
+                 * 边缘压缩,这里没有。所以标定时板子必须放在画面横向正中,
+                 * 偏到两侧解出来的 f_px 会系统性偏大。 */
                 g_calib_stat.focal_estimate =
                     (g_calib_stat.width_avg * CALIB_DIST_M) / VISION_BOARD_W_M;
             }
@@ -113,7 +124,12 @@ void kart_calib_update(const uint16 *img, int16 w, int16 h, const kart_vision_re
     }
     else
     {
-        /* 统计拒绝原因 */
+        /* 统计拒绝原因。
+         * 【这四格不是四个独立原因】REJ_AREA 是 kart_vision_process 的
+         * 缺省值,连"图像指针为空""图比掩膜大"都算进面积一格;REJ_ASPECT
+         * 则同时是真宽高比越界和连续性门跳目标两件事(它们共用一个取值)。
+         * 报告里的百分比按这个口径读,别当成门限调参的依据。
+         * default 分支吞不掉任何东西:每条失败路径都写了明确的 reject 值。 */
         switch(result->reject)
         {
             case VISION_REJ_AREA:
