@@ -47,7 +47,9 @@
 #if WIFI_ENABLE
 typedef char wifi_spi_conflict_check[(WIFI_SPI_INDEX != KART_STEER_ABS_SPI_INDEX) ? 1 : -1];
 typedef char wifi_rst_conflict_check[(WIFI_SPI_RST_PIN != KART_STEER_ABS_CS_GPIO_PIN) ? 1 : -1];
-/* 图像缓冲必须装得下一整帧 */
+/* 单块长度必须落在 (0, WIFI_SPI_TRANSFER_SIZE] 内 —— 超了库内部会再拆包,
+ * 单次阻塞就不再是这里算出来的那个数。跟帧缓冲大小无关:
+ * 帧缓冲是 img_buf[SCC8660_IMAGE_SIZE],由摄像头那边的宏保证。 */
 typedef char wifi_chunk_check[((WIFI_CHUNK_BYTES > 0) && (WIFI_CHUNK_BYTES <= WIFI_SPI_TRANSFER_SIZE)) ? 1 : -1];
 #endif
 

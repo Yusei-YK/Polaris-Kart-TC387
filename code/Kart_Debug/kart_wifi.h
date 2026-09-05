@@ -35,7 +35,12 @@
  *   与 kart_debug_uart_background_poll 同一个位置，且内部：
  *     1) 每次只发一小块（WIFI_CHUNK_BYTES），发完就返回，靠反复被调推进；
  *     2) 用状态机记住发到第几块，不在函数里循环等；
- *     3) 车在跑（非 IDLE）时自动降级：只发示波器波形，不发图像。
+ *     3) 车在跑(非 IDLE)时只发示波器波形,不发图像。
+ *        【但这道闸不在本模块里】判断写在 cpu0_main.c 请求图像那一段:
+ *        if(MISSION_IDLE == kart_mission_get_mode()) 才累 50ms 计数、
+ *        才调 kart_wifi_request_image()。本模块的 background_poll 只认
+ *        "有没有待发的帧",谁请求它就发。把 poll 搬到别处或自己加请求点时,
+ *        这道闸会一起丢掉,必须重新加。
  *   这样最坏情况下单次调用只阻塞一小块的时间，而不是整帧。
  *   【严禁】把 wifi_send_image() 直接放进 kart_task_5ms/10ms。
  *
@@ -71,7 +76,9 @@
  *
  * 【连不上时的排查顺序，别乱试】
  *   1) g_wifi_init_ret != 0 且 wifi_spi_version 为空串 → SPI 都没通，
- *      是引脚问题，先试 WIFI_SWAP_CS_MISO = 1（MISO/CS 可能接反）；
+ *      是引脚问题 —— 但【别找 WIFI_SWAP_CS_MISO 这个宏,本仓库里没有】,
+ *      早期设想的那个开关始终没实现。真接反了只能改 board_pins.h 里
+ *      WIFI_SPI 那几个引脚宏,或者直接改接线;
  *   2) version 读到了但 g_wifi_link != KART_WIFI_LINK_SOCKET_OK →
  *      SPI 通了、WiFi 或 TCP 没通，看 wifi_spi_ip_addr_port 有没有拿到 IP：
  *        没拿到 IP → SSID/密码错，或热点是 5G 频段（模块只支持 2.4G）；
@@ -84,8 +91,12 @@
 #define WIFI_TARGET_PORT           "8086"
 #define WIFI_LOCAL_PORT            "6666"
 
-/* 上电初始化是否阻塞等 WiFi 连上。
- * 【默认 0：不等】理由是连不上 WiFi 绝不能影响跑车 ——
+/* 上电时要不要卡在这儿等 WiFi 连上。
+ * 【这个宏没有任何人读它】全仓库只有下面这一行定义,改成 1 也不会有任何变化 ——
+ * kart_wifi_init() 里没有 #if WIFI_BLOCK_UNTIL_LINK 这样的分支。留着只是
+ * 记录当初的取舍。现状等于"不等":init 调一次 wifi_link_up() 就返回,
+ * 连不上交给后台重连。
+ * 当初为什么定成不等:连不上 WiFi 绝不能影响跑车 ——
  * wifi_spi_wifi_connect 内部最长可能等好几秒，若放在 pit_ms_init 之前阻塞，
  * 现场没开热点就等于车打不着火。改成后台重连，见 kart_wifi_background_poll。 */
 #define WIFI_BLOCK_UNTIL_LINK      (0)
@@ -96,8 +107,11 @@
 
 /*=========================== 发送节奏 ===========================*/
 /* 图像发送周期(ms)。见文件头"带宽实算"。200ms = 5FPS。
- * 【想看更流畅时改这里，但先看 g_wifi_img_us 实测单帧耗时】
- * 若单帧耗时已经接近 PERIOD，说明带宽顶满了，再缩周期只会开始丢帧。 */
+ * 【这个宏由 cpu0_main.c 执行,不是本文件】50ms 任务里累 wifi_img_elapsed_ms,
+ * 到了就调一次 request_image。本文件里那个 img_period_last_raw 是残留:
+ * init 里赋过一次值,之后再没人读过,删掉不影响任何行为。
+ * 【想看更流畅时改这里,但先看 g_wifi_img_us 实测单帧耗时】
+ * 若单帧耗时已经接近本周期,说明带宽顶满了,再调小只会挤掉主循环空转段。 */
 #define WIFI_IMG_PERIOD_MS         (200)
 
 /* 示波器发送周期(ms)。数据量小(几十字节)，可以高频。
@@ -137,8 +151,13 @@ extern volatile uint32 g_wifi_reconnect_cnt;   /* 重连尝试次数 */
 
 /* 上电初始化。
  * 【位置约束】必须在 pit_ms_init(CCU60_CH0, ...) 之前 —— 内部可能阻塞数秒。
- * 且必须在 kart_camera_init() 之后：图像地址要指向 scc8660_image。
- * 返回 0 成功；非 0 表示没连上，但【不影响跑车】，后台会继续重连。 */
+ * 【和 kart_camera 的先后】init 本身不记任何图像地址,这一条不是 init 的约束;
+ * 真正依赖摄像头的是 kart_wifi_request_image():它调 kart_camera_frame_ready()
+ * 判断有没有新帧,再 memcpy 一份 scc8660_image[0],然后立刻 release。
+ * 所以只要第一次请求图像发生在 kart_camera_init() 之后就行,而请求点在
+ * 50ms 任务里,天然晚于初始化。
+ * 返回 0 成功;非 0 表示没连上,但【不影响跑车】,后台会继续重连。
+ * WIFI_ENABLE=0 时本函数直接返回 1 并把 g_wifi_link 置 OFF。 */
 uint8 kart_wifi_init                (void);
 
 /* 后台推进。【只能放在主循环空转段】，与 kart_debug_uart_background_poll 同处。
@@ -165,10 +184,16 @@ void kart_wifi_osc_set              (uint8 ch, float value);
 /* 设置示波器通道数。默认 WIFI_OSC_CH_NUM，一般不用改。 */
 void kart_wifi_osc_set_channel_num  (uint8 num);
 
-/* 配置图像叠加的边界点（画外接框用）。传 NULL 关闭叠加。
- * dot_num 是点数；x/y 数组必须在下次调用前一直有效（内部只存指针，不拷贝）。
+/* 配置图像叠加的边界点(画外接框用)。传 NULL 关闭叠加。
+ * 【内部是拷贝,不存指针】dot_num 是点数,x/y 的内容会被拷进模块自己的
+ * uint8 数组,调用方的局部数组可以立刻失效。代价是三条隐式截断:
+ *   · 点数超过 WIFI_DOT_MAX(32) 的部分直接丢掉;
+ *   · 坐标大于 255 的钳到 255(协议里坐标位宽是 8 位);
+ *   · 不报错、不计数,只是画出来的框位置不对。
+ * 【当前没有任何调用点】全仓库没人调它,所以下面这套叠加框在实际运行中
+ * 从没出现过 —— 想用得自己在视觉侧调一次。
  * 【为什么要叠框】只看图判断不了"检测器认为板子在哪" ——
- * 图上有块红、检测器却报 valid=0，不叠框就分不清是判别式没过还是门限拒了。 */
+ * 图上有块红、检测器却报 valid=0,不叠框就分不清是判别式没过还是门限拒了。 */
 void kart_wifi_set_boundary         (uint16 dot_num, uint16 *x, uint16 *y);
 
 kart_wifi_link_enum kart_wifi_link_state (void);
