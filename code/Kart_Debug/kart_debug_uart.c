@@ -14,7 +14,7 @@
 #include "kart_wifi.h"            /* WiFi 图传链路诊断 CH39-CH44(借用视觉通道,摄像头未启用) */
 #include "kart_person_link.h"     /* TC4D7 人体视觉链路诊断 CH39-CH44(与视觉通道二选一) */
 #include "isr.h"                 /* 协作式调度器运行时监测 g_sched_* */
-#include "kart_assist_img.h"      /* CH12 图传占用标志 g_aimg_busy */
+#include "kart_assist_img.h"      /* CH12 图传占用标志 g_aimg_busy,仅全量档 */
 #include "kart_multicore.h"       /* CH22/23/31 core3 视觉耗时与投递统计 */
 #include <string.h>
 
