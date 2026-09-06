@@ -43,6 +43,7 @@
 #include "kart_remote.h"
 #include "kart_debug_uart.h"
 #include "kart_person_link.h"
+#include "kart_pedal.h"           /* uart2_rx_isr 里的踏板盒收字节回调 */
 #include "zf_device_tld7002.h"
 #include "zf_device_dot_matrix_screen.h"
 /* 2026-08-10 已删除 #include "kart_camera.h": UART1 不再需要动态分派，

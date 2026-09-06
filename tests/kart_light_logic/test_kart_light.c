@@ -1,3 +1,26 @@
+/*
+ * 这是给电脑跑的单元测试,不是车上的代码 —— 它自带 main(),不能进单片机镜像。
+ *
+ * 为什么要在源码里挡而不是只在 IDE 里 Exclude from Build:
+ *   AURIX Studio 的排除是按 configuration 存的,重新导入工程或者换
+ *   configuration 就丢(2026-09-06 就是这么又被扫进来的)。
+ *
+ * 为什么用 TASKING 编译器就一定会炸:
+ *   Windows 文件名不分大小写,而英飞凌库里的
+ *   Service/CpuGeneric/SysSe/Bsp/Assert.h 在 -I 路径上排在 TASKING 标准头
+ *   前面,所以下面的 <assert.h> 会被解析成那一份,里面没有 assert 宏。
+ *   结果 assert 变成隐式声明,链接时报 ltc E106 unresolved external: assert。
+ *   补 #include <assert.h> 没用 —— 它本来就在。
+ *
+ * 在电脑上跑:见同目录 README.md,用 gcc/clang 单独编译这一个文件。
+ */
+#if defined(__CTC__) || defined(__TRICORE__) || defined(__TASKING__)
+
+/* 目标机编译:整份测试跳过。空的翻译单元不合法,留一个 typedef 占位。 */
+typedef int kart_light_test_not_built_for_target_t;
+
+#else
+
 #include <assert.h>
 #include <stdio.h>
 
@@ -189,3 +212,5 @@ int main(void)
     puts("kart_light logic tests passed");
     return 0;
 }
+
+#endif /* 目标机编译:整份测试跳过 */

@@ -14,6 +14,8 @@
 #include "kart_playback.h"
 #include "kart_mission.h"
 #include "kart_remote.h"
+#include "kart_person_link.h"     /* PLINK:init/poll 原来漏了声明,靠隐式声明连上的 */
+#include "kart_pedal.h"           /* CH32 踏板盒:init/poll/control_update */
 #include "kart_hw_test.h"
 #include "kart_menu.h"
 #include "zf_device_dot_matrix_screen.h"

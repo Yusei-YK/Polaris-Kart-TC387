@@ -17,6 +17,8 @@
 #include "kart_vtrack.h"
 #include "kart_vision.h"
 #include "kart_wifi.h"       /* kart_wifi_osc_set, WIFI_ENABLE */
+#include "kart_control.h"    /* B 组基准直接打 kart_control_speed_update */
+#include "kart_steer_ctrl.h" /* 同上:kart_steer_ctrl_update */
 #include <math.h>
 #include <string.h>
 

@@ -10,6 +10,7 @@
 #include "kart_odom.h"
 #include "kart_imu.h"
 #include "kart_remote.h"
+#include "kart_pedal.h"           /* MISSION_PEDAL 进出钩子 */
 #include "kart_debug_uart.h"
 #include "kart_light.h"
 #include "kart_params.h"
