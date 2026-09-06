@@ -18,6 +18,7 @@
 #include "kart_traj_view.h"    /* 录制路径采样点可视化 */
 #include "kart_boot_anim.h"    /* 白底开机帧动画 */
 #include "kart_multicore.h"  /* core2 屏幕绘制代理 draw_* */
+#include "kart_pedal.h"        /* 踏板驾驶页:油门/刹车/链路状态 + 合闸条件 */
 
 typedef enum
 {
@@ -38,6 +39,7 @@ typedef enum
     MENU_LEVEL_S3_RUN,
     MENU_LEVEL_CAMERA,
     MENU_LEVEL_SETTINGS,
+    MENU_LEVEL_PEDAL_RUN,       /* 踏板驾驶运行页:同 S3_RUN,不吃 MID,只认 KART_LEFT 退出 */
 } menu_level_t;
 
 typedef enum
@@ -47,6 +49,9 @@ typedef enum
     MENU_MAIN_SUBJECT3,
     MENU_MAIN_CAMERA,
     MENU_MAIN_SETTINGS,
+    /* 加在 MAX 之前、SETTINGS 之后:cursor_main 的上界写的是 MENU_MAIN_MAX - 1,
+     * 会自己跟着变;这个 enum 不落 Flash,所以往后加不会错位任何已存的东西。 */
+    MENU_MAIN_PEDAL,
     MENU_MAIN_MAX
 } menu_main_item_t;
 
@@ -379,6 +384,10 @@ static void menu_draw_main(void)
             (uint8)(cursor_main == MENU_MAIN_CAMERA));
     ui_item(UI_Y_ROW0 + 4 * UI_ROW_H, "Settings",
             (uint8)(cursor_main == MENU_MAIN_SETTINGS));
+    /* 第 5 行:y = UI_Y_ROW0 + 5*UI_ROW_H = 70 + 100 = 170,离 UI_Y_HINT(296)
+     * 还差得远,不用动版面。 */
+    ui_item(UI_Y_ROW0 + 5 * UI_ROW_H, "Pedal Drive Manual",
+            (uint8)(cursor_main == MENU_MAIN_PEDAL));
 
     ui_hint(" knob/UP/DN move  MID enter");
 }
@@ -1146,6 +1155,50 @@ static void menu_draw_s3_run(void)
     }
 }
 
+/* 踏板驾驶运行页。和科目三运行页一个套路:【不吃 MID】防运行中误触刷屏。
+ * 注意光"没出现在 menu_handle_key_mid_press 的 switch 里"是不够的:那个函数
+ * 一进门就先置 need_repaint = 1,再往下 switch,落进 default 也已经刷了屏。
+ * 所以真正的吞是在上一层 kart_menu_input_poll 里连同 S1_READY / S3_RUN
+ * 一起挡掉的,见那处注释。退出只认 KART_LEFT。
+ * 这一页只读状态、不改状态,而且在 50ms 拍上,画多久都进不了控制窗口。
+ * 【为什么不显示实测速度】那要 include kart_control.h + kart_calib.h,
+ * 本文件是一条条显式 include 的、不走 kart_include.h;司机自己感觉得到车速,
+ * 屏上有目标速度就够判断"踏板有没有被吃进去"。 */
+static void menu_draw_pedal_run(void)
+{
+    char  buf[40];
+    uint8 online = kart_pedal_is_online();
+    uint8 brake  = kart_pedal_get_brake();
+
+    ui_title("Pedal Drive", online ? "LINK" : "LOST");
+    ui_bar(UI_Y_HEAD, " Steering is mechanical", UI_DIM, UI_BG);
+
+    sprintf(buf, " Throttle  %4u / 1000",
+            (unsigned)kart_pedal_get_throttle_pm());
+    ui_bar(UI_Y_ROW0, buf, UI_NUM, UI_BG);
+
+    sprintf(buf, " Brake     %s", brake ? "ON " : "off");
+    ui_bar(UI_Y_ROW0 + UI_ROW_H, buf, brake ? UI_WARN : UI_DIM, UI_BG);
+
+    /* 这是本拍【真下发】的目标,不是"油门应该对应多少":刹车或失联时它是 0,
+     * 一眼就能看出踏板到底有没有被吃进速度环。 */
+    sprintf(buf, " Target   %5.2f m/s", kart_pedal_get_target_ms());
+    ui_bar(UI_Y_ROW0 + 2 * UI_ROW_H, buf, UI_NUM, UI_BG);
+
+    if(online)
+    {
+        ui_bar(UI_Y_ROW0 + 3 * UI_ROW_H, "", UI_FG, UI_BG);
+    }
+    else
+    {
+        /* 失联不是停机:速度环还开着,PID 在主动把车拖停,方向还在你手上。 */
+        ui_bar(UI_Y_ROW0 + 3 * UI_ROW_H, " LINK LOST - braking to stop",
+               UI_ERR, UI_BG);
+    }
+
+    ui_hint(" KART_LEFT exit");
+}
+
 static void menu_draw_subject1(void)
 {
     ui_title("Subject 1", "Slalom");
@@ -1508,6 +1561,26 @@ static void menu_handle_key_mid_press(void)
                 kart_mission_set_mode(MISSION_SUBJECT_3);
                 current_level = MENU_LEVEL_S3_RUN;
             }
+            else if(cursor_main == MENU_MAIN_PEDAL)
+            {
+                /* 踏板驾驶:选中就【直接进模式】,没有预备态、不用按 START。
+                 * 切之前查两个条件(踏板盒在线 + 油门在死区内)。这两条都不要求
+                 * 人做动作,正常上车一次都不会被挡;挡住的是"油门线接触不良
+                 * 卡在半开"—— 那种情况下直接切模式,车会当场窜出去。
+                 * 不满足就只闪一条提示、停在主菜单,不切模式。 */
+                if(kart_pedal_can_engage())
+                {
+                    kart_mission_set_mode(MISSION_PEDAL);
+                    current_level = MENU_LEVEL_PEDAL_RUN;
+                }
+                else
+                {
+                    kart_pedal_note_deny();
+                    menu_flash_notice(kart_pedal_is_online()
+                                      ? "Release throttle first!"
+                                      : "Pedal box offline!", 700);
+                }
+            }
             break;
 
         case MENU_LEVEL_SUBJECT1:
@@ -1841,6 +1914,14 @@ static void menu_handle_key_left_press(void)
 
         case MENU_LEVEL_S3_RUN:
             /* 科目三运行界面 KART_LEFT 退出:完整停机退回 IDLE,防遥控/录制/复现残留。 */
+            if(kart_mission_get_mode() != MISSION_IDLE)
+                kart_mission_set_mode(MISSION_IDLE);
+            current_level = MENU_LEVEL_MAIN;
+            break;
+
+        case MENU_LEVEL_PEDAL_RUN:
+            /* 踏板驾驶唯一的退出口。set_mode(IDLE) 会走统一停机:清速度环目标、
+             * 关速度环、关转向内外环,并顺带调 kart_pedal_exit()。 */
             if(kart_mission_get_mode() != MISSION_IDLE)
                 kart_mission_set_mode(MISSION_IDLE);
             current_level = MENU_LEVEL_MAIN;
@@ -2218,11 +2299,15 @@ static void menu_scan_keys(void)
         if(mid_edge)
             menu_handle_recording_mid_press();
     }
-    else if(current_level == MENU_LEVEL_S1_READY || current_level == MENU_LEVEL_S3_RUN)
+    else if(current_level == MENU_LEVEL_S1_READY
+            || current_level == MENU_LEVEL_S3_RUN
+            || current_level == MENU_LEVEL_PEDAL_RUN)
     {
-        /* 这两个界面 MID 无对应菜单项,但 menu_handle_key_mid_press 一进去就
-         * 置 need_repaint → 会在等发车/倒车推进期间插一次 IPS200 刷新
+        /* 这三个界面 MID 无对应菜单项,但 menu_handle_key_mid_press 一进去就
+         * 置 need_repaint → 会在等发车/倒车推进/踏板驾驶期间插一次 IPS200 刷新
          * (2026-07-27 已定过:运行中一律不刷屏)。所以直接吞掉。
+         * 踏板驾驶页(2026-09 加)同理,而且更硬:司机正用脚开车、方向全靠机械
+         * 连杆,这时候他不会去看屏,刷屏纯粹是白占 CPU。
          * 注意与旧板不同,现在吞的原因只是"防无谓刷屏",不再是引脚共用 ——
          * 新板 START 是独立的 P20.7,菜单 MID 是 P33.4。 */
     }
@@ -2424,6 +2509,7 @@ static void menu_draw_page(void)
             case MENU_LEVEL_S3_RUN:              menu_draw_s3_run();             break;
             case MENU_LEVEL_CAMERA:              menu_draw_camera();             break;
             case MENU_LEVEL_SETTINGS:            menu_draw_settings();           break;
+            case MENU_LEVEL_PEDAL_RUN:           menu_draw_pedal_run();          break;
             default:                                                             break;
         }
     }

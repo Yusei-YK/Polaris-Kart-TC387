@@ -41,6 +41,10 @@ typedef enum
     MISSION_SUBJECT_3,          /* 科目三如影随形:跟随录轨 + 反向复现(车头不掉转,回放录制打角) */
     MISSION_REMOTE,             /* SBUS 遥控接管(调试/手动,VOFA m3 进入) */
     MISSION_FAULT,
+    /* 【为什么加在最后,而不是插在 MISSION_REMOTE 后面】模式号会原样上 VOFA
+     * 第 0 路(kart_debug_uart.c ch[0] = (float)kart_mission_get_mode()),
+     * 插在中间会把之前所有日志里 FAULT=5 的含义改掉,历史数据就对不上了。 */
+    MISSION_PEDAL,              /* 踏板驾驶:人踩油门/刹车,方向盘走机械连杆,转向电机全程不使能 */
 } kart_mission_mode_t;
 
 /* 科目一阶段。 */

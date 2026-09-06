@@ -211,6 +211,12 @@ static void mission_enter(kart_mission_mode_t mode)
             kart_remote_control_stop();
             break;
 
+        case MISSION_PEDAL:
+            /* 踏板驾驶:开速度环(目标 0)、断转向电机。具体动作全在
+             * kart_pedal_enter() 里,这里不重抄一遍,免得两处对不上。 */
+            kart_pedal_enter();
+            break;
+
         case MISSION_IDLE:
         case MISSION_FAULT:
         default:
@@ -1105,6 +1111,15 @@ void kart_mission_set_mode(kart_mission_mode_t mode)
     }
 #endif
 
+    /* 退出踏板驾驶。输出的停机由紧随其后的 mission_stop_all() 兜着 ——
+     * 它已经清速度环目标、关速度环、关航向外环和转向内环,一条不少。
+     * 这里调 kart_pedal_exit() 只为清模块自己那份遥测目标值(mission_stop_all
+     * 看不到它),顺便把"谁负责退出"写在明面上。 */
+    if(MISSION_PEDAL == mission_mode)
+    {
+        kart_pedal_exit();
+    }
+
     /* 统一 exit:任何模式退出都执行完整停机(清运动+蜂鸣器+队列)。 */
     mission_stop_all();
 
@@ -1162,6 +1177,12 @@ void kart_mission_poll(void)
             break;
         case MISSION_REMOTE:
             remote_loop();
+            break;
+        case MISSION_PEDAL:
+            /* 踏板驾驶没有 loop。解帧、失联计时、遥控抢占和物理 START 键都在
+             * kart_pedal_poll()(cpu0_main 的同一个 10ms 拍里调),目标下发在
+             * 5ms 拍的 kart_pedal_control_update()。这里留个空 case 是为了
+             * 别让它掉进 default,读代码的人一眼能看出这个模式是有人管的。 */
             break;
         case MISSION_IDLE:
         case MISSION_FAULT:

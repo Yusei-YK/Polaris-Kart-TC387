@@ -229,6 +229,27 @@
 #define BOARD_GPS_UART_RX_PIN          (UART3_RX_P15_7)
 #define BOARD_GPS_UART_BAUD            (115200)
 
+/* ---------------- 踏板 ECU(UART_2 / ASCLIN2)2026-09 ----------------
+ * 车外挂的一个 CH32 油门+刹车踏板盒,单向发 8 字节帧进来(协议见 kart_pedal.h)。
+ * 接线只有两根:CH32 USART1_TX(PD5) → 本板 P02.1;两边 GND 共地。
+ *
+ * 【为什么是 P02.1,而不是最初打算接的 P33.12】
+ *   P33.12 在库里的名字是 UART1_TX_P33_12 —— 它是 TX 脚,方向就不对;
+ *   而且 UART_1 = ASCLIN1 已经被灯板 TLD7002 占着(见 user/isr.c 的 uart1_rx_isr)。
+ * 【P33.13 也不行,虽然它物理上确实空着】
+ *   它是 UART1_RX_P33_13,还是 ASCLIN1。一个 ASCLIN 只有一个 1 字节深的 RX FIFO,
+ *   两个主抢它的话谁先取走另一方就永远收不到 —— 和上面 VOICE_MUTED 那段是同一个坑。
+ * 【为什么不用 UART_2 的库默认脚 P14.2/P14.3】
+ *   两个都在《尽量不要使用的引脚.txt》的 P14.2~P14.6 禁用段里。
+ *   ASCLIN2 的 RX 可选脚是 P02.0/P02.1/P10.6/P14.3/P33.8,其中 P02.1 全树未占用。
+ * 【TX 脚为什么还是得给一个】
+ *   uart_init() 的 TX 形参是必填的,给了就会被配成推挽输出,所以不能随便填一个
+ *   已被占用的脚。选 P33.8:全树未占用、也不在禁用表里,实际不接线、悬空。
+ *   这条链路是单向的,本板永远不往踏板盒发字节。 */
+#define BOARD_PEDAL_UART_INDEX          (UART_2)
+#define BOARD_PEDAL_UART_TX_PIN         (UART2_TX_P33_8)
+#define BOARD_PEDAL_UART_RX_PIN         (UART2_RX_P02_1)
+
 /* ---------------- IPS200 屏幕(当前为软件 SPI)----------------
  * 2026-08-12 以 zf_device_ips200.h + 主板网表复核：屏幕已不走 SPI_2/P15.2~5。
  * SCK/MOSI 是普通 GPIO 软件翻转，因此能与无线模块的硬件 SPI_2 同时使用。 */

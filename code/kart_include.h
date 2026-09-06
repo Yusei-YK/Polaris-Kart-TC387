@@ -65,6 +65,7 @@
 #include "kart_control.h"       /* 后轮速度环 */
 #include "kart_steer_ctrl.h"    /* 转向串级环(航向外环 + 转角内环) */
 #include "kart_remote.h"        /* SBUS 遥控解析 + 接管(兼当安全绳) */
+#include "kart_pedal.h"         /* CH32 油门/刹车踏板盒 → 速度环(人坐车上开) */
 #include "kart_voice.h"         /* 语音帧解析与命令队列 */
 #include "kart_light.h"         /* 灯板点阵图案 */
 #include "kart_person_link.h"   /* TC4D7 人体视觉链路（收 25 字节帧 → 合成 kart_vtrack）*/

@@ -271,7 +271,10 @@ IFX_INTERRUPT(uart2_tx_isr, UART2_INT_VECTAB_NUM, UART2_TX_INT_PRIO)
 IFX_INTERRUPT(uart2_rx_isr, UART2_INT_VECTAB_NUM, UART2_RX_INT_PRIO)
 {
     interrupt_global_enable(0);                     // �����ж�Ƕ��
-    wireless_module_uart_handler();                 // ����ģ��ͳһ�ص�����
+    /* CH32 油门/刹车踏板盒收字节(UART_2 = ASCLIN2,RX = P02.1)。
+     * 原先这里挂的是逐飞例程的 wireless_module_uart_handler():本车的无线
+     * 模块走 SPI(见 kart_wifi.c),那个回调没有对应硬件,是模板残留。 */
+    kart_pedal_rx_callback();
 
 
 

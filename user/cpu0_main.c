@@ -79,6 +79,12 @@ static void kart_task_5ms(void)
     /* 转向串级一拍:紧跟 kart_steer_abs_update 吃到本拍最新 center_delta。 */
     kart_steer_ctrl_update();
 
+    /* 踏板驾驶一拍:油门 → 速度环目标,并把转向电机按在断电状态(人开方向盘)。
+     * 【必须在 kart_steer_ctrl_update 之后】它要盖掉转向内环这一拍算出来的 duty;
+     * 【必须在 power_sync 之前】duty 只有过了 power_sync 才真写进 PWM 寄存器。
+     * 不在踏板模式时第一句就 return,零代价。 */
+    kart_pedal_control_update();
+
     /* 速度环未使能时强制后轮归零;转向串级独立运行,不受速度环门控。 */
     if(!kart_control_is_enabled())
     {
@@ -160,6 +166,7 @@ static void kart_task_10ms(void)
      * CAMERA_ENABLE=0 时是空函数。 */
     kart_camera_poll();
     kart_person_link_poll(10);      /* 人体视觉链路：失联计时 + 合成 kart_vtrack，不收字节 */
+    kart_pedal_poll(10);            /* 踏板链路:解帧 + 失联计时 + 遥控抢占 */
 
     kart_task_light_10ms();     /* 灯板动画推进 + 帧下发(仅科目二有灯光命令时生效) */
 
@@ -249,6 +256,7 @@ int core0_main(void)
     kart_debug_uart_init();
     kart_control_init();        // 速度环:填默认 PID、清滤波、默认不使能(等 VOFA 发 e1 才输出)
     kart_steer_ctrl_init();     // 转向串级:填内/外环默认 PID,默认全不使能(等 VOFA 发 se1 才驱动转向电机)
+    kart_pedal_init();          // CH32 踏板盒链路:UART_2(RX=P02.1)+ RX 中断。PEDAL_ENABLE=0 时是空函数
 
     /* SCC8660 彩色摄像头(凌瞳)。默认 CAMERA_ENABLE=0,此调用编译期就是空壳,
      * 已验证的低速基线一个字节都不受影响。
