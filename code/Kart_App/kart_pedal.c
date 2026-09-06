@@ -34,6 +34,27 @@ static uint8  pedal_seq_seen = 0;
 
 static float  pedal_target_ms = 0.0f;
 
+/* -------------------- 挡位 --------------------
+ * 只有 D 和 R 两个挡。R 的语义就是"刹车踩住 + 车已经停了",松刹车当拍回 D,
+ * 所以它不是一个要人记住的模式,而是左脚位置的直接映射 —— 忘了自己在哪个挡
+ * 这件事在这个方案里不可能发生。
+ * pedal_thr_relock:出 R 那一瞬油门还踩着的话,不许直接给前进目标,
+ * 否则"倒车中松刹车"就等于当拍翻符号往前窜。要求油门先回死区才解锁。 */
+static uint8  pedal_gear_rev   = 0;
+static uint8  pedal_thr_relock = 1;
+
+/* -------------------- 遥控介入的防抖 --------------------
+ * pedal_rc_online_run:链路连续在线的拍数,封顶在 SETTLE_POLLS。挡位和摇杆
+ *   读数都只在它到顶之后才算数,理由见 KART_PEDAL_RC_SETTLE_POLLS。
+ * pedal_rc_estop_armed:本次驾驶中是否见过一次"非低挡"。低挡急停只在见过
+ *   之后才认。【为什么要这道门】低挡就是三段开关的静止位置,不加这道门的话,
+ *   发射机一开机就等于禁止踏板驾驶 —— 而人根本没打算用遥控。加了之后:
+ *   不碰发射机 = 它永远停不了你;主动拨出低挡再拨回来 = 总闸,照设计生效。
+ *   已武装之后链路掉了照样急停(挡位会被钳成低挡),这是对的 —— 正在用的
+ *   安全绳断了本身就是停车条件。 */
+static uint8  pedal_rc_online_run  = 0;
+static uint8  pedal_rc_estop_armed = 0;
+
 static kart_pedal_stat_t pedal_stat = {0};
 
 /* -------------------- 小工具 -------------------- */
@@ -68,6 +89,25 @@ static float pedal_thr_to_ms(uint16 pm)
 
     span = (float)(PEDAL_THROTTLE_PM_MAX - KART_PEDAL_DEADBAND_PM);
     return (float)(pm - KART_PEDAL_DEADBAND_PM) / span * KART_PEDAL_MAX_V_MS;
+}
+
+/* 千分比 → 倒车目标车速(m/s,返回正值,取负在调用处做)。
+ * 故意写成按比例缩放前进档,而不是抄一份线性映射:死区处理、满量程钳位、
+ * 零点行为全跟前进档共用同一段代码,改一边不会漏掉另一边。 */
+static float pedal_thr_to_rev_ms(uint16 pm)
+{
+    return pedal_thr_to_ms(pm)
+           * (KART_PEDAL_MAX_V_REV_MS / KART_PEDAL_MAX_V_MS);
+}
+
+/* 车速是否已经接近 0 —— 挂 R 的唯一门槛,理由见 KART_PEDAL_REV_STOP_MS。
+ * kart_control_get_meas() 的单位是脉冲/5ms(跟目标同单位),换成 m/s 再比。 */
+static uint8 pedal_is_stopped(void)
+{
+    float v = kart_control_get_meas() * KART_PULSE_V_TO_MS;
+
+    if(v < 0.0f) { v = -v; }
+    return (v <= KART_PEDAL_REV_STOP_MS) ? 1U : 0U;
 }
 
 /* -------------------- 解帧 --------------------
@@ -152,6 +192,10 @@ void kart_pedal_init(void)
     pedal_brake    = 1;
     pedal_flags    = 0;
     pedal_target_ms = 0.0f;
+    pedal_gear_rev   = 0;
+    pedal_thr_relock = 1;   /* 上电先要求收油,不管踏板此刻什么状态 */
+    pedal_rc_online_run  = 0;
+    pedal_rc_estop_armed = 0;
     pedal_idle_ms  = KART_PEDAL_LOST_TIMEOUT_MS + 1U;
 
     uart_init(BOARD_PEDAL_UART_INDEX, PEDAL_BAUD,
@@ -176,6 +220,7 @@ void kart_pedal_rx_callback(void)
 uint8 kart_pedal_is_online(void)  { return pedal_online; }
 uint16 kart_pedal_get_throttle_pm(void) { return pedal_thr_pm; }
 uint8 kart_pedal_get_brake(void)  { return pedal_brake; }
+uint8 kart_pedal_is_reverse(void) { return pedal_gear_rev; }
 float kart_pedal_get_target_ms(void) { return pedal_target_ms; }
 
 void kart_pedal_get_stat(kart_pedal_stat_t *dst)
@@ -221,6 +266,10 @@ void kart_pedal_enter(void)
     kart_steer_set_angle_enable(0);     /* 人开车,转向电机全程不通电 */
 
     pedal_target_ms = 0.0f;
+    pedal_gear_rev   = 0;               /* 进来一律 D 挡 */
+    pedal_thr_relock = 1;               /* 且必须先收油才出力 */
+    pedal_rc_online_run  = 0;           /* 遥控防抖计数每次进模式重来 */
+    pedal_rc_estop_armed = 0;           /* 且要重新见过一次非低挡才武装 */
 }
 
 void kart_pedal_exit(void)
@@ -229,6 +278,10 @@ void kart_pedal_exit(void)
     kart_control_set_enable(0);
     kart_steer_set_angle_enable(0);
     pedal_target_ms = 0.0f;
+    pedal_gear_rev   = 0;
+    pedal_thr_relock = 1;
+    pedal_rc_online_run  = 0;
+    pedal_rc_estop_armed = 0;
 }
 
 /* ==================== 10ms 拍 ==================== */
@@ -242,6 +295,14 @@ static uint8 pedal_rc_wants_takeover(void)
     uint16 thr;
     int    diff;
 
+    /* 链路刚回来的头几拍不算:此时通道值可能还是失控前的残留或失控值,
+     * 摇杆看着就是"离中位很远",链路一抖就把模式弹去 MISSION_REMOTE。
+     * 这个坑在加低挡急停之前就有,同一个根因,在同一处一起堵。
+     * 手动接管晚 50ms 生效不构成安全代价。 */
+    if(pedal_rc_online_run < KART_PEDAL_RC_SETTLE_POLLS)
+    {
+        return 0;
+    }
     if(0U == kart_remote_is_online())
     {
         return 0;
@@ -293,6 +354,45 @@ void kart_pedal_poll(uint16 period_ms)
     /* --- 3. 驾驶模式下的遥控抢占 --- */
     if(MISSION_PEDAL == kart_mission_get_mode())
     {
+        /* 遥控软件急停(三段开关低挡)在踏板模式下【原来是不起作用的】:
+         * 那套逻辑全在 kart_remote_control_update() 里,而它只被 kart_mission
+         * 在遥控/录制路径上调(kart_mission.c:329/418/873),踏板模式一次都不调。
+         * 于是唯一的遥控介入是下面那个"油门杆离中位"的抢占 —— 拨挡位没反应。
+         * 车上坐着人,这个总闸必须在,所以在这儿单独接一次。
+         * 【为什么只在遥控在线时判】离线也急停的话,发射机不开就没法用踏板 ——
+         * 而不开发射机是常态。代价说清楚:发射机没开就没有这道总闸。
+         * 【为什么切 IDLE 而不是自己清速度】沿用全项目一致的急停语义:
+         * set_mode(IDLE) 走统一停机(清目标、关速度环、关转向内外环、
+         * 顺带 kart_pedal_exit()),而且必须回菜单重新进,是真总闸不是点动。
+         * 注意它是失能而不是主动刹停,车会滑行 —— 脚下那个刹车踏板还在人手里。
+         * 【2026-09-06 订正】原来这里写的是"挡位已经过 kart_remote 的连续 N 拍
+         * 滤波,这里不再滤",那句是错的,而且错得有后果:链路掉的时候挡位被
+         * 强行钳成低挡(kart_remote.c:165),而 remote_online 来一帧就当拍回 1,
+         * 于是每次链路恢复都有几拍"在线 + 钳出来的低挡"。照那个写法,链路每抖
+         * 一次就误急停一次,跟开关实际在哪儿无关 —— 现场表现就是屏幕反复闪回
+         * 主菜单。所以这里要自己再加两道门:先等链路坐稳,再要求已武装。 */
+        if(0U == kart_remote_is_online())
+        {
+            pedal_rc_online_run = 0;
+        }
+        else if(pedal_rc_online_run < KART_PEDAL_RC_SETTLE_POLLS)
+        {
+            pedal_rc_online_run++;
+        }
+
+        if(pedal_rc_online_run >= KART_PEDAL_RC_SETTLE_POLLS)
+        {
+            if(KART_REMOTE_SW3_L != kart_remote_get_sw3())
+            {
+                pedal_rc_estop_armed = 1;   /* 见过非低挡:人确实在用发射机 */
+            }
+            else if(0U != pedal_rc_estop_armed)
+            {
+                kart_mission_set_mode(MISSION_IDLE);
+                return;
+            }
+        }
+
         if(pedal_rc_wants_takeover())
         {
             kart_mission_set_mode(MISSION_REMOTE);
@@ -324,24 +424,86 @@ void kart_pedal_control_update(void)
     kart_steer_set_head_enable(0);
     kart_steer_set_angle_enable(0);
 
-    /* --- 目标速度 --- */
+    /* --- 挡位 + 目标速度 --- */
     if(0U == pedal_online)
     {
-        /* 失联:断油,但 enable 保持 1 让 PID 主动减速 */
+        /* 失联:断油,但 enable 保持 1 让 PID 主动减速。
+         * 顺带退回 D 并挂上 relock:链路恢复的那一拍不能因为油门还踩着
+         * 就直接窜出去,也不能停在一个司机看不到的 R 挡里。 */
         v = 0.0f;
+        pedal_gear_rev   = 0;
+        pedal_thr_relock = 1;
+        /* 链路断了跟踩死刹车是同一件事:同样要清积分,否则前 1 秒只有 19% 的
+         * 制动 duty(推导见 kart_control.h 的 brake_hard 声明处)。 */
+        kart_control_set_ramp_step(0.0f);
+        kart_control_brake_hard();
     }
     else if(0U != pedal_brake)
     {
-        /* 刹车:目标归零且【绕过斜坡】。ramp_step=0 在 kart_control 里的语义是
-         * "不限速",也就是目标瞬间到位 —— 这才是刹车该有的响应。
-         * enable 不关:关了后轮只是断电滑行,减速比 PID 主动拖到零慢得多。 */
-        kart_control_set_ramp_step(0.0f);
-        v = 0.0f;
+        /* 刹车踩着。先判能不能挂 R:车已停 + 油门此刻在死区内。
+         * 【为什么还要查油门】不查的话,"踩着油门去踩刹车"会在车停住的
+         * 那一瞬直接挂上 R 并立刻倒车 —— 司机的意图明显是停车。 */
+        if((0U == pedal_gear_rev)
+           && (0U != pedal_is_stopped())
+           && (pedal_thr_pm <= KART_PEDAL_DEADBAND_PM))
+        {
+            pedal_gear_rev = 1;
+        }
+
+        if(0U != pedal_gear_rev)
+        {
+            /* R 挡:刹车不再是"归零",它变成挡位选择器,油门给的是倒车速度。
+             * 斜坡照常开着 —— 倒车一样要防电流冲击,负方向的爬坡分支在
+             * kart_control.c:144。挂上 R 之后不再复查车速,否则一动就掉挡。 */
+            kart_control_set_ramp_step(KART_PEDAL_RAMP_STEP);
+            v = -pedal_thr_to_rev_ms(pedal_thr_pm);
+        }
+        else
+        {
+            /* 还在 D 挡踩刹车(车还在动):目标归零、绕过斜坡、并且清积分。
+             * ramp_step=0 在 kart_control 里的语义是"不限速",目标瞬间到位;
+             * enable 不关:关了后轮只是断电滑行,减速比 PID 主动拖到零慢得多。
+             * 【2026-09-06 加清积分】只做前两件事的话刹车是软的:巡航的稳态
+             * duty 全在积分器里(4.0m/s 约 8913),它要按每拍 54.3 退掉近 1 秒,
+             * 这期间它一直在抵消 P 项给出的反向 duty。完整推导和数字写在
+             * kart_control.h 的 kart_control_brake_hard() 声明处。
+             * 【R 挡不调它】那边油门是真目标而不是停车请求,清了会破坏倒车加速。 */
+            kart_control_set_ramp_step(0.0f);
+            kart_control_brake_hard();
+            v = 0.0f;
+        }
     }
     else
     {
+        /* 刹车松开 → 当拍回 D。 */
+        if(0U != pedal_gear_rev)
+        {
+            pedal_gear_rev = 0;
+            /* 倒车中松刹车:此刻油门还踩着的话,直接回 D 就是当拍翻符号
+             * 往前窜。挂 relock,要求先收油。 */
+            if(pedal_thr_pm > KART_PEDAL_DEADBAND_PM)
+            {
+                pedal_thr_relock = 1;
+            }
+        }
+
         kart_control_set_ramp_step(KART_PEDAL_RAMP_STEP);
         v = pedal_thr_to_ms(pedal_thr_pm);
+    }
+
+    /* relock:油门回到死区才解除。期间一律 0 且绕过斜坡 —— 这是安全兜底,
+     * 不该让它慢慢爬。 */
+    if(0U != pedal_thr_relock)
+    {
+        if(pedal_thr_pm <= KART_PEDAL_DEADBAND_PM)
+        {
+            pedal_thr_relock = 0;
+        }
+        else
+        {
+            kart_control_set_ramp_step(0.0f);
+            v = 0.0f;
+        }
     }
 
     pedal_target_ms = v;
@@ -361,6 +523,7 @@ uint8 kart_pedal_is_online(void)                { return 0; }
 uint8 kart_pedal_can_engage(void)               { return 0; }
 uint16 kart_pedal_get_throttle_pm(void)         { return 0; }
 uint8 kart_pedal_get_brake(void)                { return 1; }
+uint8 kart_pedal_is_reverse(void)               { return 0; }
 float kart_pedal_get_target_ms(void)            { return 0.0f; }
 
 void kart_pedal_get_stat(kart_pedal_stat_t *dst)

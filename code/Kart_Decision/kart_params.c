@@ -6,6 +6,9 @@
 #include "kart_mission.h"
 #include "kart_power.h"
 #include "kart_follow.h"
+#include "kart_calib.h"      /* KART_PEDAL_MAX_V_MS:反解 Imax 要把踏板算进去。
+                             * 本来经 kart_control.h 也传递得到,显式写出来是
+                             * 因为这文件靠隐式可达吃过一次亏(见 p55)。 */
 #include "zf_driver_flash.h"
 
 /* 参数表元数据。def 一律引用各模块原有的宏,保证"出厂值"与代码里写的一致,
@@ -109,6 +112,12 @@ static float  u2f(uint32 v) { flash_data_union u; u.uint32_type = v; return u.fl
  *   后轮实测拟合 v(m/s) = 0.00046*duty - 0.10,反解目标速度需要的 duty,留 1.3 倍余量。
  *   代入现场值(Flw 1.70 / OLSpd -33 即 2.43m/s):1.3*(2.43+0.10)/0.00046 = 7150,
  *   与本文件下方原注释里手试出来的"3000 -> 5000 -> 7000"终点吻合 —— 互为验证。
+ *   2026-09-06 补进【踏板驾驶】:它也是速度消费者,当初漏在这个 max 之外,
+ *   结果把 KART_PEDAL_MAX_V_MS 提到 3.0 也跑不到 —— Imax 7150 反解回去
+ *   只支撑 3.19m/s,现象就是"上限提了还是慢"。
+ *   代价说清楚:v_top 是共用的,所以跟随和科目三的 Imax 也跟着从 7150 上到
+ *   10000。按上面那条"Imax 是天花板不是油门"的理由这是安全的,车不会超过
+ *   命令速度,只是瞬态积分能积更多、起步可能有点超调,有 Ramp Step 兜着。
  *   【放大它为什么安全】Imax 是天花板不是油门:变大不会让车超过命令速度,只是拆掉
  *   那道拿不到 31% duty 的人为限制。电流/温度由速度目标决定,那个还在人手里。
  *   代价是瞬态积分能积更多,起步/出弯可能有点速度超调,有 Ramp Step 兜着。
@@ -140,8 +149,15 @@ static float param_derive_imax(void)
     float v_flw = param_val[PARAM_FLW_CRUZ];                        /* m/s */
     float v_rev = -param_val[PARAM_S3_OL_SPD] * PLAYBACK_V_TO_MS;   /* 脉冲/5ms(负) -> m/s(正) */
     float v_top = (v_flw > v_rev) ? v_flw : v_rev;
-    float imax  = SPD_DERIVE_IMAX_MARGIN
-                  * (v_top + SPD_DERIVE_DUTY_OFFSET) / SPD_DERIVE_DUTY_PER_MS;
+    float imax;
+
+    /* 踏板驾驶踩到底的目标速度。是编译期常量,不是参数表里的格子 ——
+     * 踏板是赛后加的外挂功能,故意不占 DFlash 参数表的槽位(理由见
+     * kart_calib.h 第八节开头)。所以它只能这样并进来。 */
+    if(KART_PEDAL_MAX_V_MS > v_top) { v_top = KART_PEDAL_MAX_V_MS; }
+
+    imax = SPD_DERIVE_IMAX_MARGIN
+           * (v_top + SPD_DERIVE_DUTY_OFFSET) / SPD_DERIVE_DUTY_PER_MS;
 
     if(imax < SPD_DERIVE_IMAX_FLOOR) imax = SPD_DERIVE_IMAX_FLOOR;
     if(imax > SPD_DERIVE_IMAX_CEIL)  imax = SPD_DERIVE_IMAX_CEIL;

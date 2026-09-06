@@ -288,6 +288,18 @@ void kart_control_set_ramp_step(float step)
 float kart_control_get_ramp_step(void) { return kart_speed.ramp_step; }
 float kart_control_get_target_cmd(void) { return kart_speed.target_cmd; }
 
+/* 全力刹车,理由与数值推导写在 kart_control.h 的声明处。
+ * target 和 target_cmd 一起清:清 target_cmd 是下命令,清 target 是绕过斜坡
+ * (斜坡本来对"幅值减小"就是直接跟随,这里写明白免得以后改斜坡时漏掉)。
+ * pid_right 全工程不再被推进,跟着清只为两份状态别劈叉。 */
+void kart_control_brake_hard(void)
+{
+    kart_speed.target_cmd = 0.0f;
+    kart_speed.target     = 0.0f;
+    kart_speed.kart_pid.err_sum  = 0.0f;
+    kart_speed.pid_right.err_sum = 0.0f;
+}
+
 /* 速度环积分限幅在线调(菜单 Spd Imax)。
  * 为什么单独给接口:i_max 是提速的第一道墙 —— 稳态 duty = Kp*e + i_max,
  * 实测 200*19.4+3000 = 6876,10000 的量程有 27% 永远拿不到。

@@ -371,7 +371,7 @@ static void menu_draw_status_bar(void)
 
 static void menu_draw_main(void)
 {
-    ui_title("KART Kart_TC387", NULL);
+    ui_title("KART TC387", NULL);
     ui_bar(UI_Y_HEAD, " Select subject", UI_KEY, UI_BG);
 
     ui_item(UI_Y_ROW0 + 0 * UI_ROW_H, "Subject 1   Slalom",
@@ -1171,14 +1171,19 @@ static void menu_draw_pedal_run(void)
     uint8 brake  = kart_pedal_get_brake();
 
     ui_title("Pedal Drive", online ? "LINK" : "LOST");
-    ui_bar(UI_Y_HEAD, " Steering is mechanical", UI_DIM, UI_BG);
+    ui_bar(UI_Y_HEAD, " Steer manual  brake@stop=R", UI_DIM, UI_BG);
 
     sprintf(buf, " Throttle  %4u / 1000",
             (unsigned)kart_pedal_get_throttle_pm());
     ui_bar(UI_Y_ROW0, buf, UI_NUM, UI_BG);
 
-    sprintf(buf, " Brake     %s", brake ? "ON " : "off");
-    ui_bar(UI_Y_ROW0 + UI_ROW_H, buf, brake ? UI_WARN : UI_DIM, UI_BG);
+    /* 挡位跟刹车挤在同一行:R 就是"刹车踩住"的另一种说法,分两行反而像
+     * 两个独立状态。R 用报警色,因为它是屏幕上唯一能看出车会往后走的地方。 */
+    sprintf(buf, " Brake %s   Gear %s", brake ? "ON " : "off",
+            kart_pedal_is_reverse() ? "R" : "D");
+    ui_bar(UI_Y_ROW0 + UI_ROW_H, buf,
+           kart_pedal_is_reverse() ? UI_ERR : (brake ? UI_WARN : UI_DIM),
+           UI_BG);
 
     /* 这是本拍【真下发】的目标,不是"油门应该对应多少":刹车或失联时它是 0,
      * 一眼就能看出踏板到底有没有被吃进速度环。 */
@@ -1575,10 +1580,33 @@ static void menu_handle_key_mid_press(void)
                 }
                 else
                 {
+                    /* 提示里必须带链路计数。光说 offline 分不清两种完全不同的故障:
+                     *   rx=0            一个字节都没来 → 线/共地/波特率/CH32 没在发
+                     *   rx>0 且 bad>0   字节来了但整帧被丢 → 帧格式不对,最常见是
+                     *                   CH32 还在跑最初那版 7 字节结构体(没有 seq、
+                     *                   没有 0x0D 尾字节),buf[7] 永远对不上 PEDAL_TAIL。
+                     * 时长从 700 提到 1800:700ms 人看不完(2026-09-06 实测)。
+                     * nb 给到 48 而不是 UI_COLS+1:跑久了计数器能超过 30 个字符,
+                     * menu_flash_notice 自己会截到 UI_COLS,但 sprintf 不会。 */
+                    kart_pedal_stat_t st;
+                    char nb[48];
+
                     kart_pedal_note_deny();
-                    menu_flash_notice(kart_pedal_is_online()
-                                      ? "Release throttle first!"
-                                      : "Pedal box offline!", 700);
+                    kart_pedal_get_stat(&st);
+
+                    if(kart_pedal_is_online())
+                    {
+                        sprintf(nb, "THR %u - release pedal",
+                                (unsigned int)kart_pedal_get_throttle_pm());
+                    }
+                    else
+                    {
+                        sprintf(nb, "OFF rx%u ok%u bad%u",
+                                (unsigned int)st.rx_bytes,
+                                (unsigned int)st.frame_ok,
+                                (unsigned int)st.frame_bad);
+                    }
+                    menu_flash_notice(nb, 1800);
                 }
             }
             break;
@@ -2536,6 +2564,18 @@ static void menu_poll_body(void)
      * 这里比对上一次画的是哪页即可。页内改值/移光标两者都不变 → 不清屏。
      * 科目三阶段跳变刻意不算换页(2026-07-27 定):倒车过程自动推进,跟着刷屏会在
      * 控制窗口里插整屏 SPI 写。进 S3 界面的首屏由换页那次画出,之后保持静止。 */
+    /* 踏板驾驶页跟 MISSION_PEDAL 是绑定的:模式被别人切走了,这一页就不能留。
+     * 【原来会留】谁切模式谁不改 current_level,而这个函数只比对"上次画的是
+     * 哪一页",不看 mission。于是遥控抢占(kart_pedal.c 的 rc_wants_takeover,
+     * 早就有)和新加的遥控低挡急停都会让屏幕停在 Pedal Drive 页上,油门/挡位
+     * 还在跳,人以为车还归踏板管。一次判定把两条路都收住。
+     * 只做这一页:别的运行页要么自己退,要么故意留着看结果(S3_FINISHED)。 */
+    if(current_level == MENU_LEVEL_PEDAL_RUN
+       && MISSION_PEDAL != kart_mission_get_mode())
+    {
+        current_level = MENU_LEVEL_MAIN;
+    }
+
     if(current_level != last_drawn_level || rec_state != last_drawn_rec)
     {
         need_clear = 1;

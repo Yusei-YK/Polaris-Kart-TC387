@@ -165,6 +165,23 @@ void  kart_control_set_speed_kp(float kp);
  * 只影响"目标幅值增大"方向;减速/停车/反向恒为瞬时,不受此值影响。 */
 void  kart_control_set_ramp_step(float step);
 float kart_control_get_ramp_step(void);
+
+/* 全力刹车一拍:目标清零【并且清掉速度环积分】,让本拍输出退化成纯比例。
+ * 【为什么必须清积分】巡航时稳态 duty 全靠积分器供 —— 4.0m/s 需要 duty 8913,
+ * 积分项就顶在 8913 附近。此时只把目标打到 0,第一拍算出来是
+ *     P = 200*(0-54.3) = -10860,I = +8913  →  输出只有 -1947
+ * 也就是踩下刹车的瞬间只有 19% 的反向 duty,剩下的要等积分按每拍 54.3 的
+ * 速度自己退完(约 1 秒)才逐渐出来。这就是"刹车软"的全部来历。
+ * 清掉之后第一拍就是 -10860 → 撞满 ±10000 钳位,初始制动力矩是原来的 5.1 倍,
+ * 而且它随车速自己收敛:车停下 err→0,输出自然回 0,不会在静止时反向窜。
+ * 【为什么不动 Kd】KART_SPEED_KD_DEFAULT 是 0,这里只清 err_sum 不调
+ * kart_pid_reset(),免得将来 Kd 非 0 时把微分历史一起抹掉。
+ * 【剩下的延迟不在环里】power_sync 的 slew 遇到反向请求会先把输出打到 0、
+ * 驻留 KART_SLEW_ZERO_DWELL_TICKS 拍(6 拍 = 30ms)再往反向爬,爬升速率是
+ * 菜单 Slew Rear(400/拍 → 满量程 125ms)。这两个是全车共用的保护,不在这里改;
+ * 还嫌不够狠就调 Slew Rear。
+ * 调用方每拍调都可以(幂等),不需要自己判上升沿。 */
+void  kart_control_brake_hard(void);
 /* 读上层请求的目标(斜坡前)。get_target 返回的是斜坡后的实际 PID 目标。 */
 float kart_control_get_target_cmd(void);
 

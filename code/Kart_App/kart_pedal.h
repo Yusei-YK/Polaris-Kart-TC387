@@ -125,6 +125,7 @@ uint8  kart_pedal_is_online(void);
 uint8  kart_pedal_can_engage(void);     /* 两个硬条件是否都满足 */
 uint16 kart_pedal_get_throttle_pm(void);
 uint8  kart_pedal_get_brake(void);
+uint8  kart_pedal_is_reverse(void);    /* 1 = 当前 R 挡(刹车踩住且车已停) */
 float  kart_pedal_get_target_ms(void);  /* 本拍下发的目标速度(m/s)，遥测/屏幕用 */
 void   kart_pedal_get_stat(kart_pedal_stat_t *dst);
 
