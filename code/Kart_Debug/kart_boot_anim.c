@@ -15,7 +15,6 @@
 #define BOOT_PROGRESS_X     (24u)
 #define BOOT_PROGRESS_Y     (284u)
 #define BOOT_PROGRESS_W     (192u)
-#define BOOT_DISPLAY_FRAMES (15u)     /* 30 帧素材隔帧显示，兼顾流畅度与启动速度 */
 #define BOOT_READY_MS       (120u)
 
 /* 一帧解码缓冲 16KB；压缩素材常驻 Flash，不占数据 RAM。 */
