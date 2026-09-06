@@ -1,4 +1,21 @@
-/* 由 tools/generate_boot_anim.py 生成，请勿手改。 */
+/* 由 tools/generate_boot_anim.py 生成，请勿手改。
+ *
+ * 里面是什么：开机动画的 30 帧，每帧 112x122，6 色调色板 + 逐行 RLE。
+ *   kart_boot_palette[6]        RGB565 调色板
+ *   kart_boot_frame_offsets[31] 第 n 帧在 rle 里的起止（末项 72292 = 总长）
+ *   kart_boot_rle[72292]        (count, 色号) 成对，count 上限 255
+ * 三个数组都是 const，合计约 70.7KB，常驻 Flash。解码和上屏在
+ * kart_boot_anim.c，整份数据由 BOOT_ANIM_ENABLE 一并裁掉。
+ *
+ * 【重跑脚本前必读，2026-09-06 记】这份文件不是脚本输出的原样，手动改过两处，
+ * 直接重跑会得到一个编不过的头文件：
+ *   1) 脚本写的宏名带前缀（KART_BOOT_FRAME_W/H/COUNT），而这里和
+ *      kart_boot_anim.c 用的是不带前缀的 BOOT_FRAME_W/H/COUNT。
+ *      重跑之后 .c 里那些宏就全都找不到定义。
+ *   2) 脚本按 LF 写文件，仓库里这份是纯 CRLF。
+ * 换动画素材的正确做法：跑完脚本，把这三个宏名改回不带前缀，再转成 CRLF。
+ * 要么就先去把脚本改对——那样以后就不用记这一段了。
+ * （脚本开头那句 docstring 写的“128x64”也是旧数，实际 FRAME_SIZE 是 112x122。） */
 #ifndef KART_BOOT_ANIM_DATA_H_
 #define KART_BOOT_ANIM_DATA_H_
 
