@@ -54,7 +54,10 @@ void kart_boot_anim_play(void)
     ips200_full(BOOT_BG);
     ips200_show_string(84u, 14u, "SMART CAR");
     ips200_set_color(BOOT_BLUE, BOOT_BG);
-    ips200_show_string(40u, 34u, "Kart_TC387 CONTROL SYSTEM");
+    /* x=40 不是随手填的:8x16 字体、屏宽 240,20 个字符 = 160px,
+     * (240-160)/2 = 40 正好居中。改这行文字就必须重算 x,
+     * 否则整行偏出中线(2026-09-06 就是这么错位的)。 */
+    ips200_show_string(40u, 34u, "TC387 CONTROL SYSTEM");
     ips200_draw_line(BOOT_PROGRESS_X, BOOT_PROGRESS_Y,
                      BOOT_PROGRESS_X + BOOT_PROGRESS_W - 1u,
                      BOOT_PROGRESS_Y, BOOT_LIGHT_BLUE);
