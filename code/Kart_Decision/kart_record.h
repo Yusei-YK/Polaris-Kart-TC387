@@ -11,17 +11,25 @@
  * ------------------------------------------------------------------
  * 调用位置:
  *   kart_record_init()  —— cpu0_main.c 初始化段
- *   kart_record_poll()  —— 【10ms 一拍】cpu0_main.c:156 的 kart_task_10ms(),
+ *   kart_record_poll()  —— 【10ms 一拍】cpu0_main.c 的 kart_task_10ms(),
  *       紧跟在 kart_mission_poll() 后面。而且不是直调:中间隔着
  *       kart_multicore_record_poll(),那个包装只在 runtime_enabled 为真时才把
  *       活派给 CPU2 —— 该标志仅在 #if KART_MULTICORE_COMPAT_ENABLE 里被置 1,
  *       宏是 0,所以出厂固件恒走 else 分支,poll 就在 CPU0 上原地跑。
  *       采样阈值是【距离/转角】的,不是时间的,所以换拍率不改路径形状,
  *       只改能跟上 0.05m 间距的最高车速(10ms 一拍、2m/s 时每拍走 2cm)。
- *   kart_record_start/stop() —— 六处,都不是调试口:
- *       start: kart_menu.c:2097、kart_mission.c:174
- *       stop : kart_menu.c:2102、kart_mission.c:87、kart_mission.c:827、
- *              kart_mission.c:883
+ *   kart_record_start/stop() —— 六处,都不是调试口。
+ *       start: kart_menu.c   menu_handle_recording_mid_press()
+ *              kart_mission.c mission_enter()
+ *       stop : kart_menu.c   menu_handle_recording_mid_press()
+ *              kart_mission.c mission_stop_all()
+ *              kart_mission.c subject3_loop() 两处(正常收尾 + 异常收尾)
+ *       【2026-09-06 为什么这里不写行号了】原来这六处写的是
+ *       menu 2097/2102、mission 87/174/827/883,现在全是错的,而本文件谁都没动过
+ *       —— 是别处插进来的代码把它们顶下去的(改踏板那批往 kart_menu.c 里加了
+ *       二十多行)。而且错得不显眼:老的 mission.c:87 现在是 kart_playback_stop(),
+ *       看上去还挺像那么回事,真正的 kart_record_stop() 在 88 行。
+ *       函数名不会这样漂,所以改成按函数定位。上面 kart_task_10ms 那处同理。
  *       【原来写的"VOFA 命令 r1/r0"已作废】调试口现在一处都不碰录制。
  * ------------------------------------------------------------------
  * Flash 持久化【已经做完了,不是后续扩展】:接口就是本文件下面的
