@@ -91,7 +91,9 @@ static void motion_set_delta(float delta)
 /* 航向误差(度,规整 ±180),定义为【目标 - 实测】= yaw0 - yaw,与航向环同惯例。
  * 【只用相对量】比赛中途不能 reset,绝对 yaw 会漂几十度;本函数只比 yaw0,
  * 而 yaw0 是本条动作启动那拍 latch 的,所以长时间漂移完全不影响。
- * get_relative_angle(now, aim) 返回 aim-now(kart_calc.c:93),所以参数顺序是 (yaw, yaw0)。 */
+ * get_relative_angle(now, aim) 返回 aim-now,所以参数顺序是 (yaw, yaw0)。
+ * 【2026-09-06 订正】函数在 kart_calc.c 里,原注释写的 :93 只是那一节的分隔线,
+ * 函数本体在 :97 —— 改成按函数名找,行号会漂。 */
 static float motion_yaw_err(void)
 {
     return get_relative_angle(kart_imu_get_yaw(), motion_yaw0);
@@ -163,7 +165,11 @@ static void motion_snake_step(uint8 reverse)
  *   开环(MOTION_OPENLOOP_REAR=1):固定 duty 直下发,不跑速度环 PID。
  *   闭环(=0):走速度环,行为与改造前完全一致(A/B 对照回退用)。
  * 两种模式都必须 set_enable(1) —— enable 是"后轮有没有主人"的唯一开关,
- * 全工程三处仲裁(kart_control.c / isr.c:70 / cpu0_main.c:103)都判它,
+ * 全工程三处仲裁都判它:kart_control.c 的速度环本体、isr.c 的 5ms 中断
+ * cc60_pit_ch0_isr、cpu0_main.c 的 kart_task_5ms()。
+ * 【2026-09-06 订正】原注释在 isr.c 那处写的 :70、cpu0_main.c 那处写的 :103,
+ * 两个行号都已失效(真实位置是 :74 和 :91,而 :70 那行现在是
+ * kart_multicore_imu_update)。三处仲裁这件事本身没变,只是改成按函数定位。
  * 不置 1 后轮会被清成 0(遥控挡位/失联/deadman 也是改这个开关来急停的)。
  * duty 符号 = 方向:正前进、负后退。 */
 static void motion_set_rear(int16 open_duty, float closed_speed)
@@ -438,7 +444,9 @@ uint8 kart_motion_start_goto(float tx, float ty, float tyaw)
  *   0.001m),反方向命令更要先跑 2000 计数 ≈1.1s 才开始对。连续下命令必踩。
  * 后轮此刻已经停了,所以是原地回轮,车不会走出去。
  * 回正期间 motion_phase != IDLE => is_busy()=1 => 下一条语音命令在队列里等,
- *   不会踩着歪轮子起步(kart_voice.c:265 已经按 is_busy 串行排队)。 */
+ *   不会踩着歪轮子起步 —— kart_voice.c 的 kart_voice_dispatch() 开头就按
+ *   is_busy 串行排队。【2026-09-06 订正】原注释写的 :265 现在是
+ *   kart_voice_get_frame_count() 的左花括号,真实位置在 :290。 */
 static void motion_finish(void)
 {
     /* 后轮立刻停:回正段绝不能还带着出力。 */
