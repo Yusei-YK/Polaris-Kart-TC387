@@ -283,10 +283,10 @@ void kart_voice_dispatch(void)
 
     /* 鸣笛/运动/门洞复现都是长动作:任一忙时本拍不取新命令,让当前动作跑完再处理
      * 下一条,保证串行执行不打架(队列缓冲已在解析层入队)。
-     * 【2026-07-29 补 kart_playback】原来漏判 kart_playback_is_running():门洞复现
-     * 途中来一条语音命令会立刻被派发,kart_motion 和 kart_playback 同时写 target_delta /
-     * target 速度,两个都在 5ms/10ms 拍上互相覆盖 → 车在门洞里乱打方向。
-     * kart_playback 自己不看队列,所以只能在这里拦。 */
+     * 【为什么连 kart_playback 一起判】门洞复现途中来一条语音命令若被立刻派发,
+     * kart_motion 和 kart_playback 会同时写 target_delta / target 速度,两个都在
+     * 5ms/10ms 拍上互相覆盖 → 车在门洞里乱打方向。kart_playback 自己不看队列,
+     * 所以只能在这里拦。 */
     if(kart_horn_is_busy() || kart_motion_is_busy() || kart_playback_is_running())
     {
         return;
@@ -321,14 +321,12 @@ void kart_voice_dispatch(void)
          * 复用已验证的 kart_playback 链路:加载→启动(相对当前位姿复现)。
          * 前提同手动选槽:说命令时车须已停在发车区标记点且车头摆正。
          *
-         * 【2026-07-29 删掉了这里的 kart_odom_reset()】
-         * 为什么删:它把发车区原点擦了,之后车永远不知道"发车区在哪",
-         *   语音返回(0x1A~0x1E)就无从实现 —— 这是返回功能的头号阻塞项。
-         * 为什么删了行为不变(可证明,不是赌):kart_playback_start() 自己把
-         *   当前位姿快照存进 play_origin_x/y/yaw(kart_playback.c:204-207),
-         *   poll 里只用 kart_odom - play_origin 的【差值】(345-346)。
-         *   reset 只改绝对值不改差值 → 本条复现的每一拍输出完全一致。
-         * 发车区原点改为整个科目二只清一次,在 mission_enter(MISSION_SUBJECT_2)。 */
+         * 【这里不要 kart_odom_reset()】发车区原点整个科目二只清一次,在
+         * mission_enter(MISSION_SUBJECT_2) 里。在这儿再清一次会把发车区原点擦了,
+         * 之后车永远不知道"发车区在哪",语音返回(0x1A~0x1E)就无从实现。
+         * 清不清都不影响本条复现:kart_playback_start() 自己把当前位姿快照存进
+         * play_origin_x/y/yaw,poll 里只用 kart_odom - play_origin 的【差值】,
+         * 绝对值变了差值不变,每一拍输出完全一致。 */
         uint8 slot = (uint8)(cmd.cmd - 0x15 + 1);
         if(kart_record_load_from_flash(slot) >= 2)
         {
