@@ -161,9 +161,9 @@ uint8 kart_camera_init(void)
     g_cam_wb_ret = 0xFFu;
 
     /* 这里不需要停点阵扫描、也不需要改 UART1 归属:本函数被约束在
-     * dot_matrix_screen_init() 之前调用(cpu0_main.c:265 / :275),那时灯板还没起来,
-     * UART1 没人用。原先的动态仲裁已于 2026-08-10 删除,删除说明就在本函数上方
-     * (CAMERA_ENABLE 段末那块注释)。 */
+     * dot_matrix_screen_init() 之前调用(见 cpu0_main.c 里 kart_camera_init()
+     * 的调用处),那时灯板还没起来,UART1 没人用。为什么不需要运行期仲裁,
+     * 本函数上方那块注释写了。 */
 
     for(try_i = 0; try_i < CAMERA_INIT_RETRY; try_i++)
     {
