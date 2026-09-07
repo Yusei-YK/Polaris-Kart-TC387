@@ -6,7 +6,15 @@
 第二十一届全国大学生智能汽车竞赛 · 全国二等奖
 
 基于 Infineon AURIX TC387 的卡丁车工程。惯导轨迹录制与复刻、引导员跟随、
-视觉锥桶识别、人车联动的灯光与语音,四核分工,控制环 5 ms,遥测 50 Hz。
+视觉锥桶识别、人车联动的灯光与语音、踏板人工驾驶,四核分工,控制环 5 ms,
+遥测 50 Hz。
+
+## 先看这里
+
+**实车完赛的固件是标签 `race-final-2026`。** 想复现赛场上的车,检出这个标签,
+不要用分支尖端。赛后又加了 CH32 踏板盒驾驶和一轮注释订正,那些改动没有在
+实车上跑过、也还没编译验证过,现在都在 `feature/pedal-ecu` 分支上。
+各版本之间的差别记在 `CHANGELOG.md`。
 
 ## 工程概览
 
@@ -14,18 +22,19 @@
 |---|---|
 | 主控 | Infineon AURIX TC387(TriCore,四核) |
 | 工具链 | AURIX Development Studio + TASKING |
-| Eclipse 工程名 | `Kart_TC387` |
-| 跟踪文件 | 821 个(自己写的 163,厂商库 658) |
-| 提交 | 33 条,2026-06 至 2026-08 |
+| Eclipse 工程名 | `Kart_TC387`(写在 `.project` 里,不是文件夹名) |
+| 跟踪文件 | 829 个:本队 171,厂商库 658 |
+| 提交 | 108 条,2026-06-04 至 2026-09-07 |
 | 控制周期 | 速度环、转向内环 5 ms;任务与运动学 10 ms |
 | 遥测 | VOFA+ JustFloat,460800,43 通道,50 Hz |
 | 参数 | 存片上 flash,菜单里在线改,掉电不丢 |
+| 动态内存 | 不用。全工程 `malloc`/`calloc`/`free` 零处使用 |
 
 ## 目录结构
 
 ```text
 Polaris-Kart-TC387/
-├── code/                  自己写的业务代码,按职责分层
+├── code/                  业务代码,按职责分层
 │   ├── Kart_Config/       板级引脚、标定常量(引脚事实的唯一来源)
 │   ├── Kart_Driver/       外设驱动封装:电机、编码器、相机、flash、鸣笛
 │   ├── Kart_App/          应用层:速度环、转向环、里程推算、IMU、灯光语音
@@ -39,6 +48,27 @@ Polaris-Kart-TC387/
 ├── tools/                 上位机脚本:日志解析、轨迹仿真、素材生成
 └── .cproject .project ... AURIX Studio 工程文件
 ```
+
+## 运行模式
+
+顶层模式机在 `code/Kart_Decision/kart_mission.c`,七个模式:
+
+| 模式 | 做什么 |
+|---|---|
+| `MISSION_IDLE` | 安全待机。车轮、转向、蜂鸣器全部无输出 |
+| `MISSION_SUBJECT_1` | 科目一绕桩:START 键触发,前向复现录好的路线 |
+| `MISSION_SUBJECT_2` | 科目二人车交互:听语音口令,一条一条派发动作 |
+| `MISSION_SUBJECT_3` | 科目三如影随形:跟随录轨 → 开环反向复现 → 盲盒固定动作 |
+| `MISSION_REMOTE` | SBUS 遥控接管,调试和手动开车用 |
+| `MISSION_FAULT` | 故障锁止 |
+| `MISSION_PEDAL` | 踏板驾驶:人踩油门刹车,方向盘走机械连杆,转向电机不使能 |
+
+模式切换统一走 `kart_mission_set_mode()`:先 exit 旧模式统一停机,再 enter 新模式,
+保证互切不留残余输出。入口是 IPS200 菜单,调试口的 VOFA `m` 命令是备用。
+
+科目三第一阶段的控制源由 `S3_FOLLOW_SRC` 编译期选:0 遥控、1 本地视觉认引导板、
+2 收 TC4D7 送来的人体检测帧。三条并存的原因是现场哪条不灵都能改一个宏重烧退回去,
+第二阶段的开环倒车复现三者共用。
 
 ## 功能模块与源码对应
 
@@ -54,6 +84,7 @@ Polaris-Kart-TC387/
 | 运动学与几何 | `code/Kart_Decision/kart_motion.c` `code/Kart_Algo/kart_calc.c` |
 | 视觉识别与目标跟踪 | `code/Kart_Algo/kart_vision.c` `kart_vtrack.c` `kart_preprocess.c` |
 | 人车联动 | `code/Kart_App/kart_person_link.c` |
+| 踏板盒串口接入 | `code/Kart_App/kart_pedal.c` |
 | 灯光 / 语音 / 鸣笛 | `code/Kart_App/kart_light.c` `kart_voice.c` `code/Kart_Driver/kart_horn.c` |
 | 遥控 SBUS 接管 | `code/Kart_App/kart_remote.c` |
 | 菜单、参数、flash 存取 | `code/Kart_Decision/kart_menu.c` `kart_params.c` `code/Kart_Driver/kart_flash.c` |
@@ -65,7 +96,7 @@ Polaris-Kart-TC387/
 ```text
 传感器原始数据
   编码器 kart_encoder · IMU kart_imu · 转向绝对编码器 kart_steer_abs
-  摄像头 kart_camera · 遥控 SBUS kart_remote
+  摄像头 kart_camera · 遥控 SBUS kart_remote · 踏板盒 kart_pedal
     -> 驱动层封装(code/Kart_Driver/)
 底盘状态估计    kart_imu 姿态 + kart_odom 位置与里程
     ->
@@ -87,7 +118,8 @@ Polaris-Kart-TC387/
 | CPU2 | IPS200 屏幕绘制 | 软件 SPI,刷一屏要推 61.8 万 bit ≈ 355 ms(按位周期推算,非实测),留在主核会挤掉 71 个控制拍 |
 | CPU3 | 视觉识别(异步) | 一帧约 360 ms(推算,非实测),投递即返回,主核不等结果 |
 
-多核调度与通道协议在 `user/kart_multicore.c`,各核入口在 `user/cpu1_main.c` ~ `cpu3_main.c`。
+多核调度与通道协议在 `user/kart_multicore.c`,各核入口在 `user/cpu1_main.c` ~
+`cpu3_main.c`。
 
 ## 设计约束
 
@@ -95,21 +127,23 @@ Polaris-Kart-TC387/
 
 1. 主控制流程非阻塞。流程靠距离、航向、事件推进,不靠长 `delay` 硬等。
 2. 硬件访问一律经 `code/Kart_Driver/` 封装,业务代码不直接碰 PWM/GPIO/SPI/UART。
-3. 不用动态内存,不上操作系统。全工程 `malloc`/`calloc`/`free` 零处使用。
+3. 不用动态内存,不上操作系统。
 4. 急停、关键传感器异常、路段超时,一律先停车,由 `kart_power` 统一执行。
 5. 闭环调参必须有 VOFA 通道或日志支撑,不靠肉眼和手感猜。
+6. 注释和文档以代码为准。对不上的时候改注释,不是改代码来迁就注释。
 
 ## 编译与烧录
 
 1. 安装 AURIX Development Studio。安装与使用说明见
    `docs/硬件资料/AURIX_Studio使用说明书_逐飞V1.9.pdf`。
 2. `File → Import → Existing Projects into Workspace`,根目录选本仓库。
-   工程名是 `Kart_TC387`(写在 `.project` 里,不是文件夹名)。
+   工程名是 `Kart_TC387`。
 3. 选构建配置:`Debug` 带调试信息,`release build` 是比赛用的。
 4. 烧录与调试直接用已入库的两份配置:`Kart_TC387 Debug.launch`、
    `Kart_TC387 release build.launch`,clone 下来就能跑,不用自己新建。
 5. 上位机用 VOFA+,接调试串口,协议 JustFloat,波特率 460800,
-   **通道数必须设成 43**,少一个通道整帧会错位。
+   **通道数必须设成 43**,少一个通道整帧会错位。标定步骤见根目录
+   `VOFA_标定操作.md`。
 
 ## 二次开发注意
 
@@ -130,37 +164,11 @@ Polaris-Kart-TC387/
 
 | 文档 | 内容 |
 |---|---|
-| `开发日志.md` | 开发过程、当天遇到的问题和结论 |
+| `开发日志.md`(根目录) | 开发过程、当天遇到的问题和结论 |
 | `docs/03_硬件排查与第二版PCB.md` | 硬件硬结论、v1/v2 引脚、走线错误与飞线修复 |
 | `docs/04_Indoor_Test_Checklist.md` | 上车前的室内测试清单 |
 
-`VOFA_标定操作.md` 在根目录,是 43 通道遥测的标定步骤。待办清单在 `docs/TODO.md`。
-
-## 参考与自研
-
-这套方案是照着东北大学秦皇岛分校 TopSpeed 队的开源工程学的。哪些是学的、哪些是
-自己做的分开写在这儿,免得后来人误会成全是原创。
-
-跟着 TopSpeed 学的：
-
-- 骨架：分层架构、控制节拍的划分、PID 算子、统一由 `kart_power` 出口、
-  Mission 任务状态机这套组织方式。
-- 只学到结构和算子这一层。他们用舵机、车上没有前轮角度传感器,那个
-  `angle_ctrler` 控的是车身航向而不是前轮角,所以转向闭环搬不过来。
-
-自己做的：
-
-| 模块 | 为什么得自己写 |
-|---|---|
-| 转向内环与航向外环 `kart_steer_ctrl.c` | 卡丁用直流转向电机加前轮绝对编码器,角度环没有可抄的对象 |
-| 里程与位姿推算 `kart_odom.c` | 左右轮脉冲当量拆成独立通道,共用一个系数会把单侧故障盖在均值里 |
-| 轨迹录制与复刻 `kart_record.c` `kart_playback.c` | Flash 路径格式自定,每点 7 字,头部存起点位姿,复刻不用手动把车摆回原位 |
-| 视觉识别与 CPU3 异步投递 `kart_vision.c` `user/kart_multicore.c` | 一帧约 360 ms,必须投递即返回,同步通道用不了 |
-| 灯光 `kart_light.c` | 灯板用 74HC238 把三位地址译码成 SR0~SR6,和官方例程七路 GPIO 直接行选不是一回事,扫描得重写 |
-| 人车联动与语音 `kart_person_link.c` `kart_voice.c` | 科目要求,官方例程里没有 |
-| 菜单在线调参与 flash 存取 `kart_menu.c` `kart_params.c` `kart_flash.c` | 现场没有上位机,参数改不动就只能一遍遍烧写 |
-| 引导员跟随 `kart_follow.c` | 科目要求 |
-| 43 通道遥测 `kart_debug_uart.c` | 调参得有数据支撑,不靠手感猜 |
+待办和已知缺口在 `docs/TODO.md`,封箱前的检查项在根目录 `国赛封箱清单.txt`。
 
 ## 版权与使用声明
 
@@ -171,13 +179,14 @@ Polaris-Kart-TC387/
 - `docs/硬件资料/` 的三份 PDF 是厂商公开手册,版权归原作者,放在这里只为方便查阅。
 - 参赛、学习、二次开发自便。商用请自行核对上游许可。
 
-## 维护说明
+## 分支与标签
 
-只保留一条 `main` 分支。关键节点用标签标记:
+`main` 是主线。`feature/pedal-ecu` 是赛后的踏板驾驶与文档整理,尚未并入。
+关键节点用标签标记:
 
 | 标签 | 指向 | 是什么 |
 |---|---|---|
-| `race-final-2026` | `195ca7e` | 国赛完赛版本(全国二等奖) |
+| `race-final-2026` | `195ca7e` | 国赛完赛版本(全国二等奖),实车跑的就是这一份 |
 | `flash-s3-20260823` | `93bceda` | 国赛前最后一次科目三烧录版本 |
 | `freeze-20260726-light-voice` | `7c23740` | 灯光与语音功能冻结点 |
 | `snapshot-pre-multicore-20260722` | `c818976` | 拆多核之前的快照 |
@@ -189,14 +198,11 @@ Polaris-Kart-TC387/
 ## 致谢
 
 - 东北大学秦皇岛分校 TopSpeed 队的
-  [NEUQ_TopSpeed_CrossCountry_TC377](https://github.com/Ryan-5853/NEUQ_TopSpeed_CrossCountry_TC377)
-  开源工程。本仓库的目录分级和文件管理方式参照它整理,清晰、好找。
-- 东北大学秦皇岛分校公开的 IMU 姿态解算实现(知乎 @Morever,
-  <https://zhuanlan.zhihu.com/p/656101554>)。`code/Kart_App/kart_imu.c`
-  的解算部分来自这份资料。
-- 逐飞科技的 TC387 开源库和 AURIX Studio 使用说明。
-- 逐飞科技的 TLD7002 点阵屏例程
+  [开源工程](https://github.com/Ryan-5853/NEUQ_TopSpeed_CrossCountry_TC377),
+  以及东北大学秦皇岛分校公开的 IMU 姿态解算实现
+  (知乎 @Morever,<https://zhuanlan.zhihu.com/p/656101554>)。
+  真心感谢无私开源。
+- 逐飞科技的 TC387 开源库、AURIX Studio 使用说明,以及 TLD7002 点阵屏例程
   (<https://gitee.com/seekfree/TLD7002_LED_Dot_Matrix.git>,当年固定在提交
-  `335abb7`,GPL-3.0)。只作为官方接口参照,比赛用的显示逻辑是自己写的。
+  `335abb7`,GPL-3.0)。
 - Infineon 的 iLLD 与 SFR 头文件。
-
