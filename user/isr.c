@@ -406,7 +406,12 @@ IFX_INTERRUPT(uart10_rx_isr, UART10_INT_VECTAB_NUM, UART10_RX_INT_PRIO)
     /* 语音模块不在这里：kart_voice_poll() 用 uart_query_byte() 直读硬件 RX FIFO，
      * 它的帧很稀疏（人说一句才来一帧），轮询足够。
      * 人体视觉链路不同：115200 下背靠背连发，25 字节一帧只需 ~2.2ms，
-     * 放到 10ms 任务里轮询必丢字节，所以这里必须用中断。 */
+     * 放到 10ms 任务里轮询必丢字节，所以这里必须用中断。
+     * 【2026-09-07 出厂档这个 ISR 是空的】下面那个 #if 两个条件都不成立:
+     * board_pins.h 里 PERSON_LINK_ENABLE = 0,而且 PERSON_LINK_PORT 选的是
+     * PORT_LIGHT 不是 PORT_VOFA。所以 UART10 的 RX 中断进来什么也不做
+     * (只有一句 interrupt_global_enable)。UART10 在出厂档归语音,而语音是轮询的。
+     * 上面那套"必须用中断"的论证只在 PLINK 走 VOFA 口那一档成立,留着备用。 */
 #if (PERSON_LINK_ENABLE && (PERSON_LINK_PORT == PERSON_LINK_PORT_VOFA))
     kart_person_link_rx_callback();
 #endif

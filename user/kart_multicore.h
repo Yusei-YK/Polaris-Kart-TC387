@@ -34,7 +34,12 @@ void  kart_multicore_mark_online(uint8 core_id);
 void  kart_multicore_enable_runtime(void);
 uint8 kart_multicore_is_runtime_enabled(void);
 
-/* Drop-in wrappers used at the original CPU0 call sites. */
+/* Drop-in wrappers used at the original CPU0 call sites.
+ * 【2026-09-07 下面这五个里 dot_scan 已经没有调用点了】code/ 和 user/ 里
+ * kart_multicore_dot_scan 只剩本行声明和 kart_multicore.c 里的定义。点阵扫描
+ * 早已交给 CPU0 的 1ms PIT(cc61_pit_ch0_isr),不再经过这个包装。
+ * 另外四个还在用:imu/odom 在 isr.c 的 5ms 中断里,record_poll 在 10ms 拍,
+ * dot_show_string 在 100ms 拍。留着 dot_scan 是因为 COMPAT 通道整套都留着。 */
 void kart_multicore_imu_update(void);
 void kart_multicore_odom_update(void);
 void kart_multicore_record_poll(void);
