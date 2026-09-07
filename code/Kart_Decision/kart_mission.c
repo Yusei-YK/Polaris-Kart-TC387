@@ -421,13 +421,17 @@ static void remote_loop(void)
 #if (S3_FOLLOW_SRC == S3_FOLLOW_SRC_VISION)
 /* ---- kart_vision 结果 → kart_vtrack 结果 ----
  * 【修一个先于 PLINK 就存在的错】原先这里直接 kart_follow_update(vis)，
- * 而 kart_follow.h:285 的入参是 const kart_vtrack_result_t *。两个结构体第三个
+ * 而 kart_follow_update() 声明的入参是 const kart_vtrack_result_t *。两个结构体第三个
  * 字段一个是 float dist_m、一个是 enum scale_level：不报错（都是指针），但
  * kart_follow 会把“米”当“档位”读，跟随行为鬼异。所以在这里显式换一道。
  *
- * scale_r 的参考距离取 FOLLOW_L_NOMINAL_M(1.50m)：它在 kart_follow.h:135
- * 的注释里就是“期望跟车距离的中点”。仓里没有任何专门的“目标距离”宏，
+ * scale_r 的参考距离取 FOLLOW_L_NOMINAL_M(1.50m)：它在 kart_follow.h 那个宏
+ * 自己的注释里就是“期望跟车距离的中点”。仓里没有任何专门的“目标距离”宏，
  * 不新造一个；这个选择是判断，不是协议规定。
+ * 【2026-09-07 不写行号了】上面两处原来写的是 kart_follow.h 的 :285(入参)和
+ * :135(标称距离),两个都已对不上:kart_follow_update 的声明现在在 :350,
+ * FOLLOW_L_NOMINAL_M 在 :138。claim 本身没错,只是行号会随头文件长短漂,
+ * 改成按名字找。
  * scale_r = L_NOMINAL / dist：人走近 → dist 小 → scale_r 大，与 kart_vtrack 的
  * “像素尺寸比”同向，NEAR_THRESH/FAR_THRESH 两个阀值可直接用。
  * confidence：kart_vision_result_t 没有置信度字段，valid 就给满。
@@ -1132,7 +1136,15 @@ void kart_mission_set_mode(kart_mission_mode_t mode)
      * 同样 acquire 过。判据用"阶段已到 S3_SIGNAL 及以后"而不是无条件释放 ——
      * 在跟随/倒车阶段就退出的话根本没 acquire,那时 release 会把日志波特率
      * 切成还没被改过的样子(实际是同一个 460800,行为无害但语义是错的),
-     * 更要紧的是 kart_debug_uart_set_enabled(1) 会把本来关着的日志闸打开。 */
+     * 更要紧的是 kart_debug_uart_set_enabled(1) 会把本来关着的日志闸打开。
+     * 【2026-09-07 这段的前提已经没了,当历史读】上面这套推理成立的前提是科目三
+     * 真会走到 S3_SIGNAL。出厂配置 S3_FIXED_ACT_ENABLE = 1,于是
+     * S3_HOLDS_VOICE_UART(stage) 被展开成常量 (0)(见 kart_mission.h 那个 #if),
+     * 而唯一给 subject3_stage 赋 S3_SIGNAL 的 subject3_enter_signal() 整个被
+     * #if !S3_FIXED_ACT_ENABLE 编译掉 —— 也就是下面那个 if 的 MISSION_SUBJECT_3
+     * 那一半是死支路,科目三这条路从来没 acquire 过语音串口。
+     * 头文件 S3_HOLDS_VOICE_UART 处早就写清楚了,漏改的是这里。
+     * 【别删】ENABLE 改回 0 这套推理立刻重新有效,而且届时它仍然是对的。 */
     if((MISSION_SUBJECT_2 == mission_mode)
        || (MISSION_SUBJECT_3 == mission_mode && S3_HOLDS_VOICE_UART(subject3_stage)))
     {
