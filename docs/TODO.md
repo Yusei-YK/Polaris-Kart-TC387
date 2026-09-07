@@ -158,7 +158,13 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
       后面 93 个文件要照抄的：每个数带标定来源和日期、派生量标明"不要手改"、
       重标步骤编号列出、踩过的坑留在原地（例如 `:137` 记着 2026-07-29 误改
       符号导致一动就打死不回中，已回退）。文件里六处算术全复算过，对得上。
-- [ ] D2 按上面顺序过完 94 个文件
+- [x] D2 按上面顺序过完了。七层加 `user/` 加 `code/kart_include.h` 全走到。
+      找到的错注释分五类：行号引用跑了、结论的前提已被别处改掉、
+      说法从来就没对过、把编译期已死的分支当成出厂路径写、
+      索引悄悄落在它声称镜像的目录后面。
+      改法统一是【保留原来错的说法，在旁边注明它错在哪】，不默默换掉，
+      因为仓库要交给下一届。引用一律改成函数名/宏名/槽名这类不随行号漂的锚点。
+      只改注释，去注释后代码逐字节等价由脚本强制。
 - [x] D3 订正已知的过期注释，五条都处理完了：`kart_playback.h` 的 Ke 建议
       （改成直接填实车完赛那对 Ke=-600，并写明当前剖面看不到 e_lat）、
       `kart_vtrack.c:332` 的 `pyr_gray`（实际是 `pyr_L0`/`pyr_L1`）、
@@ -183,7 +189,65 @@ commit；`freeze/light-voice-20260726` 和上表那个 tag 同一个 commit；
         文件头已标状态。
       `kart_menu.c` 2602 行不是死代码，是活的菜单，挪去 D2 按层级过。
       删宏之后 `board_pins.h` 和 `kart_debug_uart.c:577` 两处悬空引用已改说法。
-- [ ] D5 函数名清单：只挑词不达意的，给出对照表，人工确认后再改
+- [ ] D5 函数名清单：对照表列在下面，等人工确认后再改。改名要连
+      调用点一起动，所以本条只给判断，不动代码。
+      扫了 `code/`（不含 `zf_*` 和 `TLD7002_driver`）加 `user/` 的所有 `.c`，
+      537 个自研函数的名字逐个看过，真正词不达意的六条，
+      另有五条属于命名不统一而不是名字错，分开列。
+
+      建议改的六条：
+      - `kart_calib_init/update/reset/get_stat/print_report`
+        （`kart_vision_calibrate.c`）→ 加 vision，例如 `kart_vision_calib_*`。
+        这五个是视觉颜色/焦距标定工具，但 `kart_calib_` 这个前缀在别处
+        指的是 `kart_calib.h`——整车标定常数那份（阿克曼常数、编码器系数）。
+        在调用点看见 `kart_calib_update()` 的人会翻错文件。这条最值得改。
+      - `power_check_poll` / `power_check_is_done`（`kart_power.c`）→
+        `power_boot_selftest_poll` / `_is_done`。名字里的 check 读起来是只读的
+        状态查询，实际上它按 Debug_Stage 1→10→2→20→3→30→4→40→5 的顺序
+        真的给后轮和转向发 duty，车会动。当状态查询调一下就是轮子转起来。
+      - `IMU_check`（`kart_imu.c`）→ `kart_imu_calib_gyro_bias`。它不做检查，
+        做的是陀螺零偏静止标定（带极差静止检测和重试），而且阻塞约 6s。
+        名字来自 TopSpeed 的同名函数，改了就断掉迁移对照，要改得在注释里留一句。
+      - `draw_begin/clear/string/line/point/image/commit`
+        （`kart_multicore.c`，对外声明在 `kart_multicore.h`）→ 建议加 `kart_` 前缀。
+        两个问题：一是全仓库就这七个对外函数没有 `kart_` 前缀；二是出厂档
+        `DRAW_ON_CORE2=1` 时它们根本不画，只是往 `draw_q` 塞指令等 CPU2 执行，
+        而 `draw_begin()` 返回 0 时整帧被静默丢掉（`draw_q.dropped++`）。
+        名字说“画”，行为是“排队，也可能不画”。
+      - `kart_playback_complete`（`kart_playback.c`）→ `kart_playback_finish`。
+        名字像个判断（“完成了吗”），实际是动作。而且开环倒车档它并不完成——
+        置 `playback_braking=1` 后保持 `playback_running=1`，真正完成要等
+        `kart_playback_poll_brake()` 那边。
+      - `draw_straight_line`（`kart_calc.c`）→ `line_from_two_points` 之类。
+        它不画任何东西，是用两点算 ax+by+c=0 的系数。注释里已经写明，
+        但名字还在误导。它和 `point_to_straight_line_distance` /
+        `get_point_to_line_dir` 全工程零调用者，改不改都不影响运行。
+
+      属于命名不统一，不建议现在动：
+      - `kart_power.c` 的公开接口全是 `power_*` 没有 `kart_` 前缀
+        （`power_init`/`power_sync`/`power_stop` 等十一个），而同文件的静态辅助
+        反而叫 `kart_limit_duty`/`kart_set_dir_pwm`/`kart_slew_step`。
+        前缀正好用反了。改要动十一个符号加全部调用点。
+      - 一批 static 辅助用了完整的公开前缀，例如 `kart_vision_erode_once`、
+        `kart_vtrack_bearing`、`kart_playback_find_nearest`、`kart_steer_wrap180`。
+        看名字分不出哪个是对外接口。量太大，收益太小。
+      - `kart_calc.c` 从 TopSpeed 的 GPS.c 搬来那批没有前缀：`get_angle`、
+        `get_distance`、`get_relative_angle`、`invSqrt`、`quaternionToEuler`。
+        其中 `get_angle` 最含糊——它返回的是方位角（度，正北 0，逆时针为正），
+        不是任意“角度”。
+      - `power_sync` 名字没说方向，它做的是把 `Power_now` 的四个 duty 快照取出来、
+        过变化率限制、写 PWM，叫 `power_apply` 更准。
+      - `kart_odom_read_center_distance` 返回的是累计里程，不是这一拍走的距离，
+        `read`+`distance` 容易读成增量。
+
+      核实过没问题、不要改的（防下一届当成漏项）：
+      - `kart_horn_isr` 真的是中断里调的（`isr.c:97`）。
+      - `kart_menu_input_poll` / `kart_menu_enc_poll` 名副其实。
+      - `vision_dev_cell` 的 dev 是色相偏差，和文件顶部 VIS_DEV 那套词汇一致。
+      - `kart_light_publish_text` 的 publish 指双缓冲切帧，是准确的。
+      - `kart_calib_print_report` 真的在 printf。
+      - `kart_task_light_10ms` 和 `kart_task_10ms` 都在 10ms 拍，不是重名。
+      - `motion_goto_axis_s` 的 s 是轴线上的带符号投影，注释里定义过。
 
 ## E 收尾
 
