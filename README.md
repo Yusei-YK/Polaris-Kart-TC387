@@ -41,11 +41,13 @@ Polaris-Kart-TC387/
 │   ├── Kart_Algo/         算法:PID、几何计算、图像预处理、视觉跟踪
 │   ├── Kart_Decision/     决策:任务状态机、录制回放、跟随、菜单参数
 │   ├── Kart_Debug/        调试:VOFA、硬件自测、轨迹绘制、开机动画
-│   └── Kart_TPL/          第三方器件驱动:点阵屏、TLD7002 灯板
+│   ├── Kart_TPL/          第三方器件驱动:点阵屏、TLD7002 灯板
+│   └── kart_include.h     聚合头,业务代码统一 include 这一个
 ├── user/                  四核 main、中断向量表、多核调度
 ├── libraries/             厂商代码,不改动
 ├── docs/                  文档、测试清单、硬件资料
 ├── tools/                 上位机脚本:日志解析、轨迹仿真、素材生成
+├── tests/                 主机上能跑的逻辑测试:灯光状态机
 └── .cproject .project ... AURIX Studio 工程文件
 ```
 
@@ -139,7 +141,8 @@ Polaris-Kart-TC387/
    `docs/硬件资料/AURIX_Studio使用说明书_逐飞V1.9.pdf`。
 2. `File → Import → Existing Projects into Workspace`,根目录选本仓库。
    工程名是 `Kart_TC387`。
-3. 选构建配置:`Debug` 带调试信息,`release build` 是比赛用的。
+3. 选构建配置:`.cproject` 里有五个,只用 `Debug`(带调试信息)和 `release build`(比赛用)。
+   `Release` 和两个 `External GCC - *` 是 Studio 模板带的,入库的两份 `.launch` 也只对应前两个。
 4. 烧录与调试直接用已入库的两份配置:`Kart_TC387 Debug.launch`、
    `Kart_TC387 release build.launch`,clone 下来就能跑,不用自己新建。
 5. 上位机用 VOFA+,接调试串口,协议 JustFloat,波特率 460800,
