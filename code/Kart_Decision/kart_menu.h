@@ -28,16 +28,12 @@
  *   · 新增界面务必走 kart_menu.c 里的 ui_bar/ui_item（补空格到定宽），
  *     直接 ips200_show_string 写不定长串会留上一帧的尾巴。
  *
- * 菜单结构（最深四级,下面照 kart_menu.c 的 menu_level_t 和各 item 枚举写。
- * 原注释写的"3级、一级只有 Subject 1/2"是加科目三、Camera、Settings 三页之前的
- * 老结构,已订正）：
+ * 菜单结构（最深四级,下面照 kart_menu.c 的 menu_level_t 和各 item 枚举写；
+ * 往 menu_main_item_t 里加项时记得回来补这张表）：
  *   [一级] Subject 1 Slalom / Subject 2 Voice / Subject 3 Follow /
- *          Camera Kart_Debug / Settings
- *   【2026-09-07 补一行:上面这五项漏了踏板页】menu_main_item_t 现在是六项,
- *   MENU_MAIN_PEDAL 加在 SETTINGS 之后,menu_draw_main 里画成第 5 行
- *   "Pedal Drive Manual",进去是独立的 MENU_LEVEL_PEDAL_RUN。
- *   上面这段当年加科目三/Camera/Settings 时订正过一次,加踏板页时又漏了改 ——
- *   往 menu_main_item_t 里加项,记得回来补这张表。
+ *          Camera Kart_Debug / Settings / Pedal Drive Manual
+ *          （menu_main_item_t 六项,MENU_MAIN_PEDAL 在 SETTINGS 之后、
+ *           menu_draw_main 里画成第 5 行,进去是独立的 MENU_LEVEL_PEDAL_RUN）
  *   [二级-科目一] Record Path / Playback Path / View Sampled Path /
  *                 Enter Remote / Exit Remote
  *   [二级-科目二] Voice A auto ret / Voice B RC ret / Gate Recording /
