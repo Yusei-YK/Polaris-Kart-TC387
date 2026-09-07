@@ -33,6 +33,11 @@
  * 老结构,已订正）：
  *   [一级] Subject 1 Slalom / Subject 2 Voice / Subject 3 Follow /
  *          Camera Kart_Debug / Settings
+ *   【2026-09-07 补一行:上面这五项漏了踏板页】menu_main_item_t 现在是六项,
+ *   MENU_MAIN_PEDAL 加在 SETTINGS 之后,menu_draw_main 里画成第 5 行
+ *   "Pedal Drive Manual",进去是独立的 MENU_LEVEL_PEDAL_RUN。
+ *   上面这段当年加科目三/Camera/Settings 时订正过一次,加踏板页时又漏了改 ——
+ *   往 menu_main_item_t 里加项,记得回来补这张表。
  *   [二级-科目一] Record Path / Playback Path / View Sampled Path /
  *                 Enter Remote / Exit Remote
  *   [二级-科目二] Voice A auto ret / Voice B RC ret / Gate Recording /

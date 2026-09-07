@@ -676,7 +676,12 @@ static uint8 camdbg_show_overlay = 1;   /* MID 切换:叠加框/准星 开关 */
 
 /* 色相标定 ROI 的边长。15 是折中:板子在 2m 处宽约 14px(f_px 83.5、板宽 0.33m),
  * 取 15 保证近距离时整个方块都落在板面内,不会扫到黑边或背景。
- * 距离更远要减小它,否则中位数会被背景污染 —— 看 ROI% 那个数就知道有没有被污染。 */
+ * 距离更远要减小它,否则中位数会被背景污染 —— 看 ROI% 那个数就知道有没有被污染。
+ * 【2026-09-07 现场改不了这个数】"距离更远要减小它"只能靠重新编译:本变量全文
+ * 只有两处引用 —— 这行定义和 vision_roi_stat() 那次传参,没有任何按键写它。
+ * menu_draw_camera 底部那句提示写着 "L2 ROI",听着像有个键能调 ROI,其实
+ * 五向的键位早就分完了(RIGHT/旋钮=列、UP/DOWN=行、MID=切叠加层、LEFT=返回),
+ * 这句提示是计划里的、没实现。别照它去现场找键。 */
 static int16 camdbg_roi_side = 15;
 
 /* 以下到 menu_draw_camera 结束都只在开了相机时才编译:
@@ -991,7 +996,10 @@ static void menu_draw_s3_live(void)
 
     /* 方位角和跟随下发的打角必须【反号】。同号就是 kart_follow_update() 里
      * delta = -(KART_STEER_R_TIMES_DELTA * kappa) 那个负号错了(一打就反向),
-     * 立刻拨 SW3 到低挡停车。原注释指的 kart_follow.c:127 已不是那一行。 */
+     * 立刻拨 SW3 到低挡停车。
+     * 【2026-09-07 把那个行号补成名字】原注释指的 kart_follow.c:127 已不是那一行;
+     * 按上面那句 delta = ... 的原样去 kart_follow.c 里搜就是(写这行时在 :224)。
+     * 以后别写行号,那个文件长度一直在变。 */
     sprintf(buf, " bear%+6.1f del%+6.0f",
             (double)(v->bearing_rad * 57.29578f),
             (double)kart_follow_get()->target_delta);
@@ -1016,6 +1024,9 @@ static void menu_draw_s3_live(void)
  * link 一列与 kart_debug_uart.c 里 PERSON_LINK 那档日志的 ch[39] 同义,但出厂档
  * LOG_PROFILE_S3=1 的通道表里 CH39 是 kart_playback_get_cur_y();ch[39]=link 在
  * 另一档的 #else 里,还要 PERSON_LINK_ENABLE=1 才编译,别对着出厂日志找它：
+ * 【2026-09-07 补:抢 ch[39] 的其实有四家】除了上面这两处,还有 #if WIFI_ENABLE
+ * 那一档写 g_wifi_link,以及另一处写 v->valid。也就是看到 CH39 有数【先确认
+ * 编译档位再解释它】,四家的量纲完全不同。
  *   0=一个字节没收到（线/波特率/4D7 没在发） 1=有字节但从未成帧（帧头或 CRC）
  *   2=曾通现失联（>200ms 无 VALID 帧）          3=在线
  * 现场先看这一位；0/1 是链路问题，2/3 才轮得到看跟随。 */
@@ -1086,7 +1097,17 @@ static void menu_draw_s3_run(void)
             /* 文案以自动判停为主:kart_mission.c subject3_loop 里,走够 1m 之后
              * 车速连续 150ms ≈0 就自己停录+开倒车,START 只是"不想等那 150ms"的
              * 手动提前触发。原来写成 "START to go back",现场会以为必须按键。
-             * 两种控制源文案不同(S3_FOLLOW_SRC),别让现场看着遥控提示去举板子。 */
+             * 两种控制源文案不同(S3_FOLLOW_SRC),别让现场看着遥控提示去举板子。
+             * 【2026-09-07 上面那个前提没了】kart_mission.c 里现在没有任何"走够
+             * 1m + 车速连续 150ms 约 0"的判停:整个文件没有 s3_still 之类的状态,
+             * kart_control_get_meas() 只在 S3_FIXED_ACT 的停稳检查里用一次,
+             * subject3_start_requested 只由 START 下降沿和油门全开沿写。
+             * kart_mission.c 那边写得很直白:"车停住、视觉丢失和 MID 键都不再
+             * 自动推进任务"。也就是从跟随段到倒车段【只能手动发车】。
+             * 受连累的是下面 #else 那三行遥控文案和 " auto  START now" 那句提示
+             * (还有本页 " hide board=back" / " hide 2s=back" 两句 —— 藏板子也不会
+             * 自动返回)。这些字串是代码,本次不动;要改就改成 "START to go back",
+             * 别再让现场等那 150ms。 */
             ui_title("Subject 3", "REC");
 /* 这里的条件必须跟 menu_draw_s3_live 的定义条件【逐字一致】,少一个
  * CAMERA_ENABLE 就会在关摄像头的版本里调到一个没定义的函数。 */
