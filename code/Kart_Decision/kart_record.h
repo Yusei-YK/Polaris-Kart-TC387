@@ -24,17 +24,14 @@
  *       stop : kart_menu.c   menu_handle_recording_mid_press()
  *              kart_mission.c mission_stop_all()
  *              kart_mission.c subject3_loop() 两处(正常收尾 + 异常收尾)
- *       【2026-09-06 为什么这里不写行号了】原来这六处写的是
- *       menu 2097/2102、mission 87/174/827/883,现在全是错的,而本文件谁都没动过
- *       —— 是别处插进来的代码把它们顶下去的(改踏板那批往 kart_menu.c 里加了
- *       二十多行)。而且错得不显眼:老的 mission.c:87 现在是 kart_playback_stop(),
- *       看上去还挺像那么回事,真正的 kart_record_stop() 在 88 行。
- *       函数名不会这样漂,所以改成按函数定位。上面 kart_task_10ms 那处同理。
- *       【原来写的"VOFA 命令 r1/r0"已作废】调试口现在一处都不碰录制。
+ *       不写行号:函数名不会漂,行号会 —— 别处插进来的代码会把它们整体顶
+ *       下去(改踏板那批往 kart_menu.c 里加了二十多行),而且错得不显眼:
+ *       老的 mission.c:87 现在是 kart_playback_stop(),看上去还挺像那么回事。
+ *       上面 kart_task_10ms 那处同理。调试口现在一处都不碰录制。
  * ------------------------------------------------------------------
  * Flash 持久化【已经做完了,不是后续扩展】:接口就是本文件下面的
  * kart_record_save_to_flash() / kart_record_load_from_flash(),菜单已在调。
- * 原来这里写的 kart_record_flush_to_flash() 全工程不存在,别去找。
+ * 全工程没有 kart_record_flush_to_flash() 这个函数,别去找。
  */
 
 /* 【容量上限值得先算一遍】1500 点 × 0.05m = 直线 75m 封顶;弯道里 2° 转角阈值

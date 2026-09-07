@@ -53,14 +53,13 @@
 /* 5ms PIT 节拍计数器:主循环协作式调度的时基,每个 5ms 中断 +1。 */
 volatile uint32 g_tick_5ms = 0;
 
-/* 点阵屏 SYNC(P15.8)下降沿累计:诊断用,VOFA/主循环每秒读一次清零 → SYNC_Hz。
- * 因扫描为 14 边沿/帧,帧率 = SYNC_Hz / 14。计数低/忽高忽低 → SYNC 整形链或 EXTI 丢中断。
- * 【2026-09-07 那个"主循环每秒读一次"的读者不存在】全仓库唯一读它的地方是
+/* 点阵屏 SYNC(P15.8)下降沿累计:诊断用。因扫描为 14 边沿/帧,若每秒读一次
+ * 并清零,帧率 = 读数 / 14;计数低/忽高忽低 → SYNC 整形链或 EXTI 丢中断。
+ * 出厂固件里这个计数只涨不读:全仓库唯一读它的是
  * zf_device_dot_matrix_screen.c 里的 dot_matrix_screen_test_all_on_sync(),
- * 而那个自检函数在 code/ 和 user/ 里零调用点(只有头文件的声明)。VOFA 的通道表
- * 里也没有 SYNC 这一路。也就是出厂固件里这个计数只涨不读。
- * 【别删】它是零成本的(EXTI 里一条 ++),而 SYNC 整形链哪天修好了,把那个自检
- * 手动接进 main 就能直接用。要看它,现在得自己去调那个自检函数。 */
+ * 而那个自检函数在 code/ 和 user/ 里零调用点(只有头文件的声明),VOFA 的
+ * 通道表里也没有 SYNC 这一路。留着是零成本的(EXTI 里一条 ++),SYNC 整形链
+ * 哪天修好了,把那个自检手动接进 main 就能直接用。 */
 volatile uint32 g_dot_sync_edges = 0;
 
 // 对于TC系列默认是不支持中断嵌套的，希望支持中断嵌套需要在中断内使用 interrupt_global_enable(0); 来开启中断嵌套
@@ -170,10 +169,9 @@ IFX_INTERRUPT(exti_ch1_ch5_isr, EXTI_CH1_CH5_INT_VECTAB_NUM, EXTI_CH1_CH5_INT_PR
          * 直接在此调 scan():其内 tld7002_set_duty 回读会因本 ISR(pri 61)>UART1_RX(pri 14)
          * 无法被抢占而拿不到应答(返回 COMM_ERROR,被 set_duty 忽略),但 TX+DC_SYNC 照发,
          * 占空比仍下发生效 → 显示正常,无死锁(回读为单次非阻塞 fifo_read)。
-         * 【2026-09-07 这段讲的是没编译进去的那条路】下面的 #if 取反,而
-         * DOT_MATRIX_SCREEN_USE_PIT_SCAN = 1,所以出厂固件走的是 1ms PIT 软扫
-         * (本文件上面 cc61_pit_ch0_isr 那处),这里的 scan() 一次都不会被调。
-         * 上面那套抢占分析是当年 SYNC 方案的实测记录,SYNC 修好切回来时仍然有效。 */
+         * 出厂固件走的是 1ms PIT 软扫(本文件上面 cc61_pit_ch0_isr 那处):下面的
+         * #if 取反,而 DOT_MATRIX_SCREEN_USE_PIT_SCAN = 1,所以这里的 scan() 一次都
+         * 不会被调。上面那套抢占分析是当年 SYNC 方案的实测记录,切回 SYNC 时仍然有效。 */
 #if !DOT_MATRIX_SCREEN_USE_PIT_SCAN
         dot_matrix_screen_scan();
 #endif
@@ -257,15 +255,13 @@ IFX_INTERRUPT(uart1_rx_isr, UART1_INT_VECTAB_NUM, UART1_RX_INT_PRIO)
     interrupt_global_enable(0);                     // 开启中断嵌套
 
 #if DOT_MATRIX_MUTED
-    /* 2026-08-12 UART1 已改归 TC4D7 人体视觉链路（灯板拔了，4D7 插在那个坐子）。
-     * 必须二选一、不能两个都调：两边都从同一个 1 字节深的 RX FIFO 取字节，
-     * 谁先取走另一方就永远收不到；而且 tld7002_callback() 用的是阻塞式
-     * uart_read_byte()，没字节时会在中断里死自旋。
-     * 【2026-09-07 出厂档跑的不是这一支】DOT_MATRIX_MUTED 展开是
-     * (PERSON_LINK_ENABLE && PORT == LIGHT),而 board_pins.h 里 PERSON_LINK_ENABLE
-     * = 0,所以本 #if 整块不编译,UART1 上真正在跑的是下面 #else 的
-     * tld7002_callback() —— 灯板是插着的。"改归 4D7"是 2026-08-12 那次实验的状态,
-     * 后来插回来了。二选一那条约束本身永远成立,别为了省事把两个都调上。 */
+    /* UART1 上真正在跑的是下面 #else 的 tld7002_callback() —— 灯板是插着的:
+     * DOT_MATRIX_MUTED 展开是 (PERSON_LINK_ENABLE && PORT == LIGHT),而
+     * board_pins.h 里 PERSON_LINK_ENABLE = 0,所以本 #if 整块不编译。
+     * 把 UART1 改归 TC4D7 人体视觉链路(灯板拔了、4D7 插那个座子)那一档才
+     * 走这里。必须二选一、不能两个都调:两边都从同一个 1 字节深的 RX FIFO
+     * 取字节,谁先取走另一方就永远收不到;而且 tld7002_callback() 用的是
+     * 阻塞式 uart_read_byte(),没字节时会在中断里死自旋。 */
     kart_person_link_rx_callback();
 #else
     /* 2026-07-24 TLD7002 飞线到 UART1(P11.12/P11.10)。喂 TLD7002 回调:把芯片响应/
@@ -407,11 +403,11 @@ IFX_INTERRUPT(uart10_rx_isr, UART10_INT_VECTAB_NUM, UART10_RX_INT_PRIO)
      * 它的帧很稀疏（人说一句才来一帧），轮询足够。
      * 人体视觉链路不同：115200 下背靠背连发，25 字节一帧只需 ~2.2ms，
      * 放到 10ms 任务里轮询必丢字节，所以这里必须用中断。
-     * 【2026-09-07 出厂档这个 ISR 是空的】下面那个 #if 两个条件都不成立:
-     * board_pins.h 里 PERSON_LINK_ENABLE = 0,而且 PERSON_LINK_PORT 选的是
-     * PORT_LIGHT 不是 PORT_VOFA。所以 UART10 的 RX 中断进来什么也不做
-     * (只有一句 interrupt_global_enable)。UART10 在出厂档归语音,而语音是轮询的。
-     * 上面那套"必须用中断"的论证只在 PLINK 走 VOFA 口那一档成立,留着备用。 */
+     * 【出厂档这个 ISR 是空的】下面那个 #if 两个条件都不成立:board_pins.h 里
+     * PERSON_LINK_ENABLE = 0,而且 PERSON_LINK_PORT 选的是 PORT_LIGHT 不是
+     * PORT_VOFA。所以 UART10 的 RX 中断进来什么也不做(只有一句
+     * interrupt_global_enable)。UART10 在出厂档归语音,而语音是轮询的。上面那套
+     * "必须用中断"的论证只在 PLINK 走 VOFA 口那一档成立,留着备用。 */
 #if (PERSON_LINK_ENABLE && (PERSON_LINK_PORT == PERSON_LINK_PORT_VOFA))
     kart_person_link_rx_callback();
 #endif

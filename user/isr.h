@@ -50,11 +50,13 @@ extern volatile uint32 g_sched_last_exec_us;
 extern volatile uint32 g_sched_max_exec_us;
 extern volatile uint32 g_sched_overrun_count;
 
-/* 点阵屏 SYNC(P15.8=ERU_CH5)下降沿累计:诊断用。主循环每秒读一次清零 → SYNC_Hz,帧率=SYNC_Hz/14。
- * 判断:计数为 0 → SYNC 无边沿(整形链/芯片没吐 SYNC);低/抖 → 刷新率不足或丢中断。
- * 【2026-09-07 订正"主循环每秒读一次"】出厂固件里没有这个读者:唯一读它的是
- * dot_matrix_screen_test_all_on_sync(),那个自检函数零调用点。上面这套判据要用,
- * 得先自己把它接进 main。isr.c 定义处记了同一件事。 */
+/* 点阵屏 SYNC(P15.8=ERU_CH5)下降沿累计:诊断用。若每秒读一次并清零,读数
+ * 就是 SYNC_Hz,帧率=SYNC_Hz/14。
+ * 判断:计数为 0 → SYNC 无边沿(整形链/芯片没吐 SYNC);低/抖 → 刷新率不足
+ * 或丢中断。
+ * 出厂固件里没有这个读者:唯一读它的是 dot_matrix_screen_test_all_on_sync(),
+ * 那个自检函数零调用点。上面这套判据要用,得先自己把它接进 main。
+ * isr.c 定义处记了同一件事。 */
 extern volatile uint32 g_dot_sync_edges;
 
 

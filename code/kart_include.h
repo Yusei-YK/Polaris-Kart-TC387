@@ -7,21 +7,20 @@
  * 【用法】新增模块的 .c 直接 kart_include 本文件一个就行,不用逐个挑头文件。
  *   现有 .c 保持原样、不做批量替换 —— 它们的 kart_include 链已经验证可用,
  *   为了"整齐"去动三十个文件不值得(改一次就多一次编不过的风险)。
- *   【2026-09-07 实情】真正这么用的只有三个 .c:kart_camera.c、kart_wifi.c、
- *   kart_assist_img.c。其余全是自己挑头文件。所以本文件基本只是一份索引,
- *   改它不会牵动编译 —— 但也别指望它替你把依赖带全。
+ *   真正这么用的只有三个 .c:kart_camera.c、kart_wifi.c、kart_assist_img.c,
+ *   其余全是自己挑头文件。所以本文件基本只是一份索引,改它不会牵动编译 ——
+ *   但也别指望它替你把依赖带全。
  *
- * 【分组 = 物理目录】2026-08 起下面每个分组对应 code/ 下一个真实目录,
- *   看注释就知道文件该放哪。加新文件时先想清楚它属于哪层,
- *   放进对应目录,不要往 user/ 或 code/ 根目录随手扔。
- *   【2026-09-07 这份清单不全,别当目录索引用】下面漏了六个真实存在的头:
+ * 【分组 = 物理目录】下面每个分组对应 code/ 下一个真实目录,看注释就知道文件
+ *   该放哪。加新文件时先想清楚它属于哪层,放进对应目录,不要往 user/ 或
+ *   code/ 根目录随手扔。
+ *   【这份清单不全,别当目录索引用】漏了六个真实存在的头:
  *     Kart_Algo    kart_preprocess.h      (ROI 裁剪 + 降噪 + 直方图均衡)
  *     Kart_Decision kart_follow.h         (科目三视觉跟随控制律)
  *     Kart_Debug   kart_boot_anim.h / kart_boot_anim_data.h (开机帧动画)
  *     Kart_Debug   kart_vision_calibrate.h (视觉标定)
  *     Kart_Debug   kart_assist_img.h      (逐飞助手图传)
- *   漏的原因是这些模块加进来时没人回头补这份聚合头。要查某层有什么文件,
- *   直接看目录,不要信下面的清单。
+ *   要查某层有什么文件,直接看目录,不要信下面的清单。
  *
  *   code/Kart_Config    标定与板级:物理量、符号、引脚。全工程数值的唯一出处。
  *   code/Kart_Driver    直接操作硬件:PWM / 编码器 / SPI 读角 / 蜂鸣器 / Flash。
@@ -43,14 +42,12 @@
  * 【头文件里放什么】宏定义、类型定义、函数声明。不放函数实现,
  *   不放变量定义(要跨文件共享就在 .h 里 extern、在 .c 里定义一次)。
  *
- * 【为什么这里不写目录前缀】code/ 下每个目录都进了编译器 -I 搜索路径
- *   (.cproject 的 Kart_Debug 配置),所以 kart_include 只写文件名。挪目录时改那份
- *   -I 列表,不用回来改几十条 kart_include。
- *   【2026-09-07 订正配置名】.cproject 里的构建配置叫 Debug 和 Release,没有
- *   叫 Kart_Debug 的配置(Kart_Debug 是 code/ 下的目录,同名容易看错)。
- *   而且两个配置各带一份 -I 列表,挪目录要改两处,只改一处会出现
- *   "Debug 能编 Release 编不过"。列表里现有 code 本身、七个 Kart_* 子目录、
- *   Kart_TPL/TLD7002_driver 和 user,所以"只写文件名"这条本身是成立的。
+ * 【为什么这里不写目录前缀】code/ 下每个目录都进了编译器 -I 搜索路径,所以
+ *   kart_include 只写文件名,挪目录时改那份 -I 列表就行。.cproject 里的构建
+ *   配置叫 Debug 和 Release(没有叫 Kart_Debug 的配置 —— Kart_Debug 是 code/
+ *   下的目录,同名容易看错),两个配置各带一份 -I 列表,挪目录要改两处,只改
+ *   一处会出现"Debug 能编 Release 编不过"。列表里现有 code 本身、七个 Kart_*
+ *   子目录、Kart_TPL/TLD7002_driver 和 user。
  * ------------------------------------------------------------------
  */
 
@@ -97,9 +94,8 @@
 /* ---------------- Kart_Debug ---------------- */
 #include "kart_debug_uart.h"    /* VOFA 日志 + 串口命令 */
 #include "kart_hw_test.h"       /* 上电硬件自测 */
-#include "kart_traj_view.h"     /* 录制轨迹屏上可视化(默认 ENABLE=0 不出代码)
-                                 * 【2026-09-07 订正】kart_traj_view.h 里
-                                 * TRAJ_VIEW_ENABLE 现在是 1,这个模块是真编进去的。 */
+#include "kart_traj_view.h"     /* 录制轨迹屏上可视化。TRAJ_VIEW_ENABLE = 1,
+                                 * 这个模块是真编进去的。 */
 #include "kart_wifi.h"           /* WiFi SPI 图传 + 逐飞助手上位机通道 */
 #include "kart_bench.h"          /* Kart_TC387 实时性能基准测试矩阵 B1-B12 */
 

@@ -45,7 +45,7 @@
  *   last_exec_us  —— 上一拍任务分发耗时(us)
  *   max_exec_us   —— 历史最大分发耗时(us),观察最坏情况
  *   overrun_count —— 漏周期累计(主循环一次跨 >1 tick 即累加差值,不补跑)
- * 【2026-09-07 补:VOFA 上是哪几路,两档不一样】
+ * 【VOFA 上是哪几路,两档不一样】
  *   出厂 43 通道档(LOG_PROFILE_S3=1):只上了两路 —— CH7 = overrun_count、
  *     CH8 = max_exec_us,last_exec_us 这一档没上。
  *   51 通道全量档:CH25 = last、CH26 = max、CH27 = overrun。
@@ -266,12 +266,10 @@ int core0_main(void)
     kart_steer_ctrl_init();     // 转向串级:填内/外环默认 PID,默认全不使能(等 VOFA 发 se1 才驱动转向电机)
     kart_pedal_init();          // CH32 踏板盒链路:UART_2(RX=P02.1)+ RX 中断。PEDAL_ENABLE=0 时是空函数
 
-    /* SCC8660 彩色摄像头(凌瞳)。默认 CAMERA_ENABLE=0,此调用编译期就是空壳,
-     * 已验证的低速基线一个字节都不受影响。
-     * 【2026-09-07 这句已经不成立】kart_camera.h 里 CAMERA_ENABLE 现在是 1,
-     * 所以这个调用是真跑的:下面那两条硬约束(必须在 dot init 之前、必须在
-     * pit_ms_init 之前)现在是【真的会咬人】的,不是备用说明 —— 它内部真会
-     * 阻塞 0.5~1.5s。"低速基线不受影响"那句只在 ENABLE 改回 0 时才对。
+    /* SCC8660 彩色摄像头(凌瞳)。CAMERA_ENABLE = 1,所以这个调用是真跑的,
+     * 内部真会阻塞 0.5~1.5s —— 下面那两条硬约束是【真的会咬人】的,不是备用
+     * 说明。ENABLE 改回 0 时它编译期就是空壳,已验证的低速基线一个字节都不受
+     * 影响。
      *
      * 位置有两个硬约束,别挪:
      *   1) 必须在 dot_matrix_screen_init() 之前 —— 摄像头配置可能要用 UART1@9600
@@ -422,12 +420,12 @@ int core0_main(void)
      * 选 LIGHT 口时由 DOT_MATRIX_MUTED 静默；菜单动画也已播放完成。
      * 5ms PIT 虽已启动，但 kart_person_link_poll() 只在下方正式主循环开始后
      * 才会执行，因此现在初始化 UART 不存在“先 poll 后 init”的窗口。
-     * 【2026-09-07 出厂档这一句 init 什么都不做】PERSON_LINK_ENABLE = 0,
-     * kart_person_link_init() 编到的是 kart_person_link.c 里 #else 那个空壳
-     * (函数体就是一对空花括号),既不配 UART 也不开 RX 中断。上面整套顺序论证
-     * 是给 ENABLE=1 那档准备的,当年也是那样调出来的,别因为"现在没用"就挪位置。
-     * 顺带:那句"由 DOT_MATRIX_MUTED 静默"同样只在 ENABLE=1 时成立 ——
-     * MUTED 自己就是 (PERSON_LINK_ENABLE && ...),现在恒为 0,灯板是插着跑的。 */
+     * 【出厂档这一句 init 什么都不做】PERSON_LINK_ENABLE = 0,kart_person_link_init()
+     * 编到的是 kart_person_link.c 里 #else 那个空壳(函数体就是一对空花括号),
+     * 既不配 UART 也不开 RX 中断。上面整套顺序论证是给 ENABLE=1 那档准备的,当年
+     * 也是那样调出来的,别因为"现在没用"就挪位置。同理,那句"由 DOT_MATRIX_MUTED
+     * 静默"也只在 ENABLE=1 时成立 —— MUTED 自己就是 (PERSON_LINK_ENABLE && ...),
+     * 现在恒为 0,灯板是插着跑的。 */
     kart_person_link_init();
 
     cpu_wait_event_ready();
@@ -484,10 +482,9 @@ int core0_main(void)
                 exec_us = (system_getval() - t0_raw) / 100u;
                 g_sched_last_exec_us = exec_us;
                 /* 合理性门只防回绕毛刺(实测曾恒在 4.2528e9),不该把真实的
-                 * 长停顿也滤掉。【2026-08-15 从 100ms 放到 800ms】
-                 * 原来 100ms 的门把视觉那 360ms 全丢了 —— CH26 峰值 21ms 是
-                 * 门内的残渣,不是真的最坏值,害我把根因判成图传。
-                 * 800ms 之下能看见的都要看见,只挡明显的回绕(秒级以上)。 */
+                 * 长停顿也滤掉:门开在 100ms 会把视觉那 360ms 全丢掉,CH26
+                 * 峰值 21ms 只是门内的残渣,不是真的最坏值,照它会把根因判成
+                 * 图传。800ms 之下能看见的都要看见,只挡明显的回绕(秒级以上)。 */
                 if((exec_us < 800000u) && (exec_us > g_sched_max_exec_us))
                 {
                     g_sched_max_exec_us = exec_us;

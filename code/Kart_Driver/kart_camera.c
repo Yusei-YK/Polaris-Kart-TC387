@@ -138,13 +138,11 @@ static void kart_camera_dma_wrap(void)
 }
 
 /*------------------------------------------------------------------------------
- * 【2026-08-10 删除说明】这里原有一个 kart_camera_uart_give_back() —— 摄像头配置
- * 期把 UART1 借走,配完再改归属、重跑 tld7002_init、重开 1ms 点阵扫描。
- * 连同它一起删掉的还有运行期归属标志和 uart1_rx_isr 里的分派。
- * 删的理由(kart_camera.h 顶部详述):两者时间上不重叠,只要 kart_camera_init()
- * 早于 dot_matrix_screen_init(),UART1 就静态归灯板,不需要运行期仲裁。
- * 现在灯板的 UART1 是由 dot_matrix_screen_init() 内部的 tld7002_init() 按 2Mbps
- * 重配的,时序约束写在 cpu0_main.c:271 和本文件 init 的注释里。
+ * UART1 不需要运行期仲裁:摄像头配置期与灯板扫描期时间上不重叠,只要
+ * kart_camera_init() 早于 dot_matrix_screen_init(),UART1 就静态归灯板
+ * (理由详述在 kart_camera.h 顶部)。灯板的 UART1 是由 dot_matrix_screen_init()
+ * 内部的 tld7002_init() 按 2Mbps 重配的,时序约束写在 cpu0_main.c 里
+ * kart_camera_init() 的调用处和本文件 init 的注释里。
  ------------------------------------------------------------------------------*/
 
 #endif  /* CAMERA_ENABLE */
