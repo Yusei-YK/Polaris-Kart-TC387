@@ -198,6 +198,7 @@ Polaris-Kart-TC387/
 
 ## 致谢
 
+- 哈尔滨工程大学济海追风8队,比赛期间无私帮了我们很多。真心感谢。
 - 东北大学秦皇岛分校 TopSpeed 队的
   [开源工程](https://github.com/Ryan-5853/NEUQ_TopSpeed_CrossCountry_TC377),
   以及东北大学秦皇岛分校公开的 IMU 姿态解算实现
