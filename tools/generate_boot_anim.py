@@ -1,4 +1,9 @@
-"""把 128x64 开机动画图片量化并编码成供 TC387 使用的 RLE 头文件。"""
+"""把开机动画图片量化并编码成供 TC387 使用的 RLE 头文件。
+
+帧尺寸由下面的 FRAME_SIZE 决定,当前是 112x122(宽 x 高),生成的
+KART_BOOT_FRAME_W / KART_BOOT_FRAME_H 跟着它走。改尺寸只改 FRAME_SIZE,
+不要在这里另写一份数字。
+"""
 
 from pathlib import Path
 import sys
