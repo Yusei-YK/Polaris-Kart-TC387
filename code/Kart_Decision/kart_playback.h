@@ -19,12 +19,9 @@
  *       kart_mission.c subject1_loop()               科目一 START 键
  *       kart_mission.c kart_mission_subject2_start_return_here()  科目二返程
  *       kart_voice.c   kart_voice_dispatch()         语音 0x15~0x19 选槽
- *       【2026-09-06 这里为什么不写行号了】原来写的 menu 1662、mission 258、
- *       mission 1284 现在全是错的(真实位置分别是 1772、265、1306),只有
- *       voice 335 还是对的。本文件谁都没动过 —— 是改踏板那批往 kart_menu.c
- *       里插了二十多行、往 kart_mission.c 里加了几行,把引用整体顶了下去。
- *       kart_record.h 那六处也是同一件事。函数名不会这样漂。"四处"这个数没变。
- *       【原来写的"VOFA 命令 b1"已作废】调试口现在一处都不启动复现。
+ *       不写行号:改踏板那批往 kart_menu.c 里插了二十多行、往 kart_mission.c
+ *       加了几行,把行号引用整体顶了下去(kart_record.h 那六处也一样)。
+ *       函数名不会这样漂。调试口现在一处都不启动复现。
  *   kart_playback_poll()   —— 【5ms 一拍】cpu0_main.c 的 kart_task_5ms() 里,
  *                             在 kart_steer_abs_update 之后、
  *                             kart_steer_ctrl_update 之前(好覆写目标航向)。
@@ -196,8 +193,8 @@
  *   阿克曼动力学)。若实车发现横向越纠越歪,把菜单 S3 OL Ke 调成负值即可,
  *   不用重新烧写。这也是 Ke 的量程给成 ±3000 的原因(菜单槽位见
  *   kart_params.c 里名字是 "S3 OL Ke" 的那一行,量程 ±3000、步长 20 都对得上;
- *   【2026-09-06 订正】原来写的 :56 已经漂到 :59,别按行号数下去 —— :56 附近
- *   还有 S3 OLMode 和 S3 OL Kh 两个长得很像的槽,数错了会调到别的旋钮上)。
+ *   别按行号数下去 —— 附近还有 S3 OLMode 和 S3 OL Kh 两个长得很像的槽,
+ *   数错了会调到别的旋钮上)。
  *   Ke 是打角计数增益:Ke=3000 时 20cm 横向误差就要 600 计数,
  *   已经超过满舵 1064 的一半,往上加要留意。
  *
@@ -208,8 +205,8 @@
  *      负号是已验证的方向,不用从正的小值往上试。要改收敛快慢按下面
  *      KH_FROM_KE 那段的表走(600->7.4m / 900->6.0m / 1200->5.2m),菜单步长 20。
  *      【看不到 e_lat】当前 43 通道剖面没有这一路,CH21 是 hue_pct
- *      (在 kart_debug_uart.c 的 #if LOG_PROFILE_S3 那段里,原写的 :320 已漂到
- *      :330;另注意 51 通道全量档里 hue_pct 是 CH20,两档别混),
+ *      (在 kart_debug_uart.c 的 #if LOG_PROFILE_S3 那段里;另注意 51 通道
+ *      全量档里 hue_pct 是 CH20,两档别混),
  *      要判收敛得临时把 e_lat 接一路上 VOFA;
  *   4. e_lat 稳定收敛后,再用 S3 OLSpd 提速。 */
 #define PLAYBACK_OL_NEAR_WIN   (40)        /* 最近点搜索窗(点):与正向 NEAREST_FORWARD 同量级 */
@@ -219,7 +216,7 @@
  * 不能再用"剩余里程 < OL_FINISH",那是里程方案的判据。 */
 #define PLAYBACK_OL_FIN_DIST   (0.15f)     /* 距录制起点(m)判返回发车区 */
 
-/* 【2026-08-22 新增 S3 Lead:科目三倒车"提前完成量"(米)】
+/* 【S3 Lead:科目三倒车"提前完成量"(米)】
  * 含义:倒车时沿【录制路径】还剩这么多米就喊停。倒车完成判据的第三条,
  * 实现见 kart_playback.c 的 kart_playback_poll_closedloop()。
  * 【为什么需要它】原有两条判据都挂在 odom 积分位置 cur 上,跟随 65m + 倒车

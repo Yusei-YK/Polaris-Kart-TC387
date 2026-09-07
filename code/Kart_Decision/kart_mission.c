@@ -427,11 +427,7 @@ static void remote_loop(void)
  *
  * scale_r 的参考距离取 FOLLOW_L_NOMINAL_M(1.50m)：它在 kart_follow.h 那个宏
  * 自己的注释里就是“期望跟车距离的中点”。仓里没有任何专门的“目标距离”宏，
- * 不新造一个；这个选择是判断，不是协议规定。
- * 【2026-09-07 不写行号了】上面两处原来写的是 kart_follow.h 的 :285(入参)和
- * :135(标称距离),两个都已对不上:kart_follow_update 的声明现在在 :350,
- * FOLLOW_L_NOMINAL_M 在 :138。claim 本身没错,只是行号会随头文件长短漂,
- * 改成按名字找。
+ * 不新造一个 —— 这个选择是判断，不是协议规定。
  * scale_r = L_NOMINAL / dist：人走近 → dist 小 → scale_r 大，与 kart_vtrack 的
  * “像素尺寸比”同向，NEAR_THRESH/FAR_THRESH 两个阀值可直接用。
  * confidence：kart_vision_result_t 没有置信度字段，valid 就给满。
@@ -503,11 +499,11 @@ static void subject3_vision_follow_tick(void)
     const kart_follow_out_t    *fo;
 
     /* ---- 投递:有新帧就整帧拷给 core3,立刻还帧,不等结果 ----
-     * 【2026-08-15 改】原来在这一拍里同步跑 kart_preprocess + kart_vision_process。
-     * 1.csv 实测:出新帧的行平均丢 34 拍(170ms),没新帧的行只丢 2.4 拍 ——
-     * 整条流水线约 360ms,而它挂在 10ms 拍里。有效 tick 率被压到 26Hz,
-     * 转向内环按 5ms 标定却 38ms 执行一次,1.12Hz 自激 = 乱打左右方向。
-     * submit 只做一次整帧拷贝(几十 us)就返回,识别在 core3 上跑。 */
+     * 【为什么不在这一拍里识别】整条流水线约 360ms,同步跑 kart_preprocess +
+     * kart_vision_process 会把 10ms 拍拖垮:1.csv 实测出新帧的行平均丢 34 拍
+     * (170ms),没新帧的行只丢 2.4 拍,有效 tick 率被压到 26Hz,转向内环按 5ms
+     * 标定却 38ms 执行一次,1.12Hz 自激 = 乱打左右方向。submit 只做一次整帧拷贝
+     * (几十 us)就返回,识别在 core3 上跑。 */
     if(kart_camera_frame_ready())
     {
         (void)multicore_vision_submit((const uint16 *)scc8660_image[0],
@@ -1132,19 +1128,15 @@ void kart_mission_set_mode(kart_mission_mode_t mode)
      * 放在 mission_enter 之前,避免与新模式的 enter 抢同一外设。
      * 顺序与进入时相反:先切波特率、后开闸 —— 开闸后立刻可能发字节,
      * 此时外设必须已经是 460800,否则第一批帧以 115200 发出会是乱码。 */
-    /* 科目三也可能持有语音串口:它的 S3_SIGNAL 阶段(回发车区后按口令做灯光/鸣笛)
-     * 同样 acquire 过。判据用"阶段已到 S3_SIGNAL 及以后"而不是无条件释放 ——
-     * 在跟随/倒车阶段就退出的话根本没 acquire,那时 release 会把日志波特率
-     * 切成还没被改过的样子(实际是同一个 460800,行为无害但语义是错的),
-     * 更要紧的是 kart_debug_uart_set_enabled(1) 会把本来关着的日志闸打开。
-     * 【2026-09-07 这段的前提已经没了,当历史读】上面这套推理成立的前提是科目三
-     * 真会走到 S3_SIGNAL。出厂配置 S3_FIXED_ACT_ENABLE = 1,于是
-     * S3_HOLDS_VOICE_UART(stage) 被展开成常量 (0)(见 kart_mission.h 那个 #if),
+    /* 科目三这一半在出厂档是死支路:S3_FIXED_ACT_ENABLE = 1 时
+     * S3_HOLDS_VOICE_UART(stage) 展开成常量 (0)(见 kart_mission.h 那个 #if),
      * 而唯一给 subject3_stage 赋 S3_SIGNAL 的 subject3_enter_signal() 整个被
-     * #if !S3_FIXED_ACT_ENABLE 编译掉 —— 也就是下面那个 if 的 MISSION_SUBJECT_3
-     * 那一半是死支路,科目三这条路从来没 acquire 过语音串口。
-     * 头文件 S3_HOLDS_VOICE_UART 处早就写清楚了,漏改的是这里。
-     * 【别删】ENABLE 改回 0 这套推理立刻重新有效,而且届时它仍然是对的。 */
+     * #if !S3_FIXED_ACT_ENABLE 编译掉,所以科目三从来没 acquire 过语音串口。
+     * ENABLE 改回 0 时下面这个判据才生效:那时科目三的 S3_SIGNAL 阶段(回发车区
+     * 后按口令做灯光/鸣笛)会 acquire,判据用"阶段已到 S3_SIGNAL 及以后"而不是
+     * 无条件释放 —— 在跟随/倒车阶段就退出的话根本没 acquire,那时 release 会把
+     * 日志波特率切成还没被改过的样子(实际是同一个 460800,行为无害但语义是错的),
+     * 更要紧的是 kart_debug_uart_set_enabled(1) 会把本来关着的日志闸打开。 */
     if((MISSION_SUBJECT_2 == mission_mode)
        || (MISSION_SUBJECT_3 == mission_mode && S3_HOLDS_VOICE_UART(subject3_stage)))
     {

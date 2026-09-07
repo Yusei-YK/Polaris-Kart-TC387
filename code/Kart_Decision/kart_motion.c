@@ -91,9 +91,8 @@ static void motion_set_delta(float delta)
 /* 航向误差(度,规整 ±180),定义为【目标 - 实测】= yaw0 - yaw,与航向环同惯例。
  * 【只用相对量】比赛中途不能 reset,绝对 yaw 会漂几十度;本函数只比 yaw0,
  * 而 yaw0 是本条动作启动那拍 latch 的,所以长时间漂移完全不影响。
- * get_relative_angle(now, aim) 返回 aim-now,所以参数顺序是 (yaw, yaw0)。
- * 【2026-09-06 订正】函数在 kart_calc.c 里,原注释写的 :93 只是那一节的分隔线,
- * 函数本体在 :97 —— 改成按函数名找,行号会漂。 */
+ * get_relative_angle(now, aim) 返回 aim-now,所以参数顺序是 (yaw, yaw0);
+ * 函数本体在 kart_calc.c。 */
 static float motion_yaw_err(void)
 {
     return get_relative_angle(kart_imu_get_yaw(), motion_yaw0);
@@ -167,10 +166,7 @@ static void motion_snake_step(uint8 reverse)
  * 两种模式都必须 set_enable(1) —— enable 是"后轮有没有主人"的唯一开关,
  * 全工程三处仲裁都判它:kart_control.c 的速度环本体、isr.c 的 5ms 中断
  * cc60_pit_ch0_isr、cpu0_main.c 的 kart_task_5ms()。
- * 【2026-09-06 订正】原注释在 isr.c 那处写的 :70、cpu0_main.c 那处写的 :103,
- * 两个行号都已失效(真实位置是 :74 和 :91,而 :70 那行现在是
- * kart_multicore_imu_update)。三处仲裁这件事本身没变,只是改成按函数定位。
- * 不置 1 后轮会被清成 0(遥控挡位/失联/deadman 也是改这个开关来急停的)。
+ * 不置 1 的话后轮会被清成 0(遥控挡位/失联/deadman 也是改这个开关来急停的)。
  * duty 符号 = 方向:正前进、负后退。 */
 static void motion_set_rear(int16 open_duty, float closed_speed)
 {
@@ -272,15 +268,14 @@ static void motion_goto_axis_aim(float s, float *ax, float *ay)
     float cs  = cosf(rad);
     float sa  = s + MOTION_GOTO_LD;
 
-    /* 【2026-07-29 删掉了这里的 if(sa > 0.0f) sa = 0.0f;】
-     * 那句话把前视点夹在目标点上,后果是【前视距离随 s→0 一起塌到 0】:
-     * 车快到位时前视点就压在车轮底下,motion_goto_bearing_err() 的 <0.02m 保护
-     * 直接返回方位角 0,打角冻结在最后一次的值 —— 恰恰在"对齐"最要紧的最后
-     * 1.2m 失去控制。离线仿真(304 个起始位姿,判据 pos<=0.5m 且 yaw<=10deg)
-     * 只改这一处:76/304 → 186/304,再配 LEAD=6.0 到 261/304。
-     * 不夹会怎样:越过目标(s>0)后前视点落在目标【前方】,车继续往前追。这没问题,
+    /* 【不要把 sa 夹到 <= 0】夹住等于把前视点压在目标点上,后果是【前视距离随
+     * s→0 一起塌到 0】:车快到位时前视点就压在车轮底下,motion_goto_bearing_err()
+     * 的 <0.02m 保护直接返回方位角 0,打角冻结在最后一次的值 —— 恰恰在"对齐"
+     * 最要紧的最后 1.2m 失去控制。离线仿真(304 个起始位姿,判据 pos<=0.5m 且
+     * yaw<=10deg)只改这一处:76/304 → 186/304,再配 LEAD=6.0 到 261/304。
+     * 不夹的代价:越过目标(s>0)后前视点落在目标【前方】,车继续往前追。这没问题,
      * 因为出口判据 s >= -AXIS_STOP 在同一拍就成立、AXIS 段立刻结束,那个前视点
-     * 最多被用一拍。夹住反而是在换取一个不存在的好处。 */
+     * 最多被用一拍。 */
     *ax = motion_goto_tx + (-sn) * sa;
     *ay = motion_goto_ty + ( cs) * sa;
 }
@@ -366,12 +361,12 @@ uint8 kart_motion_start_goto(float tx, float ty, float tyaw)
         float s0   = motion_goto_axis_s(&kart_odom);
         float lead = MOTION_GOTO_LEAD;
 
-        /* 【2026-07-29 把 > 改成 >=,并给推后量加 1 个 AXIS_STOP 的余量】
-         * 原来 s0 == -LEAD 这个【边界】上条件不成立、一点不推 => 引入段长度
-         * 恰好 0…LEAD 之间都可能出现,极端情况引入段是零长的:车站在前置点上,
-         * DRIVE 段的距离判据当拍就满足,AXIS 段没有任何收敛距离就判到位。
-         * 交出去的是横向偏差原样保留的位姿,而 kart_mission 会照着它放出一整条
-         * 返程路径。所以边界必须算作"要推",且推完再多留一点,别卡在等号上。 */
+        /* 【判据取 >= 而不是 >,推后量还要多留 1 个 AXIS_STOP】s0 == -LEAD 这个
+         * 【边界】若算作"不推",引入段长度恰好 0…LEAD 之间都可能出现,极端情况
+         * 引入段是零长的:车站在前置点上,DRIVE 段的距离判据当拍就满足,AXIS 段
+         * 没有任何收敛距离就判到位。交出去的是横向偏差原样保留的位姿,而
+         * kart_mission 会照着它放出一整条返程路径。所以边界要算作"要推",
+         * 且推完再多留一点。 */
         if(s0 >= -MOTION_GOTO_LEAD)
         {
             lead += (s0 + MOTION_GOTO_LEAD) + MOTION_GOTO_AXIS_STOP;
@@ -444,9 +439,8 @@ uint8 kart_motion_start_goto(float tx, float ty, float tyaw)
  *   0.001m),反方向命令更要先跑 2000 计数 ≈1.1s 才开始对。连续下命令必踩。
  * 后轮此刻已经停了,所以是原地回轮,车不会走出去。
  * 回正期间 motion_phase != IDLE => is_busy()=1 => 下一条语音命令在队列里等,
- *   不会踩着歪轮子起步 —— kart_voice.c 的 kart_voice_dispatch() 开头就按
- *   is_busy 串行排队。【2026-09-06 订正】原注释写的 :265 现在是
- *   kart_voice_get_frame_count() 的左花括号,真实位置在 :290。 */
+ *   不会踩着歪轮子起步 —— kart_voice.c 的 kart_voice_dispatch() 开头按
+ *   is_busy 串行排队。 */
 static void motion_finish(void)
 {
     /* 后轮立刻停:回正段绝不能还带着出力。 */

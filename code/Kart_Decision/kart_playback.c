@@ -22,11 +22,9 @@ static uint8  playback_seg_reverse = 0;
  * 命名沿用 openloop 是历史包袱:方案 0 现在已有【航向闭环】(航向 P 纠偏),
  * 真正开环的只剩【横向位置】—— 位置误差从头到尾没被测量,也没进反馈环,
  * 所以航向再准也会带着 0.5~1m 的横向偏移走到终点。方案 1 补的就是这一环。
- * 变量/函数名不改:收益只有可读性,风险不划算。
- * 【2026-09-06 订正代价】原注释说"改名要动 8 处调用点",这个数小了。实数(去注释
- * 后统计):本文件里 playback_openloop_mode 7 处、playback_ol_* 25 处、
- * kart_playback_poll_openloop 3 处,外加 kart_mission.c 两处调用和本模块头文件
- * 一处声明,合计三十几处。结论不变 —— 而且比原来更站得住。 */
+ * 变量/函数名不改:改起来要动三十几处(本文件里 playback_openloop_mode 7 处、
+ * playback_ol_* 25 处、kart_playback_poll_openloop 3 处,加 kart_mission.c 两处
+ * 调用和本模块头文件一处声明),收益只有可读性,不划算。 */
 static uint8  playback_openloop_mode = 0;   /* =1 时 poll 走科目三倒车分支 */
 static float  playback_ol_dist0 = 0.0f;     /* 倒车起点累计里程基准 */
 static float  playback_ol_total = 0.0f;     /* 原路全程总里程 */
@@ -814,16 +812,14 @@ static void kart_playback_poll_closedloop(void)
      * 前者是主判据(路径走完了),后者兜住"起点附近点密、索引降不到 0"的情况。 */
     start.x = wp[0].x;
     start.y = wp[0].y;
-    /* 【2026-08-22 新增第三条:提前量 S3 Lead】上面两条都挂在 cur 上,而 cur 是 odom
+    /* 【第三条判据:提前量 S3 Lead】上面两条都挂在 cur 上,而 cur 是 odom
      * 的 x/y 积分转到录制坐标系来的 —— 跟随 65m + 倒车 75m 之后累积误差是米级。
      * 实车现象:车已经压在发车线上了,程序还以为差 1.5m,于是继续往后倒,过线约
      * 1.5m 才刹(刹车本身不滑,实车确认过,纯粹是喊停喊晚了)。
      * 第三条改用录制里程表 dist[k]:该表只由 dist_sum 积分而来 —— 写它的只有
      * kart_record.c 的 kart_record_start(起点钉 0)、kart_record_poll(逐点追加)、
      * kart_record_stop(补最后一点)三处,都是 dist_sum 减录制起点里程,不含航向,
-     * 实测 1% 内。【2026-09-06 不写行号了】原注释指的 128/183 现在是 130/191,
-     * 而且漏了 start 里那处;这条引用还是跨两行写的,行号扫描工具正好扫不到。
-     * 且它沿路径度量 —— 蛇行不会像编码器总里程
+     * 实测 1% 内。且它沿路径度量 —— 蛇行不会像编码器总里程
      * 那样把它撑大,车横向偏多少也不影响它。于是"还剩 lead 米就喊停"等于把停车
      * 点整体往前挪 lead 米,正好抵掉那段滞后。挪多少现场量出来填多少。
      * 三条是 OR,谁先满足都算完成;本条写在最前只是因为它才是主判据。
